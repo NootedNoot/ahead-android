@@ -1,0 +1,398 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Plain LinearLayout, not a ScrollView: this screen is meant to read as a
+     single native view, not a page you scroll through. The current-glucose
+     card and Check now button size to their natural (wrap_content) height;
+     the trend card below takes whatever vertical space is left via
+     layout_weight, so the whole thing always fits one screen regardless of
+     device height instead of overflowing or leaving dead space. -->
+<!-- FrameLayout wrapper so the quick-log event button can float over the
+     trend card's bottom-right corner without adding to the vertical layout
+     flow - the single-screen-fit constraint on the inner LinearLayout below
+     is otherwise unaffected. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- Debug-only: visible for as long as the Debug Menu's glucose
+         injection/scenario override is active, so it's never silently
+         mistaken for a real (or dead) live feed. Gone in release builds and
+         whenever no override is set. -->
+    <TextView
+        android:id="@+id/debugOverrideBanner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="@color/low"
+        android:padding="6dp"
+        android:text="⚠ DEBUG: showing injected data, not live Health Connect"
+        android:textAlignment="center"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:orientation="vertical"
+    android:gravity="center_horizontal"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:background="@drawable/card_background"
+        android:padding="18dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/current_glucose_label"
+            android:textColor="@color/muted"
+            android:textSize="11sp"
+            android:letterSpacing="0.15" />
+
+        <TextView
+            android:id="@+id/latestValueText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="monospace"
+            android:textColor="@color/ok"
+            android:textSize="46sp"
+            android:textStyle="bold"
+            android:text="@string/no_reading_yet" />
+
+        <TextView
+            android:id="@+id/latestSeverityText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fontFamily="monospace"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+        <!-- Event-only backend hypotheses. Hidden entirely for ordinary
+             readings and whenever the scored event no longer matches the
+             latest Health Connect point. -->
+        <LinearLayout
+            android:id="@+id/guessContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/possible_explanations_label"
+                android:textColor="@color/muted"
+                android:textSize="10sp"
+                android:letterSpacing="0.1" />
+
+            <TextView
+                android:id="@+id/guessText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:gravity="center"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/guessExpandHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="@color/accent2"
+                android:textSize="11sp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/status_running"
+            android:textColor="@color/muted"
+            android:textSize="11sp"
+            android:textAlignment="center" />
+
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/checkNowButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/button_background"
+        android:paddingHorizontal="24dp"
+        android:text="@string/check_now"
+        android:textColor="#FFFFFF"
+        android:textAllCaps="false" />
+
+    <LinearLayout
+        android:id="@+id/glucoseTrendCard"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginTop="12dp"
+        android:background="@drawable/card_background"
+        android:foreground="?attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="true"
+        android:padding="14dp">
+
+        <!-- Two mirrored control rows: small-caps label left (weighted, so it
+             pushes the chips to the card's right edge), chip group right.
+             Identical structure top and bottom is what makes the range row
+             read as part of the card rather than bolted on. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/glucose_trend_label"
+                android:textColor="@color/muted"
+                android:textSize="11sp"
+                android:letterSpacing="0.06" />
+
+            <Button
+                android:id="@+id/window1hButton"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:background="@drawable/time_btn_inactive"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="5dp"
+                android:maxLines="1"
+                android:text="@string/window_1h"
+                android:textAllCaps="false"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/window3hButton"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:background="@drawable/time_btn_inactive"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="5dp"
+                android:maxLines="1"
+                android:text="@string/window_3h"
+                android:textAllCaps="false"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/window6hButton"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:background="@drawable/time_btn_inactive"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="5dp"
+                android:maxLines="1"
+                android:text="@string/window_6h"
+                android:textAllCaps="false"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <!-- Y-axis range presets. Explicit controls, not auto-scale-only: a
+             chart that silently clips a high reading hides the exact trend
+             the user needs, so the range is always user-visible state. -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp"
+            android:gravity="center">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/glucose_range_label"
+                android:textColor="@color/muted"
+                android:textSize="11sp"
+                android:letterSpacing="0.06" />
+
+            <Button
+                android:id="@+id/rangeTightButton"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:background="@drawable/time_btn_inactive"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="5dp"
+                android:maxLines="1"
+                android:text="@string/range_tight"
+                android:textAllCaps="false"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/rangeFullButton"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:background="@drawable/time_btn_inactive"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="5dp"
+                android:maxLines="1"
+                android:text="@string/range_full"
+                android:textAllCaps="false"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+            <Button
+                android:id="@+id/rangeAutoButton"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:background="@drawable/time_btn_inactive"
+                android:paddingHorizontal="10dp"
+                android:paddingVertical="5dp"
+                android:maxLines="1"
+                android:text="@string/range_auto"
+                android:textAllCaps="false"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <com.github.mikephil.charting.charts.LineChart
+            android:id="@+id/glucoseChart"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="10dp" />
+
+    </LinearLayout>
+
+    <!-- Bottom row: Voice-alerts settings entry (start) + build/version string
+         (end). In debug builds the version string doubles as a hidden reset:
+         long-press it to re-run the setup wizard (see MainActivity). -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/voiceAlertsEntry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="8dp"
+            android:text="@string/voice_alerts_entry"
+            android:textColor="@color/accent2"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/emergencyContactsEntry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="8dp"
+            android:text="@string/emergency_contacts_entry"
+            android:textColor="@color/accent2"
+            android:textSize="12sp" />
+
+        <!-- Spacer: keeps voiceAlertsEntry, debugLabel, and versionText each
+             sized to their own text (wrap_content) instead of one of them
+             stretching to fill the row and stealing taps meant for empty
+             space next to it. -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/versionText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="16dp"
+            android:paddingVertical="8dp"
+            android:gravity="end"
+            android:textColor="@color/muted"
+            android:textSize="10sp" />
+
+    </LinearLayout>
+
+</LinearLayout>
+
+    <!-- Debug-only long-press entry point for the Debug Menu. Floats in the
+         top-right corner (its own FrameLayout child) rather than living in
+         the bottom row, which sits right under the quick-log FAB and made it
+         nearly impossible to tap on its own - top corner has no other
+         touch targets nearby. Gone in release builds (and hidden until
+         MainActivity confirms BuildConfig.DEBUG). -->
+    <TextView
+        android:id="@+id/debugLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_margin="8dp"
+        android:paddingHorizontal="10dp"
+        android:paddingVertical="8dp"
+        android:text="Debug"
+        android:textColor="@color/accent2"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <!-- Quick-log event FAB: tap opens the preset-tag picker, long-press jumps
+         straight to the custom-note dialog. Floats over the trend card's
+         corner rather than taking its own row. -->
+    <ImageButton
+        android:id="@+id/logEventFab"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="24dp"
+        android:background="@drawable/fab_background"
+        android:contentDescription="@string/log_event_fab_description"
+        android:elevation="6dp"
+        android:padding="14dp"
+        android:src="@drawable/ic_add_event"
+        app:tint="#FFFFFF" />
+
+</FrameLayout>

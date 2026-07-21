@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Simple shield outline with a checkmark - "Ahead has your back",
+         friendlier than a phone/SMS glyph but still reads as a protective
+         action, not a decoration. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M12,2 L20,5.5 L20,11 C20,16 16.6,19.9 12,22 C7.4,19.9 4,16 4,11 L4,5.5 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#8C1032"
+        android:strokeWidth="1.6"
+        android:pathData="M8.5,12.2 L11,14.8 L15.8,9.4" />
+</vector>

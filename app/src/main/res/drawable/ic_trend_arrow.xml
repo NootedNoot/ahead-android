@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Solid chevron, pointing up at 0 degrees. NotificationIconFactory rotates
+     (and, for double arrows, stacks) this single shape rather than shipping
+     five separate trend-arrow assets. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,5 L20,17 L4,17 Z" />
+</vector>

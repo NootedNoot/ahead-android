@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- MaterialComponents, not plain AppCompat: MaterialDatePicker (custom
+         date range on the doctor report screen) needs the full Material
+         theming chain (colorSurface, materialCalendarStyle, header layouts,
+         etc.) that plain AppCompat themes never define - piecemeal patching
+         via a standalone theme + MaterialDatePicker.setTheme() was tried and
+         still hit missing-attribute crashes deeper in the picker's own
+         header inflation. MaterialComponents is an official drop-in
+         superset of AppCompat, confirmed (via side-by-side screenshots) not
+         to change how any existing button/screen in this app renders. -->
+    <style name="Theme.Ahead" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="colorPrimary">@color/accent</item>
+        <item name="colorAccent">@color/accent2</item>
+        <item name="android:textColorPrimary">@color/text_primary</item>
+        <item name="materialCalendarFullscreenTheme">@style/ThemeOverlay.MaterialComponents.MaterialCalendar.Fullscreen</item>
+    </style>
+
+    <!-- Red takeover: same dashboard palette, just the alert layout on top. -->
+    <style name="Theme.Ahead.RedAlert" parent="Theme.Ahead">
+        <item name="android:windowBackground">@color/bg</item>
+    </style>
+
+    <!-- Setup wizard: its own deeper palette (do not repaint the dashboard). -->
+    <style name="Theme.Ahead.Wizard" parent="Theme.Ahead">
+        <item name="android:windowBackground">@color/bg_deep</item>
+        <item name="android:textColorPrimary">@color/ink_light</item>
+    </style>
+</resources>

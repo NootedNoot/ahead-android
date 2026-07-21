@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ripple + a subtle darker ring under the solid fill, instead of a bare
+     flat oval - without either, the FAB has no press feedback and no depth
+     cue, which is what reads as "just pasted on" over the chart card. -->
+<ripple xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/accent2">
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="@color/accent" />
+            <stroke android:width="1dp" android:color="#3D2A66" />
+        </shape>
+    </item>
+</ripple>

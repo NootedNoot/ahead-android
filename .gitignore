@@ -1,0 +1,28 @@
+*.iml
+.gradle
+/local.properties
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+.kotlin
+
+# IDE
+.idea/*
+!.idea/gitignore.xml
+.idea/caches
+.idea/libraries
+.idea/modules.xml
+.idea/workspace.xml
+.idea/navEditor.xml
+.idea/assetWizardSettings.xml
+*.hprof
+
+# Signing / keystores - never commit these
+*.jks
+*.keystore
+keystore.properties
+
+# Per-module build output
+**/build/

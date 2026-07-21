@@ -1,0 +1,207 @@
+package com.aheadt1d.app.state
+
+import android.content.Context
+import androidx.core.content.edit
+import com.aheadt1d.app.setup.SetupPrefs
+import kotlin.math.abs
+import org.json.JSONArray
+import org.json.JSONObject
+
+// Source-aware staleness. Both the notification and the main screen call these
+// so a reading that's too old to trust is never shown - or alerted on - as if
+// it were current. Official Dexcom syncs a clean 5-min cadence, so 12 min
+// (~2 missed cycles) is a confident "stale". Juggluco and unknown sources gap
+// 10-15 min in normal operation (see HealthConnectManager's gap log), so 15
+// avoids crying stale - and suppressing alerts - during ordinary jitter.
+const val STALE_THRESHOLD_DEXCOM_MINUTES = 12L
+const val STALE_THRESHOLD_DEFAULT_MINUTES = 15L
+
+/** The staleness cutoff for the currently configured CGM source. */
+fun staleThresholdMinutes(context: Context): Long =
+    when (SetupPrefs.cgmPath(context)) {
+        SetupPrefs.PATH_DEXCOM -> STALE_THRESHOLD_DEXCOM_MINUTES
+        else -> STALE_THRESHOLD_DEFAULT_MINUTES
+    }
+
+/** Whole minutes since [raw] was recorded, or null when there's no reading.
+ *  First-class so no layer has to re-derive "time since last reading". */
+fun minutesSinceReading(raw: RawReading?): Long? =
+    if (raw == null) null else (System.currentTimeMillis() - raw.time) / 60_000
+
+/** Whether the latest reading is too old to treat as current (or absent).
+ *  The single staleness check both surfaces and the alert layer should use. */
+fun isStale(context: Context, raw: RawReading?): Boolean {
+    val minutes = minutesSinceReading(raw) ?: return true
+    return minutes >= staleThresholdMinutes(context)
+}
+
+// How close the backend trend's scored timestamp must be to the raw Health
+// Connect reading's time before anything backend-derived (rate, severity,
+// projection) is trusted for display against that reading. The backend dedups
+// server-side and can lag or stall - a trend scored for a much older reading
+// must not decorate a newer one.
+const val TREND_MATCH_TOLERANCE_MS = 10 * 60_000L
+
+/**
+ * THE rate-of-change (mg/dL/min) to display anywhere in the UI - the single
+ * source of truth shared by the main screen and the persistent notification,
+ * so one check cycle can never show two different rates on two surfaces.
+ *
+ * The backend's rate (trend-detector.js) is authoritative when its trend was
+ * scored for this same reading (within [TREND_MATCH_TOLERANCE_MS]) - it's the
+ * deterministic, safety-critical calculation in the pipeline. The on-device
+ * two-point rate is only a fallback for when the backend hasn't scored this
+ * reading (offline, dedup'd, slow). Null when no source has a usable rate
+ * (e.g. cold start with a single reading).
+ */
+fun effectiveRatePerMinute(raw: RawReading?, trend: LatestTrend?): Double? {
+    if (raw == null) return null
+    val trendIsCurrent = trend != null && abs(trend.date - raw.time) <= TREND_MATCH_TOLERANCE_MS
+    return if (trendIsCurrent) trend?.rate ?: raw.ratePerMinute else raw.ratePerMinute
+}
+
+/** One rule-engine hypothesis for a glucose event. Always a question in the
+ *  copy; confidence is "high" | "medium" | "low". */
+data class Guess(val label: String, val confidence: String)
+
+data class LatestTrend(
+    val currentValue: Int,
+    val severity: String,
+    val rate: Double?,
+    val projected: Int?,
+    // 30-min (extended) projection. Shown alongside the 15-min one so the alert
+    // text never implies a single window when the tier can be decided off either.
+    val projectedExtended: Int?,
+    val date: Long,
+    // Contextual guesses from the backend guess-engine, only populated during an
+    // actual event (empty otherwise). Ranked high -> low confidence.
+    val guesses: List<Guess> = emptyList()
+)
+
+/**
+ * The most recent glucose point read straight from Health Connect, tracked
+ * separately from LatestTrend. LatestTrend only advances when the backend's
+ * check-trend call returns a newly-scored reading (it dedups server-side and
+ * can silently stop advancing - e.g. after a redeploy resets its in-memory
+ * dedup state - while Health Connect keeps producing fresh points every
+ * run). Anything that needs to know "is the data actually fresh" - like the
+ * persistent notification's staleness check - should use this, not
+ * LatestTrend.date.
+ */
+data class RawReading(
+    val value: Int,
+    val time: Long,
+    // Rate of change in mg/dL per minute from the two most recent HC points.
+    // Null when only one point is available (cold start / first CGM sync).
+    val ratePerMinute: Double?,
+    // Change in mg/dL from the second-most-recent HC reading to this one.
+    // Null when only one point is available. Derived from the same two points
+    // as ratePerMinute, stored here so it survives service restarts without
+    // any in-memory state tracking in GlucoseStatusService.
+    val deltaFromPrevious: Int?
+)
+
+/**
+ * SharedPreferences-backed persistence for the latest trend result, so it
+ * survives the app process being killed and restarted. LatestTrendRepository
+ * is the API everything else should use - this is just its storage layer.
+ */
+object LatestTrendStore {
+    private const val PREFS_NAME = "ahead_latest_trend"
+    private const val KEY_CURRENT_VALUE = "current_value"
+    private const val KEY_SEVERITY = "severity"
+    private const val KEY_RATE = "rate"
+    private const val KEY_PROJECTED = "projected"
+    private const val KEY_PROJECTED_EXTENDED = "projected_extended"
+    private const val KEY_DATE = "date"
+    private const val KEY_GUESSES = "guesses"
+    private const val NO_PROJECTED = Int.MIN_VALUE
+
+    fun save(context: Context, trend: LatestTrend) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            putInt(KEY_CURRENT_VALUE, trend.currentValue)
+            putString(KEY_SEVERITY, trend.severity)
+            putFloat(KEY_RATE, trend.rate?.toFloat() ?: Float.NaN)
+            putInt(KEY_PROJECTED, trend.projected ?: NO_PROJECTED)
+            putInt(KEY_PROJECTED_EXTENDED, trend.projectedExtended ?: NO_PROJECTED)
+            putLong(KEY_DATE, trend.date)
+            putString(KEY_GUESSES, guessesToJson(trend.guesses))
+        }
+    }
+
+    fun load(context: Context): LatestTrend? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_CURRENT_VALUE)) return null
+
+        val rate = prefs.getFloat(KEY_RATE, Float.NaN)
+        val projected = prefs.getInt(KEY_PROJECTED, NO_PROJECTED)
+        val projectedExtended = prefs.getInt(KEY_PROJECTED_EXTENDED, NO_PROJECTED)
+
+        return LatestTrend(
+            currentValue = prefs.getInt(KEY_CURRENT_VALUE, 0),
+            severity = prefs.getString(KEY_SEVERITY, "none") ?: "none",
+            rate = if (rate.isNaN()) null else rate.toDouble(),
+            projected = if (projected == NO_PROJECTED) null else projected,
+            projectedExtended = if (projectedExtended == NO_PROJECTED) null else projectedExtended,
+            date = prefs.getLong(KEY_DATE, 0L),
+            guesses = guessesFromJson(prefs.getString(KEY_GUESSES, null))
+        )
+    }
+
+    private fun guessesToJson(guesses: List<Guess>): String = JSONArray().apply {
+        guesses.forEach { guess ->
+            put(JSONObject().apply {
+                put("label", guess.label)
+                put("confidence", guess.confidence)
+            })
+        }
+    }.toString()
+
+    // Backend responses are network input. A malformed cached guess must never
+    // prevent the last known glucose value from loading after a process restart.
+    private fun guessesFromJson(json: String?): List<Guess> = runCatching {
+        if (json.isNullOrBlank()) return emptyList()
+        val array = JSONArray(json)
+        buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val label = item.optString("label").trim()
+                if (label.isNotEmpty()) add(Guess(label, item.optString("confidence", "low")))
+            }
+        }
+    }.getOrDefault(emptyList())
+}
+
+/** Same persistence pattern as LatestTrendStore, kept in its own small prefs
+ *  file since it's updated far more often (every Worker run) and has nothing
+ *  to do with the backend-derived trend. */
+object RawReadingStore {
+    private const val PREFS_NAME = "ahead_latest_raw_reading"
+    private const val KEY_VALUE = "value"
+    private const val KEY_TIME = "time"
+    private const val KEY_RATE = "rate_per_minute"
+    private const val KEY_DELTA = "delta_from_previous"
+    private const val NO_DELTA = Int.MIN_VALUE
+
+    fun save(context: Context, reading: RawReading) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            putInt(KEY_VALUE, reading.value)
+            putLong(KEY_TIME, reading.time)
+            putFloat(KEY_RATE, reading.ratePerMinute?.toFloat() ?: Float.NaN)
+            putInt(KEY_DELTA, reading.deltaFromPrevious ?: NO_DELTA)
+        }
+    }
+
+    fun load(context: Context): RawReading? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (!prefs.contains(KEY_TIME)) return null
+        val rate = prefs.getFloat(KEY_RATE, Float.NaN)
+        val delta = prefs.getInt(KEY_DELTA, NO_DELTA)
+        return RawReading(
+            value = prefs.getInt(KEY_VALUE, 0),
+            time = prefs.getLong(KEY_TIME, 0L),
+            ratePerMinute = if (rate.isNaN()) null else rate.toDouble(),
+            deltaFromPrevious = if (delta == NO_DELTA) null else delta
+        )
+    }
+}

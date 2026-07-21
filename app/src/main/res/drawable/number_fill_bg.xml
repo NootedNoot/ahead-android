@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rounded fill drawn behind the big glucose number for the darkest severity
+     states (severe-low, critical-high), where the severity colour is too dark
+     to be legible as text on the near-black background. Tinted at runtime to
+     the bucket colour via backgroundTintList; a light number sits on top. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFF" />
+    <corners android:radius="18dp" />
+</shape>

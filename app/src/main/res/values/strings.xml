@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Ahead</string>
+    <string name="doctor_report_title">DOCTOR REPORT</string>
+    <string name="doctor_report_intro">The interactive report is one file you can pan, zoom, and tap through - notes are hidden by default with a toggle to reveal them. The PDF is a secondary option for printing: two files from the same data, a clinical version (numbers and curve only) and an annotated version (with your event notes).</string>
+    <string name="doctor_report_range_label">DATE RANGE</string>
+    <string name="preset_14d">14 days</string>
+    <string name="preset_30d">30 days</string>
+    <string name="preset_90d">90 days</string>
+    <string name="pick_custom_range">Pick custom range…</string>
+    <string name="generate_interactive_report">Generate Interactive Report</string>
+    <string name="generate_report">Generate PDF (for printing)</string>
+    <string name="report_back">Close doctor report</string>
+    <string name="doctor_report_button">Doctor Report</string>
+    <string name="generating_report">Generating report…</string>
+    <string name="report_generation_failed">Couldn\'t generate the report. Check Health Connect access and try again.</string>
+    <string name="current_glucose_label">CURRENT GLUCOSE</string>
+    <string name="status_running">Checks run automatically about every 15 minutes via Health Connect.</string>
+    <string name="status_hc_missing">Health Connect isn\'t installed. Install it from the Play Store, then reopen this app.</string>
+    <string name="check_now">Check now</string>
+    <string name="no_reading_yet">—</string>
+    <string name="glucose_trend_label">GLUCOSE TREND</string>
+    <string name="window_1h">1 hr</string>
+    <string name="window_3h">3 hr</string>
+    <string name="window_6h">6 hr</string>
+    <string name="chart_no_data">No readings in the last %1$s</string>
+    <string name="status_no_data">No glucose data yet. Make sure your CGM app is syncing to Health Connect.</string>
+    <string name="status_stale">⚠️ No new data — %1$s ago. Check your CGM app.</string>
+    <string name="trend_unavailable">No recent trend data</string>
+    <string name="possible_explanations_label">POSSIBLE EXPLANATIONS</string>
+    <string name="possible_explanations_expand">Tap for one more possible explanation</string>
+    <string name="possible_explanations_collapse">Tap to collapse</string>
+    <string name="range_tight">Tight</string>
+    <string name="range_full">Full</string>
+    <string name="range_auto">Auto</string>
+    <string name="glucose_range_label">RANGE</string>
+    <string name="graph_live_label">Live</string>
+    <string name="graph_pick_date_range">Pick date…</string>
+    <string name="graph_back_to_live">Back to live</string>
+    <string name="graph_no_data_for_range">No readings for %1$s</string>
+    <string name="notes_history_button">Notes</string>
+    <string name="notes_history_title">NOTES</string>
+    <string name="notes_sort_newest">Newest first</string>
+    <string name="notes_sort_oldest">Oldest first</string>
+    <string name="notes_search_hint">Search notes…</string>
+    <string name="notes_all_tags">All tags</string>
+    <string name="notes_all_dates">All dates</string>
+    <string name="notes_filter_by_date">Filter by date…</string>
+    <string name="notes_clear_date_filter">Clear</string>
+    <string name="notes_empty_state">No notes match these filters</string>
+    <string name="graph_back">Close graph</string>
+    <string name="log_event_fab_description">Log an event</string>
+    <string name="export_events_title">Export event log</string>
+    <string name="chart_low_threshold_label">Low · 70 mg/dL</string>
+    <string name="chart_high_threshold_label">High · 180 mg/dL</string>
+    <string name="chart_now_label">Now</string>
+
+    <!-- Red alert takeover -->
+    <string name="red_alert_heading">URGENT GLUCOSE ALERT</string>
+    <string name="red_alert_projected">Projected %1$d mg/dL in 15 minutes</string>
+    <string name="red_alert_no_projection">Glucose is heading out of a safe range</string>
+    <string name="red_alert_dismiss">Dismiss</string>
+    <string name="red_alert_send_emergency">Send Emergency Alert</string>
+    <string name="emergency_sms_rationale">Ahead needs SMS permission to text your emergency contact when you confirm a red alert. It only sends when you explicitly tap Yes - never automatically.</string>
+    <string name="emergency_sms_denied">SMS permission was denied, so no message was sent. You can allow it from Android Settings if you change your mind.</string>
+    <string name="emergency_send_failed">Couldn\'t send the emergency SMS. Check your signal and try again.</string>
+    <string name="emergency_contacts_title">Emergency Contacts</string>
+    <string name="emergency_contacts_entry">Emergency Contacts</string>
+    <string name="emergency_master_label">Send emergency alerts</string>
+    <string name="emergency_master_desc">Ask before texting your emergency contact(s) during a red-severity alert</string>
+    <string name="emergency_add_contact">Add contact</string>
+    <string name="emergency_no_contacts">No emergency contacts yet. Add one from your phone\'s contacts.</string>
+    <string name="emergency_cooldown_label">Cooldown between alerts to the same contact (minutes)</string>
+    <string name="emergency_your_name_label">Your name (used in the alert text)</string>
+    <string name="emergency_remove">Remove</string>
+
+    <!-- Voice alerts settings -->
+    <string name="voice_alerts_title">Voice Alerts</string>
+    <string name="voice_alerts_entry">🔊 Voice alerts</string>
+    <string name="voice_master_label">Speak alerts aloud</string>
+    <string name="voice_master_desc">Read alerts out loud using text-to-speech</string>
+    <string name="voice_red_label">Speak RED alerts</string>
+    <string name="voice_red_desc">Urgent glucose danger</string>
+    <string name="voice_yellow_label">Speak YELLOW alerts</string>
+    <string name="voice_yellow_desc">Early glucose warnings</string>
+    <string name="voice_signal_lost_label">Speak signal-lost alerts</string>
+    <string name="voice_signal_lost_desc">No new data after a concerning reading</string>
+    <string name="voice_plateau_label">Speak plateau alerts</string>
+    <string name="voice_plateau_desc">Glucose sustained high with no downward trend</string>
+    <string name="voice_correction_label">Speak correction alerts</string>
+    <string name="voice_correction_desc">A logged correction hasn\'t shown a response yet</string>
+    <string name="voice_footer_note">Voice is separate from the on-screen alerts. Turning a voice off never changes whether an alert shows or sounds — red alerts still take over the screen and pierce Do Not Disturb.</string>
+
+    <!-- Setup wizard: shared -->
+    <string name="wizard_title">Set up Ahead</string>
+    <string name="wizard_skip_all">Skip setup</string>
+    <string name="wizard_skip_step">Skip this step</string>
+    <string name="wizard_back">Back</string>
+    <string name="wizard_continue">Continue</string>
+    <string name="wizard_done_cta">Go to Ahead</string>
+
+    <!-- Step 1: CGM path -->
+    <string name="wizard_path_title">Which CGM app do you use?</string>
+    <string name="wizard_path_body">Ahead reads your glucose from Health Connect. Tell us which app is putting your readings there.</string>
+    <string name="wizard_path_dexcom">Official Dexcom app</string>
+    <string name="wizard_path_juggluco">Juggluco</string>
+    <string name="wizard_path_unsure">Not sure</string>
+
+    <!-- Step 2: Health Connect install -->
+    <string name="wizard_hc_title">Health Connect</string>
+    <string name="wizard_hc_body">Health Connect is Android\'s shared health data hub. Ahead reads your glucose through it.</string>
+    <string name="wizard_hc_installed">Health Connect is installed.</string>
+    <string name="wizard_hc_missing">Health Connect isn\'t installed yet.</string>
+    <string name="wizard_hc_install_btn">Install Health Connect</string>
+
+    <!-- Step 3: HC permissions -->
+    <string name="wizard_perms_title">Allow Ahead to read glucose</string>
+    <string name="wizard_perms_body">Ahead needs permission to read your blood glucose from Health Connect — including in the background, so it can keep checking while your screen is off. It never writes or shares your data.</string>
+    <string name="wizard_perms_granted">Glucose read permission granted.</string>
+    <string name="wizard_perms_missing">Permission not granted yet.</string>
+    <string name="wizard_perms_grant_btn">Grant permission</string>
+    <string name="wizard_perms_settings_btn">Open Health Connect settings</string>
+
+    <!-- Step 4: source app sync -->
+    <string name="wizard_source_title">Turn on Health Connect sync</string>
+    <string name="wizard_source_dexcom">In the Dexcom app, open Settings → Connections → Health Connect and turn on sharing. This toggle is easy to miss, and without it no readings reach Ahead.</string>
+    <string name="wizard_source_juggluco">In Juggluco, open the menu → Settings → Health Connect and enable it, then make sure Juggluco is running. Without this, no readings reach Ahead.</string>
+    <string name="wizard_source_unsure">If you use Dexcom: Settings → Connections → Health Connect, turn on sharing. If you use Juggluco: menu → Settings → Health Connect, enable it. Turn on whichever one applies.</string>
+    <string name="wizard_source_open_dexcom">Open Dexcom</string>
+    <string name="wizard_source_open_juggluco">Open Juggluco</string>
+
+    <!-- Step 5: live verification -->
+    <string name="wizard_verify_title">First reading</string>
+    <string name="wizard_verify_waiting">Waiting for your first reading…</string>
+    <string name="wizard_verify_got_it">Got it! Current glucose: %1$d mg/dL</string>
+    <string name="wizard_verify_hint">This can take a few minutes after your CGM app syncs. You can skip and check later.</string>
+
+    <!-- Step 6: battery -->
+    <string name="wizard_battery_title">Keep Ahead running</string>
+    <string name="wizard_battery_body">Android may put Ahead to sleep to save battery, which silently stops glucose checks. Allow it to run unrestricted.</string>
+    <string name="wizard_battery_samsung">On Samsung: also open Settings → Apps → Ahead → Battery and choose \"Unrestricted\", and make sure Ahead isn\'t listed under Sleeping or Deep sleeping apps.</string>
+    <string name="wizard_battery_granted">Battery optimisation is off for Ahead.</string>
+    <string name="wizard_battery_missing">Ahead may be put to sleep in the background.</string>
+    <string name="wizard_battery_btn">Allow unrestricted background use</string>
+
+    <!-- Step 7: notifications -->
+    <string name="wizard_notif_title">Alerts &amp; notifications</string>
+    <string name="wizard_notif_body">Ahead needs a few notification permissions so red alerts can reach you — even on the lock screen and through Do Not Disturb.</string>
+    <string name="wizard_notif_post">Show notifications</string>
+    <string name="wizard_notif_fsi">Full-screen alerts</string>
+    <string name="wizard_notif_dnd">Alerts through Do Not Disturb</string>
+    <string name="wizard_notif_post_btn">Allow notifications</string>
+    <string name="wizard_notif_fsi_btn">Allow full-screen alerts</string>
+    <string name="wizard_notif_dnd_btn">Allow Do Not Disturb access</string>
+    <string name="wizard_notif_fsi_auto">Granted automatically on this Android version</string>
+    <string name="wizard_notif_dnd_hint">Find Ahead in the list and turn it on.</string>
+
+    <!-- Step 8: done -->
+    <string name="wizard_done_title">You\'re all set</string>
+    <string name="wizard_done_body">Ahead is now watching your glucose and will alert you if it trends out of range.</string>
+</resources>

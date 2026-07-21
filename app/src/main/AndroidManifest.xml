@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.health.READ_BLOOD_GLUCOSE" />
+    <!-- Health Connect treats WorkManager's execution context as "background" even
+         when triggered from a visible Activity - without this, GlucoseCheckWorker's
+         reads throw RemoteException("must be in foreground to read ..."). -->
+    <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Required alongside foregroundServiceType="specialUse" on API 34+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Red-severity escalation: full-screen takeover over the lock screen,
+         piercing Do Not Disturb, and the battery-optimisation exemption the
+         wizard requests so background checks keep running. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- Emergency Contact Alert: only ever sent after an explicit Yes tap on
+         the red-alert confirmation dialog, never silently. -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!-- healthdata: check Health Connect's install/availability status on API < 34.
+         Dexcom/Juggluco: so the setup wizard can auto-detect the installed CGM
+         app and offer an "Open <app>" launch button (package visibility, API 30+). -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata" />
+        <package android:name="com.dexcom.g6" />
+        <package android:name="com.dexcom.g7" />
+        <package android:name="tk.glucodata" />
+    </queries>
+
+    <application
+        android:name=".AheadApplication"
+        android:label="Ahead"
+        android:allowBackup="false"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Ahead"
+        android:networkSecurityConfig="@xml/network_security_config">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Health Connect requires apps requesting health permissions to show a
+             rationale when the user views this app's permissions from inside the
+             Health Connect app. Points at MainActivity for now. -->
+        <activity-alias
+            android:name=".HealthConnectPermissionsRationaleAlias"
+            android:exported="true"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Red-severity takeover screen. Launched only via the full-screen
+             intent on the red alert notification, never started directly.
+             singleTop so a re-fired alert re-delivers via onNewIntent instead
+             of stacking. -->
+        <activity
+            android:name=".alerts.RedAlertActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.Ahead.RedAlert" />
+
+        <activity
+            android:name=".setup.SetupWizardActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Ahead.Wizard" />
+
+        <activity
+            android:name=".voice.VoiceAlertsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".GraphActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".events.EventHistoryActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".emergency.EmergencyContactsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".report.ReportExportActivity"
+            android:exported="false" />
+
+        <service
+            android:name=".notifications.GlucoseStatusService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Shows a persistent notification with the user's current glucose reading and trend" />
+        </service>
+
+        <!-- CSV event export: hands a cache file to whatever share target the
+             user picks (email, Drive, etc) without exposing the whole cache dir. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+    </application>
+</manifest>

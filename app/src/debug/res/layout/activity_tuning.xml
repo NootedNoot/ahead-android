@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Tuning Parameters"
+            android:textColor="@color/text_primary"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/wizard_card_background"
+            android:padding="14dp"
+            android:text="Debug only — changes affect live alert thresholds immediately on the next check."
+            android:textColor="@color/amber"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="LIVE WHAT-IF PREVIEW"
+                android:textColor="@color/muted"
+                android:textSize="11sp"
+                android:letterSpacing="0.12" />
+
+            <TextView android:id="@+id/liveReadingText" style="@style/TuningReadout" />
+            <TextView android:id="@+id/liveRateText" style="@style/TuningReadout" />
+            <TextView android:id="@+id/liveProjectedText" style="@style/TuningReadout" />
+            <TextView android:id="@+id/liveSeverityText" style="@style/TuningReadout" android:textStyle="bold" />
+            <TextView android:id="@+id/livePlateauText" style="@style/TuningReadout" android:textStyle="bold" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="SERVER PARAMETERS"
+            android:textColor="@color/muted"
+            android:textSize="11sp"
+            android:letterSpacing="0.12" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView style="@style/TuningParameterLabel" android:text="YELLOW_PROJECTED_LOW (default 90 mg/dL)" />
+            <TextView style="@style/TuningParameterHelp" android:text="Low-side caution threshold. A 15-minute projection at or below this is YELLOW. Raise it to warn earlier; lower it to warn later." />
+            <EditText android:id="@+id/yellowLowInput" style="@style/TuningInput" android:hint="mg/dL" />
+            <TextView style="@style/TuningParameterLabel" android:text="YELLOW_PROJECTED_HIGH (default 200 mg/dL)" />
+            <TextView style="@style/TuningParameterHelp" android:text="High-side caution threshold. A 15-minute projection at or above this is YELLOW. Lower it to warn earlier; raise it to warn later." />
+            <EditText android:id="@+id/yellowHighInput" style="@style/TuningInput" android:hint="mg/dL" />
+            <TextView style="@style/TuningParameterLabel" android:text="RED_PROJECTED_LOW (default 70 mg/dL)" />
+            <TextView style="@style/TuningParameterHelp" android:text="Low-side danger threshold. A 15-minute projection at or below this is RED and may trigger the full-screen/DND alert. Raise it only if you intentionally want earlier RED alerts." />
+            <EditText android:id="@+id/redLowInput" style="@style/TuningInput" android:hint="mg/dL" />
+            <TextView style="@style/TuningParameterLabel" android:text="RED_PROJECTED_HIGH (default 250 mg/dL)" />
+            <TextView style="@style/TuningParameterHelp" android:text="High-side danger threshold. A 15-minute projection at or above this is RED. Lower it only if you intentionally want earlier RED alerts." />
+            <EditText android:id="@+id/redHighInput" style="@style/TuningInput" android:hint="mg/dL" />
+            <TextView style="@style/TuningParameterLabel" android:text="EXTENDED_PROJECTION_MINUTES (default 30 min)" />
+            <TextView style="@style/TuningParameterHelp" android:text="Early-warning horizon. If the current slope would reach a RED boundary by this time, Ahead raises YELLOW even when the 15-minute projection is still safe. Longer means earlier, more sensitive warnings." />
+            <EditText android:id="@+id/extendedMinutesInput" style="@style/TuningInput" android:hint="minutes" />
+            <TextView style="@style/TuningParameterLabel" android:text="Rate smoothing intervals (default 2)" />
+            <TextView style="@style/TuningParameterHelp" android:text="How many latest 5-minute intervals shape the projection rate. 1 = newest interval only (fastest response, more jitter). 2 = light average of the two newest intervals. A clear reversal always uses the newest interval immediately." />
+            <EditText android:id="@+id/smoothingIntervalsInput" style="@style/TuningInput" android:hint="1 or 2" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="PLATEAU &amp; CORRECTION PARAMETERS"
+            android:textColor="@color/muted"
+            android:textSize="11sp"
+            android:letterSpacing="0.12" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView style="@style/TuningParameterLabel" android:text="HIGH_THRESHOLD (default 250 mg/dL)" />
+            <TextView style="@style/TuningParameterHelp" android:text="Glucose at or above this value counts toward a sustained-high plateau. Lower it to flag plateaus at a less extreme level; raise it to only flag more severe highs." />
+            <EditText android:id="@+id/highThresholdInput" style="@style/TuningInput" android:hint="mg/dL" />
+            <TextView style="@style/TuningParameterLabel" android:text="HIGH_DURATION (default 90 min)" />
+            <TextView style="@style/TuningParameterHelp" android:text="How long glucose must stay at or above HIGH_THRESHOLD, with no significant gap, before the plateau alert first fires." />
+            <EditText android:id="@+id/highDurationInput" style="@style/TuningInput" android:hint="minutes" />
+            <TextView style="@style/TuningParameterLabel" android:text="HYSTERESIS_BUFFER (default 20 mg/dL)" />
+            <TextView style="@style/TuningParameterHelp" android:text="Glucose must drop this far below HIGH_THRESHOLD before an active plateau is considered cleared - keeps a value hovering right at the line from flapping the alert on and off." />
+            <EditText android:id="@+id/hysteresisBufferInput" style="@style/TuningInput" android:hint="mg/dL" />
+            <TextView style="@style/TuningParameterLabel" android:text="PLATEAU_ESCALATION_STEP (default 60 min)" />
+            <TextView style="@style/TuningParameterHelp" android:text="Once a plateau has fired, this many additional minutes of continued plateau bumps it to the next severity tier and re-notifies." />
+            <EditText android:id="@+id/escalationStepInput" style="@style/TuningInput" android:hint="minutes" />
+            <TextView style="@style/TuningParameterLabel" android:text="PLATEAU_COOLDOWN (default 60 min)" />
+            <TextView style="@style/TuningParameterHelp" android:text="If the plateau is still active but hasn't escalated a tier, this is the minimum time between re-notifications - keeps a long unresolved plateau from going silent forever without spamming every cycle." />
+            <EditText android:id="@+id/cooldownInput" style="@style/TuningInput" android:hint="minutes" />
+            <TextView style="@style/TuningParameterLabel" android:text="CORRECTION_WINDOW (default 45 min)" />
+            <TextView style="@style/TuningParameterHelp" android:text="How long after a logged correction Ahead waits before checking whether glucose has started responding." />
+            <EditText android:id="@+id/correctionWindowInput" style="@style/TuningInput" android:hint="minutes" />
+            <TextView style="@style/TuningParameterLabel" android:text="CORRECTION_RESPONSE_RATE_THRESHOLD (default -1.0 mg/dL/min)" />
+            <TextView style="@style/TuningParameterHelp" android:text="How negative the rate of change must be, by the end of CORRECTION_WINDOW, to count as &quot;trending down&quot; even if glucose hasn't dropped below HIGH_THRESHOLD yet." />
+            <EditText android:id="@+id/responseRateInput" style="@style/TuningInputSigned" android:hint="mg/dL/min" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/saveTuningButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/button_background"
+            android:text="Save and refresh live scoring"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF" />
+
+        <Button
+            android:id="@+id/resetTuningButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Reset to defaults"
+            android:textAllCaps="false" />
+    </LinearLayout>
+</ScrollView>

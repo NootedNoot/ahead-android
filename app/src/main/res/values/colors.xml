@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#0D0618</color>
+    <color name="surface">#160D27</color>
+    <color name="border">#2A1A4A</color>
+    <color name="accent">#8B5CF6</color>
+    <color name="accent2">#A78BFA</color>
+    <color name="low">#F87171</color>
+    <color name="high">#FBBF24</color>
+    <color name="ok">#34D399</color>
+    <color name="text_primary">#E2D9F3</color>
+    <color name="muted">#7C6FA0</color>
+
+    <!-- ============================================================
+         Severity colour ladder - SINGLE SOURCE OF TRUTH.
+         Do NOT hardcode these hexes at call sites; go through the
+         GlucoseSeverity model (ui/GlucoseSeverity.kt). Colourblind-safe by
+         construction: severe-low sits in magenta/violet, deliberately outside
+         the red-orange-crimson high ladder, so it reads as its own category
+         under deuteranopia/protanopia (red-green CVD).
+
+         Contrast note: on the near-black bg (#0D0618), the four lighter tokens
+         clear WCAG AA (4.5:1) as the number colour. The two darkest -
+         glucose_critical_high and glucose_severe_low - do NOT (they'd be
+         near-invisible as text), so GlucoseSeverity renders those two as a
+         FILL behind a light number instead, which also better achieves the
+         "reads worse" intent. The *_on_fill tokens are the readable number
+         colour used on top of those fills.
+         ============================================================ -->
+    <color name="glucose_normal">#3DDC97</color>
+    <color name="glucose_elevated">#F4B740</color>
+    <color name="glucose_high">#E8552C</color>
+    <color name="glucose_critical_high">#8C1032</color>
+    <color name="glucose_low">#E0A030</color>
+    <color name="glucose_severe_low">#B0179E</color>
+    <color name="info_hydration">#3E8FD0</color>
+    <color name="accent_bolus">#9B5DE5</color>
+
+    <!-- Light number colour for the dark-fill severe states (see note above). -->
+    <color name="glucose_on_fill">#FFF2F5</color>
+
+    <!-- Setup wizard palette (wizard screens only - deliberately distinct from
+         the dashboard colours above; do not use these on the dashboard). -->
+    <color name="bg_deep">#170F28</color>
+    <color name="bg_card">#211436</color>
+    <color name="purple_mid">#3B2266</color>
+    <color name="amber">#F3B94C</color>
+    <color name="coral">#EF6B5C</color>
+    <color name="ink_light">#F4EEFB</color>
+    <color name="ink_muted">#B6A6D6</color>
+
+    <!-- These style the RemoteViews expanded notification, which is drawn by
+         the system notification shade (light by default), not by this app's
+         own (always-dark) theme - hence the separate values-night override
+         that follows the *system* dark mode setting instead. -->
+    <color name="notification_text_primary">#DE000000</color>
+    <color name="notification_text_secondary">#99000000</color>
+</resources>

@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:orientation="vertical"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="16dp"
+    android:paddingBottom="16dp">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/backButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:padding="8dp"
+            android:text="‹"
+            android:textColor="@color/text_primary"
+            android:textSize="28sp" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="@string/voice_alerts_title"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Master toggle card -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@drawable/card_background"
+        android:padding="18dp">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/voice_master_label"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/voice_master_desc"
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/masterSwitch"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content" />
+    </LinearLayout>
+
+    <!-- Per-category card -->
+    <LinearLayout
+        android:id="@+id/categoryCard"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:orientation="vertical"
+        android:background="@drawable/card_background"
+        android:padding="18dp">
+
+        <!-- RED -->
+        <LinearLayout style="@style/VoiceRow">
+            <LinearLayout style="@style/VoiceRowText">
+                <TextView style="@style/VoiceRowLabel" android:text="@string/voice_red_label" />
+                <TextView style="@style/VoiceRowDesc" android:text="@string/voice_red_desc" />
+            </LinearLayout>
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/redSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <View style="@style/VoiceDivider" />
+
+        <!-- YELLOW -->
+        <LinearLayout style="@style/VoiceRow">
+            <LinearLayout style="@style/VoiceRowText">
+                <TextView style="@style/VoiceRowLabel" android:text="@string/voice_yellow_label" />
+                <TextView style="@style/VoiceRowDesc" android:text="@string/voice_yellow_desc" />
+            </LinearLayout>
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/yellowSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <View style="@style/VoiceDivider" />
+
+        <!-- SIGNAL-LOST -->
+        <LinearLayout style="@style/VoiceRow">
+            <LinearLayout style="@style/VoiceRowText">
+                <TextView style="@style/VoiceRowLabel" android:text="@string/voice_signal_lost_label" />
+                <TextView style="@style/VoiceRowDesc" android:text="@string/voice_signal_lost_desc" />
+            </LinearLayout>
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/signalLostSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <View style="@style/VoiceDivider" />
+
+        <!-- PLATEAU -->
+        <LinearLayout style="@style/VoiceRow">
+            <LinearLayout style="@style/VoiceRowText">
+                <TextView style="@style/VoiceRowLabel" android:text="@string/voice_plateau_label" />
+                <TextView style="@style/VoiceRowDesc" android:text="@string/voice_plateau_desc" />
+            </LinearLayout>
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/plateauSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+
+        <View style="@style/VoiceDivider" />
+
+        <!-- CORRECTION -->
+        <LinearLayout style="@style/VoiceRow">
+            <LinearLayout style="@style/VoiceRowText">
+                <TextView style="@style/VoiceRowLabel" android:text="@string/voice_correction_label" />
+                <TextView style="@style/VoiceRowDesc" android:text="@string/voice_correction_desc" />
+            </LinearLayout>
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/correctionSwitch"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="@string/voice_footer_note"
+        android:textColor="@color/muted"
+        android:textSize="12sp" />
+
+</LinearLayout>

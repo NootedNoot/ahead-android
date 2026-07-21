@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Tag"
+        android:textColor="@color/muted"
+        android:textSize="12sp" />
+
+    <Spinner
+        android:id="@+id/customEventTagSpinner"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Note (optional)"
+        android:textColor="@color/muted"
+        android:textSize="12sp" />
+
+    <EditText
+        android:id="@+id/customEventNoteInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:hint="What happened?"
+        android:inputType="textMultiLine"
+        android:minLines="2"
+        android:textColor="@color/text_primary"
+        android:textColorHint="@color/muted" />
+
+</LinearLayout>
