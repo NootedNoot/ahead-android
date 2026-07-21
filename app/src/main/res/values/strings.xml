@@ -27,9 +27,7 @@
     <string name="status_no_data">No glucose data yet. Make sure your CGM app is syncing to Health Connect.</string>
     <string name="status_stale">⚠️ No new data — %1$s ago. Check your CGM app.</string>
     <string name="trend_unavailable">No recent trend data</string>
-    <string name="possible_explanations_label">POSSIBLE EXPLANATIONS</string>
-    <string name="possible_explanations_expand">Tap for one more possible explanation</string>
-    <string name="possible_explanations_collapse">Tap to collapse</string>
+    <string name="projected_label">PROJECTED</string>
     <string name="range_tight">Tight</string>
     <string name="range_full">Full</string>
     <string name="range_auto">Auto</string>

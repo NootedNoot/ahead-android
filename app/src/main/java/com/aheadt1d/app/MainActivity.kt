@@ -29,7 +29,6 @@ import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.staleThresholdMinutes
-import com.aheadt1d.app.state.TREND_MATCH_TOLERANCE_MS
 import com.aheadt1d.app.ui.GlucoseSeverity
 import com.aheadt1d.app.voice.VoiceAlertsActivity
 import com.aheadt1d.app.work.WorkScheduler
@@ -46,6 +45,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -62,7 +62,6 @@ class MainActivity : AppCompatActivity() {
 
     private var cachedPoints: List<GlucosePoint> = emptyList()
     private var selectedWindowMinutes = WINDOW_1H
-    private var expandedGuessTrendDate: Long? = null
 
     /** Y-axis display range. Explicit user control rather than intuitive-only
      *  auto-scaling: a clipped chart during a high reading hides exactly the
@@ -593,9 +592,8 @@ class MainActivity : AppCompatActivity() {
     // with nothing to indicate it's not live anymore.
     private fun renderTrendState(trend: LatestTrend?) {
         val severityView = findViewById<TextView>(R.id.latestSeverityText)
-        val guessesContainer = findViewById<View>(R.id.guessContainer)
-        val guessesView = findViewById<TextView>(R.id.guessText)
-        val expandHint = findViewById<TextView>(R.id.guessExpandHint)
+        val projectionContainer = findViewById<View>(R.id.projectionContainer)
+        val projectionView = findViewById<TextView>(R.id.projectionText)
         // Freshness is checked against the raw Health Connect reading, not
         // trend.date. The backend dedups check-trend calls server-side and can
         // stop advancing trend.date for 30+ minutes while fresh HC readings
@@ -603,46 +601,30 @@ class MainActivity : AppCompatActivity() {
         // show "No recent trend data" even when glucose data is perfectly live.
         val rawReading = LatestTrendRepository.latestRawReading.value
         val rawIsFresh = rawReading != null && isFresh(Instant.ofEpochMilli(rawReading.time))
-        if (trend == null || !rawIsFresh) {
+        if (trend == null || rawReading == null || !rawIsFresh) {
             severityView.setText(R.string.trend_unavailable)
-            guessesContainer.visibility = View.GONE
+            projectionContainer.visibility = View.GONE
             return
         }
         // Rate comes from the shared effectiveRatePerMinute(), NOT trend.rate
         // directly - the persistent notification renders from the same
         // function, so both surfaces always show the identical rate for a
         // given check cycle.
-        severityView.text = describe(trend, effectiveRatePerMinute(rawReading, trend))
+        val rate = effectiveRatePerMinute(rawReading, trend)
+        severityView.text = describe(trend, rate)
 
-        // A guess explains a particular scored event, not merely the user's
-        // current glucose. Keep it off screen once fresh Health Connect data
-        // has moved beyond the backend event that generated it.
-        val trendMatchesRaw = abs(trend.date - rawReading.time) <= TREND_MATCH_TOLERANCE_MS
-        if (!trendMatchesRaw || trend.guesses.isEmpty()) {
-            guessesContainer.visibility = View.GONE
+        // Projections are a straight-line extrapolation from the SAME effective
+        // rate shown in the line above (value + rate * minutes), so the number,
+        // the rate, and the projection can never disagree. Hidden when no rate
+        // is computable - a lone reading with nothing to diff against.
+        if (rate == null) {
+            projectionContainer.visibility = View.GONE
             return
         }
-        val isExpanded = expandedGuessTrendDate == trend.date
-        val visibleGuesses = trend.guesses.take(if (isExpanded) 3 else 2)
-        guessesView.text = visibleGuesses.joinToString(separator = "\n") { guess ->
-            "• ${guess.label}"
-        }
-        expandHint.text = when {
-            trend.guesses.size <= 2 -> ""
-            isExpanded -> getString(R.string.possible_explanations_collapse)
-            else -> getString(R.string.possible_explanations_expand)
-        }
-        guessesContainer.setOnClickListener {
-            if (trend.guesses.size > 2) {
-                // Toggle, not just expand - previously this only ever set the
-                // expanded date and never cleared it, so once opened it had
-                // no way back and permanently ate the extra line's worth of
-                // vertical space from the weighted chart below it.
-                expandedGuessTrendDate = if (isExpanded) null else trend.date
-                renderTrendState(trend)
-            }
-        }
-        guessesContainer.visibility = View.VISIBLE
+        val projected15 = (rawReading.value + rate * PROJECTION_15_MIN).roundToInt()
+        val projected30 = (rawReading.value + rate * PROJECTION_30_MIN).roundToInt()
+        projectionView.text = "$projected15 in 15m · $projected30 in 30m"
+        projectionContainer.visibility = View.VISIBLE
     }
 
     // Chart point colours route through the same severity ladder as the number,
@@ -692,5 +674,9 @@ class MainActivity : AppCompatActivity() {
         // points, so this label can flag a fast move even while severity is
         // still 'none' from a stale/out-of-tolerance backend trend.
         private const val FAST_RATE_THRESHOLD = 2.0
+        // Projection horizons shown under the current value. 15/30 match the
+        // backend's PROJECTION_MINUTES / EXTENDED_PROJECTION_MINUTES defaults.
+        private const val PROJECTION_15_MIN = 15
+        private const val PROJECTION_30_MIN = 30
     }
 }

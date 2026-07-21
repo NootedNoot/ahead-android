@@ -79,16 +79,14 @@
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
 
-        <!-- Event-only backend hypotheses. Hidden entirely for ordinary
-             readings and whenever the scored event no longer matches the
-             latest Health Connect point. -->
+        <!-- 15- and 30-minute projections, a straight-line extrapolation from
+             the same effective rate shown in the line above. Hidden when there
+             is no fresh reading or no computable rate. -->
         <LinearLayout
-            android:id="@+id/guessContainer"
+            android:id="@+id/projectionContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="10dp"
-            android:clickable="true"
-            android:focusable="true"
             android:gravity="center"
             android:orientation="vertical"
             android:visibility="gone">
@@ -96,27 +94,20 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/possible_explanations_label"
+                android:text="@string/projected_label"
                 android:textColor="@color/muted"
                 android:textSize="10sp"
                 android:letterSpacing="0.1" />
 
             <TextView
-                android:id="@+id/guessText"
+                android:id="@+id/projectionText"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:gravity="center"
+                android:fontFamily="monospace"
                 android:textColor="@color/text_primary"
-                android:textSize="12sp" />
-
-            <TextView
-                android:id="@+id/guessExpandHint"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:textColor="@color/accent2"
-                android:textSize="11sp" />
+                android:textSize="14sp" />
 
         </LinearLayout>
 
