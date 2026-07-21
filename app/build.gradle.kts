@@ -1,8 +1,20 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
 }
+
+// Read from local.properties (already gitignored - see sdk.dir above it) so
+// the actual shared-secret value never enters source control. A fresh clone
+// with no key configured just gets an empty string, which the backend will
+// correctly reject with 401 rather than silently working.
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val aheadApiKey: String = localProperties.getProperty("ahead.api.key", "")
 
 android {
     namespace = "com.aheadt1d.app"
@@ -16,6 +28,10 @@ android {
         versionName = "0.1.0"
 
         buildConfigField("String", "BACKEND_BASE_URL", "\"https://ahead-backend-production-ee80.up.railway.app\"")
+        // Set via `ahead.api.key=...` in local.properties, and as the
+        // AHEAD_API_KEY env var on the Railway deployment - never commit the
+        // actual value.
+        buildConfigField("String", "AHEAD_API_KEY", "\"$aheadApiKey\"")
     }
 
     buildTypes {

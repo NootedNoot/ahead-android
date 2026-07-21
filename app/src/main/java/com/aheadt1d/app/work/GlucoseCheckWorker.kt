@@ -139,7 +139,7 @@ class GlucoseCheckWorker(
         }
 
         return try {
-            val responseJson = BackendClient.postCheckTrend(body)
+            val responseJson = BackendClient.postCheckTrend(applicationContext, body)
             Log.d(TAG, "check-trend response: $responseJson")
             updateLatestTrend(responseJson)
             Result.success()
