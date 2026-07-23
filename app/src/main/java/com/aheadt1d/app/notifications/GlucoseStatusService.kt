@@ -8,14 +8,12 @@ import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
-import android.os.RemoteException
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.aheadt1d.app.alerts.AlertCoordinator
-import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
@@ -23,6 +21,7 @@ import com.aheadt1d.app.state.TREND_MATCH_TOLERANCE_MS
 import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.minutesSinceReading
 import com.aheadt1d.app.state.staleThresholdMinutes
+import com.aheadt1d.app.work.GlucoseCheckRunner
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
@@ -44,19 +43,20 @@ import kotlinx.coroutines.launch
  * guessing at its shape now.
  *
  * It owns notification updates end-to-end: it observes LatestTrendRepository
- * (populated by GlucoseCheckWorker on every Health Connect read, AND by this
- * service's own poll below) and re-renders both on new readings and on a
- * once-a-minute tick, since staleness has to be caught even when no new
- * reading ever arrives.
+ * and re-renders both on new readings and on a once-a-minute tick, since
+ * staleness has to be caught even when no new reading ever arrives.
  *
- * Also runs its own independent Health Connect poll every ~5 min (see
- * pollHealthConnect) rather than relying solely on GlucoseCheckWorker's
- * 15-min WorkManager schedule to keep latestRawReading fresh. WorkManager
- * periodic work is subject to Doze/battery-optimization deferral and (until
- * recently) a network constraint that had nothing to do with this on-device
- * read - since this service is already a long-running foreground service
- * exempt from most of those restrictions, it's a more reliable source of
- * "is this notification actually live" than depending on the Worker alone.
+ * This service is the PRIMARY driver of the whole check cadence. Its own loop
+ * runs the full shared pipeline (GlucoseCheckRunner) every 5 minutes -
+ * Health Connect read, backend severity/projection, and the plateau/correction
+ * detector - so RED/yellow and plateau alerts evaluate every 5 min, not on
+ * WorkManager's ~15-min floor. GlucoseCheckWorker still exists but is demoted to
+ * a WATCHDOG: its periodic run resurrects this service if an aggressive OEM
+ * kills it, and its one-time job backs the manual "Check now" button. Because
+ * the coordinators it feeds are @Synchronized with dedup, the watchdog and this
+ * loop overlapping is safe - they never double-fire an alert. A foreground
+ * service is exempt from most Doze/battery deferral that makes WorkManager an
+ * unreliable primary, which is why the cadence lives here.
  *
 
  * Staleness, value, and time all come from latestRawReading (the raw Health
@@ -134,51 +134,41 @@ class GlucoseStatusService : Service() {
             newScope.launch {
                 var cycle = 0
                 while (isActive) {
-                    Log.d(TAG, "poll loop: cycle ${++cycle} (every ${RAW_POLL_INTERVAL_MS / 60_000}m)")
-                    pollHealthConnect()
-                    delay(RAW_POLL_INTERVAL_MS.milliseconds)
+                    Log.d(TAG, "check loop: cycle ${++cycle} (every ${CHECK_INTERVAL_MS / 60_000}m)")
+                    runCheck()
+                    delay(CHECK_INTERVAL_MS.milliseconds)
                 }
                 // Should only be reached when the service is destroyed. If this
-                // ever logs while the service is meant to be alive, the poll has
+                // ever logs while the service is meant to be alive, the loop has
                 // stopped and the notification will freeze - that's the bug.
-                Log.w(TAG, "poll loop: EXITED")
+                Log.w(TAG, "check loop: EXITED")
             }
         }
         return START_STICKY
     }
 
-    /** Independent of GlucoseCheckWorker - see class doc. Only ever touches
-     *  latestRawReading; the backend trend call stays the Worker's job. */
-    private suspend fun pollHealthConnect() {
+    /**
+     * The primary 5-minute cadence. Runs the full shared pipeline
+     * (GlucoseCheckRunner): Health Connect read -> raw reading -> plateau/
+     * correction detector -> backend severity/projection -> publish trend. The
+     * render loop above observes LatestTrendRepository, so a fresh trend from
+     * here is what drives both the notification refresh and AlertCoordinator -
+     * meaning full RED/yellow severity and plateau alerts now evaluate every
+     * 5 minutes, not only on the ~15-min WorkManager watchdog.
+     */
+    private suspend fun runCheck() {
         try {
-            Log.d(TAG, "poll: reading Health Connect (window=${RAW_POLL_WINDOW_MINUTES}m)")
-            val points = HealthConnectManager.readGlucosePoints(this, RAW_POLL_WINDOW_MINUTES)
-            val latest = points.lastOrNull()
-            if (latest == null) {
-                Log.w(TAG, "poll: Health Connect returned no points in the window")
-                return
-            }
-            val ageMin = (System.currentTimeMillis() - latest.time.toEpochMilli()) / 60_000
-            Log.d(TAG, "poll: ${points.size} point(s), latest=${latest.sgv} (${ageMin}m old) -> updating raw reading")
-            LatestTrendRepository.updateRawReading(
-                this,
-                RawReading(
-                    value = latest.sgv,
-                    time = latest.time.toEpochMilli(),
-                    ratePerMinute = HealthConnectManager.calculateRatePerMinute(points),
-                    deltaFromPrevious = HealthConnectManager.calculateDelta(points)
-                )
-            )
+            val outcome = GlucoseCheckRunner.run(this)
+            Log.d(TAG, "check loop: outcome=$outcome")
         } catch (e: Throwable) {
-            // Broadened from RemoteException on purpose: ANY failure here must not
-            // propagate out and kill the poll loop, or the persistent notification
-            // silently freezes on a stale reading until a manual "Check now" - the
-            // exact failure seen in live low-glucose testing. Logging it surfaces
-            // permission loss / OS throttling / Health Connect errors that were
-            // previously invisible. (CancellationException is rethrown so normal
+            // ANY failure here must not propagate out and kill the loop, or the
+            // persistent notification silently freezes on a stale reading until a
+            // manual "Check now". GlucoseCheckRunner already handles the expected
+            // Health Connect / network errors internally; this is the backstop for
+            // anything unexpected. (CancellationException is rethrown so normal
             // scope shutdown still works.)
             if (e is kotlinx.coroutines.CancellationException) throw e
-            Log.w(TAG, "poll: Health Connect read failed - loop continues, will retry next cycle", e)
+            Log.w(TAG, "check loop: run failed - loop continues, will retry next cycle", e)
         }
     }
 
@@ -334,8 +324,10 @@ class GlucoseStatusService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val TICK_INTERVAL_MS = 60_000L
 
-        private const val RAW_POLL_INTERVAL_MS = 5 * 60_000L
-        private const val RAW_POLL_WINDOW_MINUTES = 30L
+        // Primary check cadence. The full pipeline (Health Connect + backend
+        // severity + plateau) runs on this interval; the WorkManager watchdog's
+        // ~15-min period is only a resurrection backstop, no longer the driver.
+        private const val CHECK_INTERVAL_MS = 5 * 60_000L
 
         // Mirrors trend-detector.js's YELLOW_PROJECTED_LOW/HIGH defaults - used
         // only for the local yellow-only fallback in toDisplayState, never as a
