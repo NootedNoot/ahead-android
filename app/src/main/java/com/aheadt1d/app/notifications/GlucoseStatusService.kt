@@ -22,6 +22,7 @@ import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.minutesSinceReading
 import com.aheadt1d.app.state.staleThresholdMinutes
 import com.aheadt1d.app.work.GlucoseCheckRunner
+import com.aheadt1d.app.work.WorkScheduler
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.milliseconds
@@ -309,6 +310,17 @@ class GlucoseStatusService : Service() {
             listOf<Any?>(value, arrow, deltaFromPrevious, readingTime, severity, projected, projectedExtended, ratePerMinute)
         is GlucoseDisplayState.Stale -> "stale-${ageMinutes / 5}"
         GlucoseDisplayState.NoData -> "no-data"
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Swiping the app from recents can kill this service on many OEM skins
+        // despite START_STICKY. Schedule a WorkManager one-time job to bring it
+        // back - WorkManager survives the process death the swipe causes, which a
+        // direct restart from here would not. This is the glucose monitor; it must
+        // not silently die just because the user cleared the app from recents.
+        Log.w(TAG, "task removed (swiped from recents) - scheduling service restart")
+        WorkScheduler.restartSoon(applicationContext)
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

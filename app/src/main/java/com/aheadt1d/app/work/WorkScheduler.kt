@@ -15,6 +15,7 @@ object WorkScheduler {
 
     private const val UNIQUE_PERIODIC_WORK_NAME = "glucose_check_periodic"
     private const val UNIQUE_ONE_TIME_WORK_NAME = "glucose_check_once"
+    private const val UNIQUE_RESTART_WORK_NAME = "glucose_service_restart"
 
     // 15 minutes is WorkManager's enforced minimum for PeriodicWorkRequest.
     private const val INTERVAL_MINUTES = 15L
@@ -60,6 +61,26 @@ object WorkScheduler {
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             UNIQUE_ONE_TIME_WORK_NAME,
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
+    }
+
+    /**
+     * Brings the monitor back shortly after the app is swiped from recents (see
+     * GlucoseStatusService.onTaskRemoved). Enqueues a one-time check whose
+     * ensureRunning() re-launches the foreground service. Deliberately NOT tagged
+     * KEY_MANUAL_CHECK: a swipe-restart is a background resurrection, not a
+     * foreground tap, so it must alert normally rather than be suppressed.
+     * WorkManager persists this across the process death the swipe causes, which
+     * a direct startForegroundService() from onTaskRemoved cannot guarantee.
+     */
+    fun restartSoon(context: Context) {
+        val request = OneTimeWorkRequestBuilder<GlucoseCheckWorker>()
+            .setInitialDelay(2, TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            UNIQUE_RESTART_WORK_NAME,
             ExistingWorkPolicy.REPLACE,
             request
         )
