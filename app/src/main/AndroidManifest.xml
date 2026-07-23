@@ -11,6 +11,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Required alongside foregroundServiceType="specialUse" on API 34+. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- BootReceiver restarts the monitor after a reboot so it survives without
+         the user having to reopen the app. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Red-severity escalation: full-screen takeover over the lock screen,
          piercing Do Not Disturb, and the battery-optimisation exemption the
@@ -109,6 +112,20 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Shows a persistent notification with the user's current glucose reading and trend" />
         </service>
+
+        <!-- Restarts GlucoseStatusService after a reboot or an app update.
+             exported=true because the reboot/replace broadcasts come from the
+             system (a different uid); it only ever re-ensures our own service. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
 
         <!-- CSV event export: hands a cache file to whatever share target the
              user picks (email, Drive, etc) without exposing the whole cache dir. -->
