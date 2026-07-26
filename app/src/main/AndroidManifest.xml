@@ -15,6 +15,14 @@
          the user having to reopen the app. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Exact-alarm watchdog (AlarmScheduler): a Doze-piercing heartbeat that
+         resurrects the foreground service if an aggressive OEM kills it. USE_EXACT_ALARM
+         is auto-granted (no hidden Settings toggle) so the exact path works out of the
+         box on API 33+; SCHEDULE_EXACT_ALARM covers API 31-32. If neither is granted,
+         AlarmScheduler falls back to an inexact allow-while-idle alarm. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
     <!-- Red-severity escalation: full-screen takeover over the lock screen,
          piercing Do Not Disturb, and the battery-optimisation exemption the
          wizard requests so background checks keep running. -->
@@ -126,6 +134,12 @@
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
+
+        <!-- Exact-alarm watchdog receiver. exported=false: only our own
+             AlarmScheduler PendingIntent ever triggers it. -->
+        <receiver
+            android:name=".work.WatchdogAlarmReceiver"
+            android:exported="false" />
 
         <!-- CSV event export: hands a cache file to whatever share target the
              user picks (email, Drive, etc) without exposing the whole cache dir. -->

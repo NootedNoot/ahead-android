@@ -15,9 +15,8 @@
     <string name="generating_report">Generating report…</string>
     <string name="report_generation_failed">Couldn\'t generate the report. Check Health Connect access and try again.</string>
     <string name="current_glucose_label">CURRENT GLUCOSE</string>
-    <string name="status_running">Checks run automatically about every 15 minutes via Health Connect.</string>
+    <string name="status_running">Monitoring in the background — updates automatically about every 5 minutes.</string>
     <string name="status_hc_missing">Health Connect isn\'t installed. Install it from the Play Store, then reopen this app.</string>
-    <string name="check_now">Check now</string>
     <string name="no_reading_yet">—</string>
     <string name="glucose_trend_label">GLUCOSE TREND</string>
     <string name="window_1h">1 hr</string>

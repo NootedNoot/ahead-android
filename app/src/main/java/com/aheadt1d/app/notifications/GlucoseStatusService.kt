@@ -21,6 +21,7 @@ import com.aheadt1d.app.state.TREND_MATCH_TOLERANCE_MS
 import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.minutesSinceReading
 import com.aheadt1d.app.state.staleThresholdMinutes
+import com.aheadt1d.app.work.AlarmScheduler
 import com.aheadt1d.app.work.GlucoseCheckRunner
 import com.aheadt1d.app.work.WorkScheduler
 import kotlin.math.abs
@@ -101,6 +102,11 @@ class GlucoseStatusService : Service() {
                 foregroundServiceType
             )
             lastRenderedSignature = initialState.signature()
+
+            // Arm the exact-alarm watchdog every time the service (re)starts.
+            // The alarm's own receiver reschedules the next one; this call is the
+            // initial arm and a re-arm if the service came back after a kill.
+            AlarmScheduler.schedule(this)
 
             val newScope = CoroutineScope(Dispatchers.Default + Job())
             scope = newScope

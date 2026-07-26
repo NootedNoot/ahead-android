@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.aheadt1d.app.notifications.GlucoseStatusService
+import com.aheadt1d.app.work.AlarmScheduler
 
 /**
  * Restarts the glucose monitor after the events that would otherwise leave it
@@ -28,6 +29,10 @@ class BootReceiver : BroadcastReceiver() {
             "android.intent.action.QUICKBOOT_POWERON" -> {
                 Log.d(TAG, "Received ${intent.action} - ensuring GlucoseStatusService is running")
                 GlucoseStatusService.ensureRunning(context)
+                // Re-arm the exact-alarm watchdog too: a reboot clears all pending
+                // alarms, so without this the tightest resilience layer would stay
+                // dead until the user next opened the app.
+                AlarmScheduler.schedule(context)
             }
         }
     }

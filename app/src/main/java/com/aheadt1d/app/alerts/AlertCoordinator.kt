@@ -49,6 +49,7 @@ object AlertCoordinator {
     private const val KEY_RED_PEAK_VALUE = "red_peak_value"
     private const val KEY_RED_LAST_VALUE = "red_last_value"
     private const val KEY_LOW_WAS_RECOVERING = "low_was_recovering"
+    private const val KEY_RED_LOW_SIDE = "red_low_side"
     private const val KEY_YELLOW_LAST_ALERTED_PROJECTED = "yellow_last_alerted_projected"
 
     private const val RED_REALERT_COOLDOWN_MS = 15 * 60_000L
@@ -58,6 +59,14 @@ object AlertCoordinator {
     // so this cleanly separates the two without needing a dedicated field.
     private const val LOW_HIGH_SPLIT = 70
     private const val PEAK_RETREAT_REARM_THRESHOLD = 20
+    // Low-side red clear hysteresis. Once a critical LOW has fired red, the alert
+    // is held up until the value climbs solidly past the danger band - not the
+    // instant it nudges back over the floor - so a BG hovering near the cutoff
+    // can't flicker the red alert on and off. Set a buffer above LOW_HIGH_SPLIT
+    // (70): reaching 75 is an unambiguous recovery, not a one-reading wobble.
+    // High-side reds are deliberately NOT held this way (a fast fall from a high
+    // is its own hazard, not something to latch).
+    private const val LOW_RED_CLEAR_HYSTERESIS = 75
     // Minimum mg/dL movement for a high-side peak/climb-back to count as a
     // re-arm trigger - below this it's ordinary CGM sensor noise, not a
     // meaningful change. See the class doc's HIGH side note.
@@ -163,6 +172,23 @@ object AlertCoordinator {
             return
         }
 
+        // Low-side red clear hysteresis. A critical low that has fired red must
+        // not clear the instant severity drops below the floor - a BG hovering
+        // around the cutoff (e.g. 58 -> 62 -> 57) would otherwise cancel and
+        // re-fire the red alert on every wobble. Hold the alert (leave it posted,
+        // don't advance last-severity/date) until the value has climbed solidly
+        // past the danger band. Only applies to LOW reds; a high red is never
+        // latched. Deliberately does NOT route through fireRedIfWarranted: a hold
+        // value can sit in the 70-75 band where that function's low/high split
+        // would misclassify it - here we simply keep the existing red up.
+        if (prevSeverity == "red" && severity != "red" &&
+            prefs.getBoolean(KEY_RED_LOW_SIDE, false) &&
+            reading.value < LOW_RED_CLEAR_HYSTERESIS
+        ) {
+            Log.d("AlertCoordinator", "low red held: value ${reading.value} < $LOW_RED_CLEAR_HYSTERESIS clear buffer")
+            return
+        }
+
         // A new scored reading (new date). Note a persisting red (or yellow)
         // episode produces a fresh date every backend cycle, so "still red/
         // yellow" must be distinguished from "just became red/yellow" -
@@ -205,6 +231,7 @@ object AlertCoordinator {
             remove(KEY_RED_PEAK_VALUE)
             remove(KEY_RED_LAST_VALUE)
             remove(KEY_LOW_WAS_RECOVERING)
+            remove(KEY_RED_LOW_SIDE)
         }
     }
 
@@ -225,6 +252,9 @@ object AlertCoordinator {
             prefs.edit {
                 putInt(KEY_RED_PEAK_VALUE, reading.value)
                 putInt(KEY_RED_LAST_VALUE, reading.value)
+                // Remember which side this episode is, so the clear-hysteresis
+                // below only ever holds a LOW red (never a high one).
+                putBoolean(KEY_RED_LOW_SIDE, isLowSide(reading.value))
             }
         }
         fireRedIfWarranted(context, prefs, reading, forceFire = newlyRed, now, lastRedFiredAt, suppressAlert)

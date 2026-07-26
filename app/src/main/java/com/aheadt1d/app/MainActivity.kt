@@ -127,16 +127,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.checkNowButton).setOnClickListener {
-            WorkScheduler.runOnce(applicationContext)
-            // Health Connect itself is fast to read - don't make the user wait
-            // on the Worker's full async round trip (network call, WorkManager
-            // scheduling) just to see the number/chart reflect what's already
-            // there. The Worker's own completion still drives the notification
-            // and trend line via the usual StateFlow observers below.
-            refreshChart()
-        }
-
+        // No manual "Check now" control by design: the foreground service's own
+        // 5-min loop is the single source of fresh data, backed by the exact-alarm
+        // + WorkManager watchdogs. If a manual refresh ever felt necessary, that
+        // would mean the service isn't staying alive - a bug to fix there, not to
+        // paper over with a button. The chart still auto-refreshes reactively via
+        // the StateFlow observers below.
         setupVersionText()
 
         observeLatestTrend()
@@ -155,14 +151,6 @@ class MainActivity : AppCompatActivity() {
 
         if (!HealthConnectManager.isAvailable(this)) {
             findViewById<TextView>(R.id.statusText).setText(R.string.status_hc_missing)
-            // Nothing for the button to do without Health Connect present - left
-            // enabled it just silently no-ops, which reads as broken. The custom
-            // background drawable has no disabled-state styling of its own, so
-            // dim it manually to make the disabled state visible.
-            findViewById<Button>(R.id.checkNowButton).apply {
-                isEnabled = false
-                alpha = 0.4f
-            }
             return
         }
 
