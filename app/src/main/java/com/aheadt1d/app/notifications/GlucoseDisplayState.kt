@@ -39,12 +39,16 @@ sealed class GlucoseDisplayState {
     /** A reading exists but is older than the staleness threshold. lastArrow is
      *  the direction the last known reading was moving - surfaced so the "no new
      *  data" indicator (and the signal-lost alert) can say which way it was
-     *  heading when the data went dark. */
+     *  heading when the data went dark. [blockedReason] is the runner's
+     *  app-side diagnosis (revoked permission, HC missing) when one exists -
+     *  null means the gap is, as far as the app can tell, upstream at the
+     *  CGM/sync side, and the copy blames the sensor only in that case. */
     data class Stale(
         val lastValue: Int,
         val lastReadingTime: Long,
         val ageMinutes: Long,
-        val lastArrow: GlucoseTrendArrow
+        val lastArrow: GlucoseTrendArrow,
+        val blockedReason: com.aheadt1d.app.state.ReadBlockedReason? = null
     ) : GlucoseDisplayState()
 
     /** No reading has ever been recorded (fresh install, no permissions yet, etc). */

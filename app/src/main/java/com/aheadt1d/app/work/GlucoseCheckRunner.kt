@@ -12,6 +12,7 @@ import com.aheadt1d.app.state.Guess
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
+import com.aheadt1d.app.state.ReadBlockedReason
 import com.aheadt1d.app.tuning.PlateauTuningPrefs
 import com.aheadt1d.app.tuning.TuningPrefs
 import java.io.IOException
@@ -53,8 +54,13 @@ object GlucoseCheckRunner {
     enum class Outcome { SUCCESS, RETRY, FAILURE }
 
     suspend fun run(context: Context): Outcome {
+        // Each early return below records WHY the read pipeline is blocked
+        // (or clears the diagnosis on success). The stale-state copy keys off
+        // this so an app-side cause - revoked permission, missing Health
+        // Connect - is reported as such instead of "check your CGM".
         val healthConnectClient = HealthConnectManager.getClientOrNull(context) ?: run {
             Log.w(TAG, "Health Connect client unavailable (not installed, or SDK unsupported on this device)")
+            LatestTrendRepository.updateReadBlocked(ReadBlockedReason.HC_UNAVAILABLE)
             return Outcome.FAILURE
         }
 
@@ -64,17 +70,23 @@ object GlucoseCheckRunner {
             // a background execution context doesn't count as foreground to
             // Health Connect, even when kicked off via the "Check now" button.
             Log.w(TAG, "Missing a Health Connect permission (have $granted, need ${HealthConnectManager.ALL_PERMISSIONS})")
+            LatestTrendRepository.updateReadBlocked(ReadBlockedReason.PERMISSION_MISSING)
             return Outcome.FAILURE
         }
 
         val points = try {
             HealthConnectManager.readGlucosePoints(context, WINDOW_MINUTES)
         } catch (e: RemoteException) {
+            // Transient read error with permissions verified granted this run -
+            // clear any older app-side diagnosis rather than letting it linger
+            // past the condition it described; the generic gap copy applies.
             Log.w(TAG, "Health Connect read failed despite granted permissions", e)
+            LatestTrendRepository.updateReadBlocked(null)
             return Outcome.FAILURE
         }
 
         Log.d(TAG, "Read ${points.size} Health Connect point(s) in the last $WINDOW_MINUTES min")
+        LatestTrendRepository.updateReadBlocked(null)
 
         // Signal a successful local read regardless of what happens with the
         // backend below - MainActivity's chart reads Health Connect directly,

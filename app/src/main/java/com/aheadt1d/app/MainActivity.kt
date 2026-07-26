@@ -28,7 +28,8 @@ import com.aheadt1d.app.state.DebugGlucoseOverride
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.effectiveRatePerMinute
-import com.aheadt1d.app.state.staleThresholdMinutes
+import com.aheadt1d.app.state.isStale
+import com.aheadt1d.app.state.staleGuidance
 import com.aheadt1d.app.ui.GlucoseSeverity
 import com.aheadt1d.app.voice.VoiceAlertsActivity
 import com.aheadt1d.app.work.WorkScheduler
@@ -309,7 +310,10 @@ class MainActivity : AppCompatActivity() {
             statusView.text = if (latest == null) {
                 getString(R.string.status_no_data)
             } else {
-                getString(R.string.status_stale, formatAge(latest.time))
+                // Same cause-aware guidance the notification shows (shared
+                // staleGuidance) - the two surfaces must never disagree about
+                // whether to blame the sensor or the app's own access.
+                "${getString(R.string.status_stale, formatAge(latest.time))} ${staleGuidance(LatestTrendRepository.readBlocked.value)}"
             }
             return
         }
@@ -357,8 +361,9 @@ class MainActivity : AppCompatActivity() {
             if (DebugGlucoseOverride.isActive) View.VISIBLE else View.GONE
     }
 
-    private fun isFresh(instant: Instant): Boolean =
-        Duration.between(instant, Instant.now()).toMinutes() < staleThresholdMinutes(this)
+    // Routes through the shared isStale() (state package) - the same rule the
+    // notification and setup wizard use, so no surface can drift its boundary.
+    private fun isFresh(instant: Instant): Boolean = !isStale(this, instant.toEpochMilli())
 
     private fun formatAge(instant: Instant): String {
         val minutes = Duration.between(instant, Instant.now()).toMinutes()

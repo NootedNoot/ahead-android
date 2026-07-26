@@ -9,7 +9,7 @@ import com.aheadt1d.app.notifications.GlucoseTrendArrow
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
-import com.aheadt1d.app.state.staleThresholdMinutes
+import com.aheadt1d.app.state.isStale
 
 /**
  * Shared debug-only path for pushing a synthetic reading through the real
@@ -51,7 +51,7 @@ object DebugInjection {
 
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
         val ageMinutes = (System.currentTimeMillis() - readingTime) / 60_000
-        val state = if (ageMinutes >= staleThresholdMinutes(ctx)) {
+        val state = if (isStale(ctx, readingTime)) {
             GlucoseDisplayState.Stale(
                 lastValue = value,
                 lastReadingTime = readingTime,

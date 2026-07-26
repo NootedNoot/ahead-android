@@ -9,6 +9,7 @@ import android.content.Intent
 import android.widget.RemoteViews
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
+import com.aheadt1d.app.state.staleGuidance
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.abs
@@ -61,7 +62,10 @@ object GlucoseNotifier {
             is GlucoseDisplayState.Stale -> Triple(
                 NotificationIconFactory.warningIcon(context),
                 "⚠️ No new data — ${formatAge(state.ageMinutes)} ago",
-                "Last reading ${state.lastValue} mg/dL ${state.lastArrow.label}. Check your CGM."
+                // Guidance is cause-aware (shared staleGuidance): an app-side
+                // blockage (revoked permission, HC missing) names itself
+                // instead of misdirecting the user to their sensor.
+                "Last reading ${state.lastValue} mg/dL ${state.lastArrow.label}. ${staleGuidance(state.blockedReason)}"
             )
             GlucoseDisplayState.NoData -> Triple(
                 NotificationIconFactory.noDataIcon(context),
@@ -120,7 +124,7 @@ object GlucoseNotifier {
                     R.id.tv_time,
                     "Last: ${state.lastValue} mg/dL ${state.lastArrow.label} at ${timeFormatter.format(state.lastReadingTime)}"
                 )
-                views.setTextViewText(R.id.tv_delta, "Check your CGM app - readings have stopped syncing")
+                views.setTextViewText(R.id.tv_delta, staleGuidance(state.blockedReason))
             }
             GlucoseDisplayState.NoData -> {
                 views.setImageViewIcon(

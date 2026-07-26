@@ -17,10 +17,11 @@ import com.aheadt1d.app.alerts.AlertCoordinator
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
+import com.aheadt1d.app.state.ReadBlockedReason
 import com.aheadt1d.app.state.TREND_MATCH_TOLERANCE_MS
 import com.aheadt1d.app.state.effectiveRatePerMinute
+import com.aheadt1d.app.state.isStale
 import com.aheadt1d.app.state.minutesSinceReading
-import com.aheadt1d.app.state.staleThresholdMinutes
 import com.aheadt1d.app.work.AlarmScheduler
 import com.aheadt1d.app.work.GlucoseCheckRunner
 import com.aheadt1d.app.work.WorkScheduler
@@ -85,10 +86,12 @@ class GlucoseStatusService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (scope == null) {
+        val freshlyStarted = scope == null
+        if (freshlyStarted) {
             val initialState = toDisplayState(
                 LatestTrendRepository.latestRawReading.value,
                 LatestTrendRepository.latestTrend.value,
+                LatestTrendRepository.readBlocked.value,
             )
             val foregroundServiceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
@@ -129,11 +132,12 @@ class GlucoseStatusService : Service() {
             newScope.launch {
                 combine(
                     LatestTrendRepository.latestRawReading,
-                    LatestTrendRepository.latestTrend
-                ) { raw, trend -> raw to trend }
-                    .collectLatest { (raw, trend) ->
+                    LatestTrendRepository.latestTrend,
+                    LatestTrendRepository.readBlocked
+                ) { raw, trend, blocked -> Triple(raw, trend, blocked) }
+                    .collectLatest { (raw, trend, blocked) ->
                         while (isActive) {
-                            render(raw, trend)
+                            render(raw, trend, blocked)
                             delay(TICK_INTERVAL_MS.milliseconds)
                         }
                     }
@@ -150,6 +154,18 @@ class GlucoseStatusService : Service() {
                 // stopped and the notification will freeze - that's the bug.
                 Log.w(TAG, "check loop: EXITED")
             }
+        }
+        // Watchdog nudge on an ALREADY-alive service. The fresh-start path above
+        // runs cycle 1 immediately, so this only matters when the scope guard
+        // no-op'd - exactly the alive-but-stalled case: the loop holds no
+        // wakelock, so in deep Doze (battery exemption not granted) its delay()
+        // timers can legally pause between alarm wakeups while the service
+        // stays "running". One-shot on the same scope; overlapping an
+        // in-flight cycle is safe - the runner's coordinators are @Synchronized
+        // with dedup, same guarantee the Worker watchdog already relies on.
+        if (!freshlyStarted && intent?.action == ACTION_FORCE_CHECK) {
+            Log.d(TAG, "force-check nudge received - running an immediate cycle")
+            scope?.launch { runCheck() }
         }
         return START_STICKY
     }
@@ -187,9 +203,9 @@ class GlucoseStatusService : Service() {
     // kept writing fresh data underneath it. The invokeOnCompletion handler
     // in onStartCommand is the safety net if this ever still happens some
     // other way; this try/catch is preventing it in the first place.
-    private fun render(raw: RawReading?, trend: LatestTrend?) {
+    private fun render(raw: RawReading?, trend: LatestTrend?, blocked: ReadBlockedReason?) {
         try {
-            val state = toDisplayState(raw, trend)
+            val state = toDisplayState(raw, trend, blocked)
 
             // Must run BEFORE the signature early-return below: the coordinator's
             // red re-alert cooldown depends on being called on every 60s tick,
@@ -215,16 +231,19 @@ class GlucoseStatusService : Service() {
         }
     }
 
-    private fun toDisplayState(raw: RawReading?, trend: LatestTrend?): GlucoseDisplayState {
+    private fun toDisplayState(raw: RawReading?, trend: LatestTrend?, blocked: ReadBlockedReason?): GlucoseDisplayState {
         if (raw == null) return GlucoseDisplayState.NoData
 
-        val ageMinutes = minutesSinceReading(raw) ?: 0
-        if (ageMinutes >= staleThresholdMinutes(this)) {
+        // Staleness routes through the shared isStale() (state package) - the
+        // same rule MainActivity and the wizard use - so the two surfaces can
+        // never disagree about the boundary.
+        if (isStale(this, raw)) {
             return GlucoseDisplayState.Stale(
                 lastValue = raw.value,
                 lastReadingTime = raw.time,
-                ageMinutes = ageMinutes,
-                lastArrow = GlucoseTrendArrow.fromRatePerMinute(raw.ratePerMinute)
+                ageMinutes = minutesSinceReading(raw) ?: 0,
+                lastArrow = GlucoseTrendArrow.fromRatePerMinute(raw.ratePerMinute),
+                blockedReason = blocked
             )
         }
 
@@ -314,7 +333,10 @@ class GlucoseStatusService : Service() {
     private fun GlucoseDisplayState.signature(): Any = when (this) {
         is GlucoseDisplayState.Reading ->
             listOf<Any?>(value, arrow, deltaFromPrevious, readingTime, severity, projected, projectedExtended, ratePerMinute)
-        is GlucoseDisplayState.Stale -> "stale-${ageMinutes / 5}"
+        // blockedReason is part of the signature so a diagnosis arriving (or
+        // clearing) mid-stale re-renders the guidance copy without waiting for
+        // the next 5-minute age bucket.
+        is GlucoseDisplayState.Stale -> "stale-${ageMinutes / 5}-${blockedReason?.name ?: "gap"}"
         GlucoseDisplayState.NoData -> "no-data"
     }
 
@@ -373,6 +395,34 @@ class GlucoseStatusService : Service() {
                 ContextCompat.startForegroundService(context, Intent(context, GlucoseStatusService::class.java))
             } catch (e: IllegalStateException) {
                 Log.w(TAG, "Couldn't start GlucoseStatusService - will retry on the next check", e)
+            }
+        }
+
+        // Intent action for nudgeCheck below. Never in the manifest - the
+        // service is exported=false and this only ever arrives via our own
+        // PendingIntent-free startForegroundService call.
+        const val ACTION_FORCE_CHECK = "com.aheadt1d.app.action.FORCE_CHECK"
+
+        /**
+         * [ensureRunning] plus a guaranteed prompt check cycle. A fresh start
+         * already runs cycle 1 immediately; but when the service is ALREADY
+         * alive, ensureRunning's scope guard makes the start a no-op - correct
+         * for every ordinary caller, yet useless to the exact-alarm watchdog
+         * when the loop is alive-but-stalled (deep Doze, no battery exemption:
+         * the loop's delay() timers pause while the service technically keeps
+         * running, and the notification quietly goes stale). This delivers
+         * ACTION_FORCE_CHECK instead: onStartCommand sees the live scope and
+         * launches one immediate runCheck() on it. Same swallow-and-retry
+         * posture as ensureRunning if the OS refuses the start.
+         */
+        fun nudgeCheck(context: Context) {
+            try {
+                ContextCompat.startForegroundService(
+                    context,
+                    Intent(context, GlucoseStatusService::class.java).setAction(ACTION_FORCE_CHECK)
+                )
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Couldn't nudge GlucoseStatusService - will retry on the next watchdog pass", e)
             }
         }
     }

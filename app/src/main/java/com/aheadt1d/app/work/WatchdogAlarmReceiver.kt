@@ -7,22 +7,25 @@ import android.util.Log
 import com.aheadt1d.app.notifications.GlucoseStatusService
 
 /**
- * Fires on the exact-alarm heartbeat (see AlarmScheduler). Re-ensures the
- * foreground monitor is running - a no-op if it already is - then reschedules
- * the next one-shot alarm, since setExactAndAllowWhileIdle does not repeat on
- * its own. This is what brings the monitor back on OEM skins that kill the
- * service in deep idle despite START_STICKY and the WorkManager watchdog.
+ * Fires on the exact-alarm heartbeat (see AlarmScheduler). Nudges the
+ * foreground monitor via GlucoseStatusService.nudgeCheck - which both revives
+ * a DEAD service (fresh start runs a check cycle immediately) and forces an
+ * immediate check on an alive-but-STALLED one (deep Doze without the battery
+ * exemption can pause the loop's delay() timers while the service technically
+ * keeps running; plain ensureRunning would no-op on it and the notification
+ * would quietly go stale). Then reschedules the next one-shot alarm, since
+ * setExactAndAllowWhileIdle does not repeat on its own.
  *
  * Starting a foreground service from here while the app is backgrounded is
  * permitted: an app whose exact alarm fires is temporarily exempt from the
- * background-FGS-start restriction, and ensureRunning() swallows the
+ * background-FGS-start restriction, and nudgeCheck() swallows the
  * IllegalStateException on the off chance the OS still refuses.
  */
 class WatchdogAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != ACTION_WATCHDOG) return
-        Log.d(TAG, "watchdog alarm fired - ensuring service is up and rescheduling")
-        GlucoseStatusService.ensureRunning(context)
+        Log.d(TAG, "watchdog alarm fired - nudging a check cycle and rescheduling")
+        GlucoseStatusService.nudgeCheck(context)
         AlarmScheduler.schedule(context)
     }
 

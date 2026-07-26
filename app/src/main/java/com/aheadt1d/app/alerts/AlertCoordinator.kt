@@ -128,7 +128,10 @@ object AlertCoordinator {
         val prevSeverity = prefs.getString(KEY_LAST_SEVERITY, "none") ?: "none"
         val alreadyFired = prefs.getBoolean(KEY_SIGNAL_LOST_FIRED, false)
         if (!alreadyFired && (prevSeverity == "red" || prevSeverity == "yellow")) {
-            AlertNotifier.showSignalLostAlert(context, stale.lastValue, stale.lastArrow, prevSeverity, stale.ageMinutes)
+            AlertNotifier.showSignalLostAlert(
+                context, stale.lastValue, stale.lastArrow, prevSeverity, stale.ageMinutes,
+                blockedReason = stale.blockedReason
+            )
             prefs.edit { putBoolean(KEY_SIGNAL_LOST_FIRED, true) }
         }
     }

@@ -7,14 +7,27 @@ import kotlin.math.abs
 import org.json.JSONArray
 import org.json.JSONObject
 
-// Source-aware staleness. Both the notification and the main screen call these
+// Source-aware staleness. Every surface (ongoing notification, main screen,
+// setup wizard's verify step, debug injection) routes through isStale() below,
 // so a reading that's too old to trust is never shown - or alerted on - as if
-// it were current. Official Dexcom syncs a clean 5-min cadence, so 12 min
-// (~2 missed cycles) is a confident "stale". Juggluco and unknown sources gap
-// 10-15 min in normal operation (see HealthConnectManager's gap log), so 15
-// avoids crying stale - and suppressing alerts - during ordinary jitter.
-const val STALE_THRESHOLD_DEXCOM_MINUTES = 12L
-const val STALE_THRESHOLD_DEFAULT_MINUTES = 15L
+// it were current.
+//
+// The threshold has to absorb the WHOLE pipeline, not just the sensor cadence:
+//   apparent age of RawReading = CGM reading gap
+//     + CGM-app -> Health Connect sync latency (Dexcom batches its HC writes;
+//       1-6 min is normal)
+//     + up to one full 5-min check cycle before the runner reads it.
+// 2026-07-26: previously 12 (Dexcom) / 15 (default), which budgeted only the
+// reading gap. Steady-state healthy apparent age already reaches ~10 min, so
+// Dexcom had ~2 min of real headroom and ordinary sync jitter produced false
+// "No new data" flickers - each of which is also a brief alert-blind window,
+// since severity evaluation stops while the state is Stale.
+//   Dexcom 18  = two missed 5-min cycles (15) + typical remaining pipeline lag.
+//   Default 22 = Juggluco's normal 10-15 min gaps (see HealthConnectManager's
+//                gap log) + worst-case 5-min read lag + sync latency.
+// A true outage is still declared well inside the runner's 45-min read window.
+const val STALE_THRESHOLD_DEXCOM_MINUTES = 18L
+const val STALE_THRESHOLD_DEFAULT_MINUTES = 22L
 
 /** The staleness cutoff for the currently configured CGM source. */
 fun staleThresholdMinutes(context: Context): Long =
@@ -28,11 +41,35 @@ fun staleThresholdMinutes(context: Context): Long =
 fun minutesSinceReading(raw: RawReading?): Long? =
     if (raw == null) null else (System.currentTimeMillis() - raw.time) / 60_000
 
-/** Whether the latest reading is too old to treat as current (or absent).
- *  The single staleness check both surfaces and the alert layer should use. */
-fun isStale(context: Context, raw: RawReading?): Boolean {
-    val minutes = minutesSinceReading(raw) ?: return true
-    return minutes >= staleThresholdMinutes(context)
+/** Whether a reading recorded at [readingTimeMillis] is too old to treat as
+ *  current. THE staleness rule - every surface calls this (directly or via the
+ *  RawReading overload below) rather than re-deriving the age/threshold
+ *  comparison, so the boundary can never drift between the notification, the
+ *  main screen, and the wizard. */
+fun isStale(context: Context, readingTimeMillis: Long): Boolean =
+    (System.currentTimeMillis() - readingTimeMillis) / 60_000 >= staleThresholdMinutes(context)
+
+/** [isStale] for the persisted latest reading; absent counts as stale. */
+fun isStale(context: Context, raw: RawReading?): Boolean =
+    raw == null || isStale(context, raw.time)
+
+/**
+ * App-side reasons the glucose read pipeline is blocked, diagnosed by
+ * GlucoseCheckRunner on every cycle - distinguished from a genuine CGM data
+ * gap (reason null) so stale-state copy can point at the actual fix instead
+ * of always blaming the sensor.
+ */
+enum class ReadBlockedReason { PERMISSION_MISSING, HC_UNAVAILABLE }
+
+/** The one place stale-state guidance copy lives - shared by the ongoing
+ *  notification (collapsed + expanded), the signal-lost alert, and the main
+ *  screen's status line, so no surface can misdirect differently from the
+ *  others. Null reason = no app-side blockage diagnosed: the gap is (as far
+ *  as the app can tell) upstream, so pointing at the CGM is honest. */
+fun staleGuidance(reason: ReadBlockedReason?): String = when (reason) {
+    ReadBlockedReason.PERMISSION_MISSING -> "Check Ahead's app permissions — Health Connect access was lost."
+    ReadBlockedReason.HC_UNAVAILABLE -> "Health Connect isn't available — open Ahead to reconnect."
+    null -> "Check your CGM app — readings stopped syncing."
 }
 
 // How close the backend trend's scored timestamp must be to the raw Health

@@ -31,6 +31,16 @@ object LatestTrendRepository {
     private val _lastCheckedAt = MutableStateFlow(0L)
     val lastCheckedAt: StateFlow<Long> = _lastCheckedAt.asStateFlow()
 
+    // Why the last check cycle couldn't read Health Connect at all, or null
+    // when the last attempt read fine (or nothing has been diagnosed yet).
+    // Written by GlucoseCheckRunner on every cycle; drives the stale-state
+    // guidance copy so an app-side cause (revoked permission, HC missing)
+    // isn't blamed on the CGM. Deliberately in-memory only: any process start
+    // runs a check cycle within seconds, which re-diagnoses fresh - persisting
+    // this would only risk replaying a stale diagnosis.
+    private val _readBlocked = MutableStateFlow<ReadBlockedReason?>(null)
+    val readBlocked: StateFlow<ReadBlockedReason?> = _readBlocked.asStateFlow()
+
     fun init(context: Context) {
         _latestTrend.value = LatestTrendStore.load(context.applicationContext)
         _latestRawReading.value = RawReadingStore.load(context.applicationContext)
@@ -48,5 +58,9 @@ object LatestTrendRepository {
 
     fun markChecked() {
         _lastCheckedAt.value = System.currentTimeMillis()
+    }
+
+    fun updateReadBlocked(reason: ReadBlockedReason?) {
+        _readBlocked.value = reason
     }
 }

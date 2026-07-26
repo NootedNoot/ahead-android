@@ -32,10 +32,12 @@ object AlarmScheduler {
     private const val TAG = "AlarmScheduler"
     private const val REQUEST_CODE = 4711
 
-    // A hard 10-min heartbeat, layered under the service's own 5-min loop. This
-    // interval only governs how often we re-check the service is alive; it does
-    // NOT read glucose itself, so it's deliberately looser than the check cadence
-    // to keep Doze wakeups modest.
+    // A hard 10-min heartbeat, layered under the service's own 5-min loop. Each
+    // firing nudges the service (WatchdogAlarmReceiver -> nudgeCheck): reviving
+    // it if dead, and forcing an immediate check cycle if it's alive but its
+    // loop timers are Doze-stalled - so in the worst case the monitor's real
+    // cadence degrades to this interval rather than dying. Deliberately looser
+    // than the 5-min check cadence to keep Doze wakeups modest.
     private const val INTERVAL_MS = 10 * 60_000L
 
     fun schedule(context: Context) {

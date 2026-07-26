@@ -23,9 +23,7 @@ import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
 import com.aheadt1d.app.alerts.AlertChannels
 import com.aheadt1d.app.health.HealthConnectManager
-import com.aheadt1d.app.state.staleThresholdMinutes
-import java.time.Duration
-import java.time.Instant
+import com.aheadt1d.app.state.isStale
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -251,9 +249,7 @@ class SetupWizardActivity : AppCompatActivity() {
                     HealthConnectManager.readGlucosePoints(this@SetupWizardActivity, 30)
                 }.getOrDefault(emptyList())
                 val latest = points.lastOrNull()
-                if (latest != null &&
-                    Duration.between(latest.time, Instant.now()).toMinutes() < staleThresholdMinutes(this@SetupWizardActivity)
-                ) {
+                if (latest != null && !isStale(this@SetupWizardActivity, latest.time.toEpochMilli())) {
                     verifiedValue = latest.sgv
                     if (currentStep == 4) refreshVerify()
                     return@launch
