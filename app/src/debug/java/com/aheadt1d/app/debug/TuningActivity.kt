@@ -61,7 +61,8 @@ class TuningActivity : AppCompatActivity() {
             findViewById(R.id.highThresholdInput), findViewById(R.id.highDurationInput),
             findViewById(R.id.hysteresisBufferInput), findViewById(R.id.escalationStepInput),
             findViewById(R.id.cooldownInput), findViewById(R.id.correctionWindowInput),
-            findViewById(R.id.responseRateInput),
+            findViewById(R.id.responseRateInput), findViewById(R.id.lowThresholdInput),
+            findViewById(R.id.lowCorrectionWindowInput), findViewById(R.id.lowResponseRateInput),
         )
         liveReading = findViewById(R.id.liveReadingText)
         liveRate = findViewById(R.id.liveRateText)
@@ -149,18 +150,25 @@ class TuningActivity : AppCompatActivity() {
             value.hysteresisBuffer.toString(), value.escalationStepMinutes.toString(),
             value.cooldownMinutes.toString(), value.correctionWindowMinutes.toString(),
             formatRate(value.correctionResponseRateThreshold),
+            value.lowThreshold.toString(), value.lowCorrectionWindowMinutes.toString(),
+            formatRate(value.lowResponseRateThreshold),
         )
         inputs2.zip(values).forEach { (input, text) -> input.setText(text) }
         renderPlateauPreview()
     }
 
     private fun parseInputs2(): PlateauTuningParameters? {
-        val ints = inputs2.take(6).map { it.text.toString().trim().toIntOrNull() ?: return null }
+        // Indices 0-5 and 7-8 are plain ints; 6 and 9 are signed rates (high-side
+        // negative, low-side positive) - see activity_tuning.xml's field order.
+        val ints = listOf(0, 1, 2, 3, 4, 5, 7, 8).map { inputs2[it].text.toString().trim().toIntOrNull() ?: return null }
         val rate = inputs2[6].text.toString().trim().toDoubleOrNull() ?: return null
+        val lowRate = inputs2[9].text.toString().trim().toDoubleOrNull() ?: return null
         return PlateauTuningParameters(
             highThreshold = ints[0], highDurationMinutes = ints[1], hysteresisBuffer = ints[2],
             escalationStepMinutes = ints[3], cooldownMinutes = ints[4], correctionWindowMinutes = ints[5],
             correctionResponseRateThreshold = rate,
+            lowThreshold = ints[6], lowCorrectionWindowMinutes = ints[7],
+            lowResponseRateThreshold = lowRate,
         )
     }
 

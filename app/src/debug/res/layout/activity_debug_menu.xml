@@ -163,7 +163,7 @@
 
         <TextView
             style="@style/DebugStatusText"
-            android:text="Simulates tapping the real 'Correction' preset tag (same PlateauCoordinator.onCorrectionLogged hook), without going through the tag-picker dialog. Tap twice quickly to also test the repeat-correction-logged notification." />
+            android:text="Simulates tapping the real 'Correction' preset tag (same PlateauCoordinator.onCorrectionLogged hook), without going through the tag-picker dialog. Auto-detects high vs low from the current injected glucose value (use Manual Value above to set a low reading first, e.g. 55, to test the low-side path). Tap twice quickly to also test the repeat-correction-logged notification." />
 
         <Button android:id="@+id/simulateLogCorrectionButton" style="@style/DebugButton" android:text="Simulate: log correction now" />
 

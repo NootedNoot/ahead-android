@@ -19,6 +19,18 @@ data class PlateauTuningParameters(
     val cooldownMinutes: Int = DEFAULT_COOLDOWN_MIN,
     val correctionWindowMinutes: Int = DEFAULT_CORRECTION_WINDOW_MIN,
     val correctionResponseRateThreshold: Double = DEFAULT_RESPONSE_RATE_THRESHOLD,
+    // Low-side correction-response (Gap 2, low direction) - deliberately its
+    // own trio rather than reusing the high-side fields above: fast carbs
+    // reverse a low far quicker than insulin reverses a high, so the window
+    // is much shorter and the rate check is a positive (rising) bar instead
+    // of a negative (falling) one. lowThreshold defaults to the same 70 mg/dL
+    // AlertCoordinator.LOW_HIGH_SPLIT already uses for "this is a low" -
+    // kept as its own independent constant (not imported) for the same
+    // decoupling reason highThreshold above is independent of the backend's
+    // severity classification.
+    val lowThreshold: Int = DEFAULT_LOW_THRESHOLD,
+    val lowCorrectionWindowMinutes: Int = DEFAULT_LOW_CORRECTION_WINDOW_MIN,
+    val lowResponseRateThreshold: Double = DEFAULT_LOW_RESPONSE_RATE_THRESHOLD,
 ) {
     fun normalized(): PlateauTuningParameters = copy(
         highThreshold = highThreshold.coerceIn(120, 400),
@@ -28,6 +40,9 @@ data class PlateauTuningParameters(
         cooldownMinutes = cooldownMinutes.coerceIn(5, 240),
         correctionWindowMinutes = correctionWindowMinutes.coerceIn(15, 180),
         correctionResponseRateThreshold = correctionResponseRateThreshold.coerceIn(-10.0, -0.1),
+        lowThreshold = lowThreshold.coerceIn(40, 90),
+        lowCorrectionWindowMinutes = lowCorrectionWindowMinutes.coerceIn(10, 60),
+        lowResponseRateThreshold = lowResponseRateThreshold.coerceIn(0.1, 5.0),
     )
 
     /** Derived, not persisted: how far back GlucoseCheckWorker needs to read
@@ -50,6 +65,9 @@ object PlateauTuningPrefs {
     private const val KEY_COOLDOWN = "plateau_cooldown_minutes"
     private const val KEY_CORRECTION_WINDOW = "correction_window_minutes"
     private const val KEY_RESPONSE_RATE_THRESHOLD = "correction_response_rate_threshold"
+    private const val KEY_LOW_THRESHOLD = "low_threshold"
+    private const val KEY_LOW_CORRECTION_WINDOW = "low_correction_window_minutes"
+    private const val KEY_LOW_RESPONSE_RATE_THRESHOLD = "low_correction_response_rate_threshold"
 
     fun load(context: Context): PlateauTuningParameters = PlateauTuningParameters(
         highThreshold = prefs(context).getInt(KEY_HIGH_THRESHOLD, DEFAULT_HIGH_THRESHOLD),
@@ -60,6 +78,11 @@ object PlateauTuningPrefs {
         correctionWindowMinutes = prefs(context).getInt(KEY_CORRECTION_WINDOW, DEFAULT_CORRECTION_WINDOW_MIN),
         correctionResponseRateThreshold = prefs(context)
             .getFloat(KEY_RESPONSE_RATE_THRESHOLD, DEFAULT_RESPONSE_RATE_THRESHOLD.toFloat())
+            .toDouble(),
+        lowThreshold = prefs(context).getInt(KEY_LOW_THRESHOLD, DEFAULT_LOW_THRESHOLD),
+        lowCorrectionWindowMinutes = prefs(context).getInt(KEY_LOW_CORRECTION_WINDOW, DEFAULT_LOW_CORRECTION_WINDOW_MIN),
+        lowResponseRateThreshold = prefs(context)
+            .getFloat(KEY_LOW_RESPONSE_RATE_THRESHOLD, DEFAULT_LOW_RESPONSE_RATE_THRESHOLD.toFloat())
             .toDouble(),
     ).normalized()
 
@@ -73,6 +96,9 @@ object PlateauTuningPrefs {
             putInt(KEY_COOLDOWN, value.cooldownMinutes)
             putInt(KEY_CORRECTION_WINDOW, value.correctionWindowMinutes)
             putFloat(KEY_RESPONSE_RATE_THRESHOLD, value.correctionResponseRateThreshold.toFloat())
+            putInt(KEY_LOW_THRESHOLD, value.lowThreshold)
+            putInt(KEY_LOW_CORRECTION_WINDOW, value.lowCorrectionWindowMinutes)
+            putFloat(KEY_LOW_RESPONSE_RATE_THRESHOLD, value.lowResponseRateThreshold.toFloat())
         }
     }
 
@@ -89,3 +115,6 @@ const val DEFAULT_ESCALATION_STEP_MIN = 60
 const val DEFAULT_COOLDOWN_MIN = 60
 const val DEFAULT_CORRECTION_WINDOW_MIN = 45
 const val DEFAULT_RESPONSE_RATE_THRESHOLD = -1.0
+const val DEFAULT_LOW_THRESHOLD = 70
+const val DEFAULT_LOW_CORRECTION_WINDOW_MIN = 20
+const val DEFAULT_LOW_RESPONSE_RATE_THRESHOLD = 1.0

@@ -35,4 +35,30 @@ object CorrectionResponseMath {
 
         return Outcome.NOT_RESPONDING
     }
+
+    /**
+     * Low-side counterpart to [evaluate] - fast carbs are expected to reverse
+     * a low far quicker than insulin reverses a high, so this is checked
+     * against its own (shorter) window and a positive rate threshold rather
+     * than reusing the high-side constants. "Responding" means glucose has
+     * climbed back above [lowThreshold], or is rising at least
+     * [responseRateThreshold] mg/dL/min even before clearing it.
+     */
+    fun evaluateLow(
+        correctionLoggedAt: Long,
+        now: Long,
+        windowMinutes: Long,
+        currentValue: Int?,
+        currentRatePerMinute: Double?,
+        lowThreshold: Int,
+        responseRateThreshold: Double,
+    ): Outcome {
+        val elapsedMinutes = (now - correctionLoggedAt) / 60_000L
+        if (elapsedMinutes < windowMinutes) return Outcome.WINDOW_OPEN
+
+        if (currentValue == null || currentValue > lowThreshold) return Outcome.RESPONDING_OR_RESOLVED
+        if (currentRatePerMinute != null && currentRatePerMinute >= responseRateThreshold) return Outcome.RESPONDING_OR_RESOLVED
+
+        return Outcome.NOT_RESPONDING
+    }
 }

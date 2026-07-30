@@ -127,6 +127,15 @@
             <TextView style="@style/TuningParameterLabel" android:text="CORRECTION_RESPONSE_RATE_THRESHOLD (default -1.0 mg/dL/min)" />
             <TextView style="@style/TuningParameterHelp" android:text="How negative the rate of change must be, by the end of CORRECTION_WINDOW, to count as &quot;trending down&quot; even if glucose hasn't dropped below HIGH_THRESHOLD yet." />
             <EditText android:id="@+id/responseRateInput" style="@style/TuningInputSigned" android:hint="mg/dL/min" />
+            <TextView style="@style/TuningParameterLabel" android:text="LOW_THRESHOLD (default 70 mg/dL)" />
+            <TextView style="@style/TuningParameterHelp" android:text="Glucose at or below this value counts as low for a logged correction - same 70 mg/dL line the chart and red-alert logic already use." />
+            <EditText android:id="@+id/lowThresholdInput" style="@style/TuningInput" android:hint="mg/dL" />
+            <TextView style="@style/TuningParameterLabel" android:text="LOW_CORRECTION_WINDOW (default 20 min)" />
+            <TextView style="@style/TuningParameterHelp" android:text="How long after a logged low-side correction (fast carbs) Ahead waits before checking whether glucose has started rising - much shorter than CORRECTION_WINDOW since carbs act faster than insulin." />
+            <EditText android:id="@+id/lowCorrectionWindowInput" style="@style/TuningInput" android:hint="minutes" />
+            <TextView style="@style/TuningParameterLabel" android:text="LOW_CORRECTION_RESPONSE_RATE_THRESHOLD (default +1.0 mg/dL/min)" />
+            <TextView style="@style/TuningParameterHelp" android:text="How positive the rate of change must be, by the end of LOW_CORRECTION_WINDOW, to count as &quot;rising&quot; even if glucose hasn't climbed back above LOW_THRESHOLD yet." />
+            <EditText android:id="@+id/lowResponseRateInput" style="@style/TuningInputSigned" android:hint="mg/dL/min" />
         </LinearLayout>
 
         <Button

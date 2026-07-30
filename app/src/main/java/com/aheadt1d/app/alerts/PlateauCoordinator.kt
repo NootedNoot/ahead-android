@@ -26,6 +26,9 @@ object PlateauCoordinator {
     private const val KEY_PLATEAU_LAST_FIRED_AT = "plateau_last_fired_at_ms"
     private const val KEY_CORRECTION_LOGGED_AT = "correction_logged_at_ms"
     private const val KEY_CORRECTION_WINDOW_NOTIFIED = "correction_window_notified"
+    private const val KEY_CORRECTION_DIRECTION = "correction_direction"
+    private const val DIRECTION_LOW = "low"
+    private const val DIRECTION_HIGH = "high"
 
     /** Synchronized: same reasoning as AlertCoordinator.evaluate - the
      *  read-decide-persist sequence must be atomic so two concurrent callers
@@ -49,6 +52,12 @@ object PlateauCoordinator {
      * tracking always starts from when the correction actually happened, not
      * necessarily when this function runs.
      *
+     * Direction (high vs low) is inferred from glucose AT LOGGING TIME, not
+     * stored per-event - a "Correction" tag means insulin above highThreshold
+     * and fast carbs below lowThreshold, and the two can never overlap since
+     * lowThreshold < highThreshold. Logging while in-range (neither) starts
+     * no window - there's nothing to check a response against.
+     *
      * @Synchronized for the same reason as evaluate() - both read-decide-
      * write against the same prefs file, and this can run concurrently with
      * a Worker-triggered evaluate() call (a user can tap "log correction"
@@ -61,29 +70,52 @@ object PlateauCoordinator {
         tuning: PlateauTuningParameters = PlateauTuningPrefs.load(context),
     ) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val existingLoggedAt = prefs.getLong(KEY_CORRECTION_LOGGED_AT, 0L)
-        val windowStillOpen = existingLoggedAt != 0L &&
-            (timestamp - existingLoggedAt) < tuning.correctionWindowMinutes * 60_000L
         val currentValue = LatestTrendRepository.latestRawReading.value?.value
-        val stillElevated = currentValue != null && currentValue >= tuning.highThreshold
+        val isLowNow = currentValue != null && currentValue <= tuning.lowThreshold
+        val isHighNow = currentValue != null && currentValue >= tuning.highThreshold
 
-        if (windowStillOpen && stillElevated) {
+        val existingLoggedAt = prefs.getLong(KEY_CORRECTION_LOGGED_AT, 0L)
+        val existingDirection = prefs.getString(KEY_CORRECTION_DIRECTION, null)
+        val windowMinutes = if (existingDirection == DIRECTION_LOW) {
+            tuning.lowCorrectionWindowMinutes
+        } else {
+            tuning.correctionWindowMinutes
+        }
+        val windowStillOpen = existingLoggedAt != 0L &&
+            (timestamp - existingLoggedAt) < windowMinutes * 60_000L
+        // "Still matching" means glucose is currently on the SAME side the
+        // open window is tracking - a low-window correction repeated while
+        // now merely high (or vice versa) isn't a repeat of the same episode.
+        val stillMatchingDirection = when (existingDirection) {
+            DIRECTION_LOW -> isLowNow
+            DIRECTION_HIGH -> isHighNow
+            else -> false
+        }
+
+        if (windowStillOpen && stillMatchingDirection) {
             // Purely informational/awareness per spec - no dosing guidance,
             // no judgment language. Leaves the ORIGINAL window's anchor
             // untouched: "while the first CORRECTION_WINDOW is still open."
             if (!CheckNowSuppression.isSuppressed()) {
                 val minutesSinceFirst = (timestamp - existingLoggedAt) / 60_000L
-                AlertNotifier.showRepeatCorrectionAlert(context, minutesSinceFirst)
+                AlertNotifier.showRepeatCorrectionAlert(context, minutesSinceFirst, isLow = existingDirection == DIRECTION_LOW)
             }
             return
         }
 
-        // Either no window was open, the prior one has aged out past
-        // correctionWindowMinutes, or glucose already isn't elevated
-        // (nothing meaningful to compare a repeat correction against) -
-        // either way, this correction starts a fresh tracking window.
+        // Either no window was open, the prior one has aged out, or glucose
+        // is no longer on the same side as the open window - either way,
+        // this correction starts a fresh tracking window, in whichever
+        // direction glucose is in RIGHT NOW. In-range (neither low nor high)
+        // opens nothing - there's no elevated/low episode to compare against.
+        val newDirection = when {
+            isLowNow -> DIRECTION_LOW
+            isHighNow -> DIRECTION_HIGH
+            else -> return
+        }
         prefs.edit {
             putLong(KEY_CORRECTION_LOGGED_AT, timestamp)
+            putString(KEY_CORRECTION_DIRECTION, newDirection)
             putBoolean(KEY_CORRECTION_WINDOW_NOTIFIED, false)
         }
     }
@@ -165,10 +197,26 @@ object PlateauCoordinator {
         if (loggedAt == 0L) return
         if (prefs.getBoolean(KEY_CORRECTION_WINDOW_NOTIFIED, false)) return
 
+        // Direction was fixed at logging time (see onCorrectionLogged) - a
+        // missing key only happens for state persisted before this field
+        // existed, which "high" (the original-only direction) reads as a
+        // no-op default.
+        val isLow = prefs.getString(KEY_CORRECTION_DIRECTION, DIRECTION_HIGH) == DIRECTION_LOW
+
         val currentValue = points.maxByOrNull { it.time }?.sgv
         val currentRate = HealthConnectManager.calculateRatePerMinute(points)
 
-        when (
+        val outcome = if (isLow) {
+            CorrectionResponseMath.evaluateLow(
+                correctionLoggedAt = loggedAt,
+                now = System.currentTimeMillis(),
+                windowMinutes = tuning.lowCorrectionWindowMinutes.toLong(),
+                currentValue = currentValue,
+                currentRatePerMinute = currentRate,
+                lowThreshold = tuning.lowThreshold,
+                responseRateThreshold = tuning.lowResponseRateThreshold,
+            )
+        } else {
             CorrectionResponseMath.evaluate(
                 correctionLoggedAt = loggedAt,
                 now = System.currentTimeMillis(),
@@ -178,23 +226,28 @@ object PlateauCoordinator {
                 highThreshold = tuning.highThreshold,
                 responseRateThreshold = tuning.correctionResponseRateThreshold,
             )
-        ) {
+        }
+
+        when (outcome) {
             CorrectionResponseMath.Outcome.WINDOW_OPEN -> Unit // still waiting
             CorrectionResponseMath.Outcome.RESPONDING_OR_RESOLVED -> {
                 // Worked (or resolved on its own) - stop tracking silently,
                 // no notification needed. Also clears the anchor so a later
-                // correction doesn't get misread as "repeat, still elevated"
-                // against an episode that's already resolved.
+                // correction doesn't get misread as "repeat, still
+                // elevated/low" against an episode that's already resolved.
                 prefs.edit {
                     remove(KEY_CORRECTION_LOGGED_AT)
                     remove(KEY_CORRECTION_WINDOW_NOTIFIED)
+                    remove(KEY_CORRECTION_DIRECTION)
                 }
             }
             CorrectionResponseMath.Outcome.NOT_RESPONDING -> {
                 if (currentValue != null && !CheckNowSuppression.isSuppressed()) {
                     val minutesSinceCorrection = (System.currentTimeMillis() - loggedAt) / 60_000L
-                    val plateauActive = prefs.getBoolean(KEY_PLATEAU_ACTIVE, false)
-                    AlertNotifier.showCorrectionNotRespondingAlert(context, currentValue, minutesSinceCorrection, plateauActive)
+                    // Plateau (Gap 1) is high-only, so this is only ever
+                    // meaningful to attach on the high-side path.
+                    val plateauActive = !isLow && prefs.getBoolean(KEY_PLATEAU_ACTIVE, false)
+                    AlertNotifier.showCorrectionNotRespondingAlert(context, currentValue, minutesSinceCorrection, plateauActive, isLow = isLow)
                 }
                 // Flag as notified but deliberately keep KEY_CORRECTION_LOGGED_AT -
                 // a correction logged shortly after this should still read as

@@ -252,21 +252,36 @@ object AlertNotifier {
     }
 
     /**
-     * Gap 2 (correction not responding): fires once a CORRECTION_WINDOW has
-     * elapsed since a logged correction with glucose still >= HIGH_THRESHOLD
-     * and no meaningful downward rate. Neutral, non-diagnostic wording -
-     * flags it, doesn't explain it or suggest a dose. [plateauActive] ties
-     * the message to an already-flagged plateau when one is active, per the
-     * spec's "escalatory relative to Gap 1, not a replacement" framing.
+     * Gap 2 (correction not responding): fires once a correction-response
+     * window has elapsed with glucose still on the wrong side of threshold
+     * and no meaningful rate in the expected direction - >= HIGH_THRESHOLD
+     * with no downward rate for a high-side correction (insulin), or <=
+     * LOW_THRESHOLD with no upward rate for a low-side one (fast carbs, see
+     * [isLow]). Neutral, non-diagnostic wording - flags it, doesn't explain
+     * it or suggest a dose. [plateauActive] ties the message to an
+     * already-flagged plateau when one is active (high-side only - there's
+     * no low-side plateau concept), per the spec's "escalatory relative to
+     * Gap 1, not a replacement" framing.
      */
-    fun showCorrectionNotRespondingAlert(context: Context, value: Int, minutesSinceCorrection: Long, plateauActive: Boolean) {
+    fun showCorrectionNotRespondingAlert(
+        context: Context,
+        value: Int,
+        minutesSinceCorrection: Long,
+        plateauActive: Boolean,
+        isLow: Boolean = false,
+    ) {
         AlertChannels.ensure(context)
 
+        val verb = if (isLow) "rising" else "trending down"
         val text = if (plateauActive) {
-            "Still $value mg/dL and hasn't started trending down since the correction was logged — part of the same elevated stretch flagged earlier."
+            "Still $value mg/dL and hasn't started $verb since the correction was logged — part of the same elevated stretch flagged earlier."
         } else {
-            "Still $value mg/dL and hasn't started trending down since the correction was logged."
+            "Still $value mg/dL and hasn't started $verb since the correction was logged."
         }
+        // Same low/high value-direction color convention showRedAlert/
+        // showYellowAlert already use - not a severity tier, just which side
+        // of range this is about.
+        val colorRes = if (isLow) R.color.low else R.color.high
 
         val notification = Notification.Builder(context, AlertChannels.YELLOW_CHANNEL_ID)
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, GlucoseTrendArrow.FLAT))
@@ -274,7 +289,7 @@ object AlertNotifier {
             .setContentText(text)
             .setCategory(Notification.CATEGORY_STATUS)
             .setAutoCancel(true)
-            .setColor(ContextCompat.getColor(context, R.color.high))
+            .setColor(ContextCompat.getColor(context, colorRes))
             .setContentIntent(mainActivityIntent(context, REQ_CORRECTION_CONTENT))
             .build()
 
@@ -291,10 +306,12 @@ object AlertNotifier {
      * with the not-responding message - most-recent-state-wins in one slot,
      * same pattern as the red/yellow/plateau alerts.
      */
-    fun showRepeatCorrectionAlert(context: Context, minutesSinceFirstCorrection: Long) {
+    fun showRepeatCorrectionAlert(context: Context, minutesSinceFirstCorrection: Long, isLow: Boolean = false) {
         AlertChannels.ensure(context)
 
-        val text = "A second correction was logged $minutesSinceFirstCorrection minutes after the first, while glucose was still elevated."
+        val direction = if (isLow) "low" else "elevated"
+        val text = "A second correction was logged $minutesSinceFirstCorrection minutes after the first, while glucose was still $direction."
+        val colorRes = if (isLow) R.color.low else R.color.high
 
         val notification = Notification.Builder(context, AlertChannels.YELLOW_CHANNEL_ID)
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
@@ -302,7 +319,7 @@ object AlertNotifier {
             .setContentText(text)
             .setCategory(Notification.CATEGORY_STATUS)
             .setAutoCancel(true)
-            .setColor(ContextCompat.getColor(context, R.color.high))
+            .setColor(ContextCompat.getColor(context, colorRes))
             .setContentIntent(mainActivityIntent(context, REQ_CORRECTION_CONTENT))
             .build()
 
