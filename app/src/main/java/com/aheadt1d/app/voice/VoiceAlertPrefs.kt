@@ -44,10 +44,13 @@ object VoiceAlertPrefs {
     private fun defaultFor(category: VoiceAlertCategory): Boolean = when (category) {
         VoiceAlertCategory.RED -> true
         VoiceAlertCategory.YELLOW -> true
-        VoiceAlertCategory.SIGNAL_LOST -> false
-        // Opt-in, same reasoning as SIGNAL_LOST: a sustained-state
-        // attention-please, not an active emergency, so it shouldn't speak
-        // aloud unless explicitly asked.
+        // Default ON since 2026-07-27: signal loss is now delivered as a
+        // genuine red-severity alert (AlertNotifier.showSignalLostAlert), so
+        // it should speak out of the box like RED does, not require an
+        // explicit opt-in the way the calmer PLATEAU/CORRECTION alerts do.
+        VoiceAlertCategory.SIGNAL_LOST -> true
+        // Opt-in: a sustained-state attention-please, not an active
+        // emergency, so it shouldn't speak aloud unless explicitly asked.
         VoiceAlertCategory.PLATEAU -> false
         VoiceAlertCategory.CORRECTION -> false
     }

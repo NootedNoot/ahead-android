@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import androidx.core.content.edit
+import com.aheadt1d.app.emergency.EmergencyAlertRepository
+import com.aheadt1d.app.emergency.EmergencyAlertScheduler
+import com.aheadt1d.app.emergency.EmergencyAlertType
+import com.aheadt1d.app.emergency.EmergencyContactsPrefs
 import com.aheadt1d.app.notifications.GlucoseDisplayState
 import com.aheadt1d.app.state.LatestTrend
 
@@ -91,22 +95,36 @@ object AlertCoordinator {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         when (state) {
             is GlucoseDisplayState.Reading -> {
-                // Fresh data: clear the signal-lost latch so a later dark period
-                // can announce again. Also unconditionally clear whatever's
-                // sitting in the shared yellow/signal-lost slot right now - the
+                // Fresh data after a dark period: clear the signal-lost latch
+                // (so a later blackout can announce again) and cancel whatever
+                // is sitting in the shared red/signal-lost slot right now - the
                 // severity-transition logic below only touches that slot on an
                 // actual severity CHANGE, but fresh data resuming at the exact
                 // same severity bucket it was in before going stale is common
                 // (the first fresh reading often lands before the backend's
                 // next classification cycle), and that transition logic would
-                // otherwise never fire, leaving stale "no new data" content
-                // sitting there indefinitely next to an already-live ongoing
-                // notification. Cancel first, unconditionally; handleReading
-                // below is still free to repost a fresh alert into the same
-                // slot right after, if one is actually warranted.
+                // otherwise never fire, leaving stale "no data" content sitting
+                // there indefinitely next to an already-live ongoing notification.
+                //
+                // ALSO reset KEY_LAST_SEVERITY to "none": while signal was lost
+                // we had no way to know what happened, so glucose reconnecting
+                // must always be announced fresh, at whatever severity it's
+                // actually AT right now - never left to the ordinary cooldown/
+                // peak-tracking heartbeat below, which assumes continuous
+                // confirmed monitoring and could otherwise stay silent for a
+                // still-critical reading just because it "isn't new" by date.
+                // Forcing prevSeverity to "none" makes the transition logic
+                // below treat ANY resumed severity (including a repeat red) as
+                // a brand-new episode - the same forceFire path a genuinely
+                // new episode already takes - so reconnecting to a still-red
+                // reading re-announces immediately instead of waiting out a
+                // cooldown calibrated for uninterrupted signal.
                 if (prefs.getBoolean(KEY_SIGNAL_LOST_FIRED, false)) {
-                    prefs.edit { putBoolean(KEY_SIGNAL_LOST_FIRED, false) }
-                    AlertNotifier.cancelYellow(context)
+                    prefs.edit {
+                        putBoolean(KEY_SIGNAL_LOST_FIRED, false)
+                        putString(KEY_LAST_SEVERITY, "none")
+                    }
+                    AlertNotifier.cancelRed(context)
                 }
                 handleReading(context, prefs, state, trend)
             }
@@ -116,23 +134,28 @@ object AlertCoordinator {
     }
 
     /**
-     * Data has gone stale. Never escalate to red (the projection that would
-     * justify it rests on a reading we can't confirm) and never cancel an
-     * in-flight red (losing signal isn't an all-clear). If the last CONFIRMED
-     * state was concerning, announce the signal loss once per dark period;
-     * otherwise stay quiet - the ongoing notification already shows "no new
-     * data". Leaves last_handled_* untouched so the Reading path resumes
-     * correctly when data returns.
+     * Data has gone stale. Never cancel an in-flight red (losing signal isn't
+     * an all-clear) - but DOES escalate itself, unconditionally, to the same
+     * red-tier delivery as a live glucose alert: a total data blackout is
+     * dangerous on its own, regardless of what the last confirmed severity
+     * was (the person could be dropping or climbing fast starting the moment
+     * signal was lost). Fires once per dark period; see the Reading branch of
+     * evaluate() for how the latch clears and forces a fresh announcement
+     * when data resumes. 2026-07-27: previously gated on prevSeverity being
+     * yellow/red and delivered as yellow-tier - see showSignalLostAlert's doc
+     * for the full reasoning on both changes.
      */
     private fun handleStale(context: Context, prefs: android.content.SharedPreferences, stale: GlucoseDisplayState.Stale) {
-        val prevSeverity = prefs.getString(KEY_LAST_SEVERITY, "none") ?: "none"
         val alreadyFired = prefs.getBoolean(KEY_SIGNAL_LOST_FIRED, false)
-        if (!alreadyFired && (prevSeverity == "red" || prevSeverity == "yellow")) {
+        if (!alreadyFired) {
             AlertNotifier.showSignalLostAlert(
-                context, stale.lastValue, stale.lastArrow, prevSeverity, stale.ageMinutes,
+                context, stale.lastValue, stale.lastArrow, stale.ageMinutes,
                 blockedReason = stale.blockedReason
             )
             prefs.edit { putBoolean(KEY_SIGNAL_LOST_FIRED, true) }
+            // Guarded by !alreadyFired, same as the alert itself - so this
+            // arms exactly once per dark period, not once per render tick.
+            scheduleEmergencyAlert(context, EmergencyAlertType.NO_DATA, stale.lastValue, rate = null)
         }
     }
 
@@ -260,7 +283,7 @@ object AlertCoordinator {
                 putBoolean(KEY_RED_LOW_SIDE, isLowSide(reading.value))
             }
         }
-        fireRedIfWarranted(context, prefs, reading, forceFire = newlyRed, now, lastRedFiredAt, suppressAlert)
+        fireRedIfWarranted(context, prefs, reading, forceFire = newlyRed, newlyRed = newlyRed, now, lastRedFiredAt, suppressAlert)
     }
 
     /** Same (severity="red", date) as last handled - a 60s-tick re-emission
@@ -275,18 +298,30 @@ object AlertCoordinator {
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
     ) {
-        fireRedIfWarranted(context, prefs, reading, forceFire = false, now, lastRedFiredAt, suppressAlert)
+        fireRedIfWarranted(context, prefs, reading, forceFire = false, newlyRed = false, now, lastRedFiredAt, suppressAlert)
     }
 
     /** Single decision point for both the transition and heartbeat paths -
      *  they differ only in whether a brand-new episode forces an immediate
      *  fire. Everything else (low-recovery suppression, high-side peak
-     *  tracking, the plain cooldown heartbeat) is identical either way. */
+     *  tracking, the plain cooldown heartbeat) is identical either way.
+     *
+     *  [newlyRed] is threaded through separately from [forceFire] (today
+     *  they're only ever true together, since handleRedTransition is the
+     *  only caller that ever passes forceFire=true) so the emergency-contact
+     *  timer below is gated on an explicit, self-documented "is this a brand
+     *  new episode" condition rather than an implicit coincidence with
+     *  forceFire's other meaning (post immediately). It must NEVER arm on a
+     *  cooldown/peak-tracking heartbeat repost of an already-ongoing episode -
+     *  RED_REALERT_COOLDOWN_MS happens to also be 15 minutes, so if every
+     *  repost rearmed the clock, an unresolved crisis would defer the auto-
+     *  text forever instead of ever actually reaching the emergency contact. */
     private fun fireRedIfWarranted(
         context: Context,
         prefs: SharedPreferences,
         reading: GlucoseDisplayState.Reading,
         forceFire: Boolean,
+        newlyRed: Boolean,
         now: Long,
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
@@ -313,6 +348,7 @@ object AlertCoordinator {
             if ((forceFire || recoveryJustStopped || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
                 AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
+                if (newlyRed) scheduleEmergencyAlert(context, EmergencyAlertType.LOW, value, rate)
             }
             return
         }
@@ -326,7 +362,22 @@ object AlertCoordinator {
         if ((forceFire || rearm.exceededPeak || rearm.climbingBack || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
             AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false)
             prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
+            if (newlyRed) scheduleEmergencyAlert(context, EmergencyAlertType.HIGH, value, rate)
         }
+    }
+
+    /** Arms the 15-minute emergency-contact timer for a genuinely new red
+     *  episode (or, via the NO_DATA overload in handleStale, a new dark
+     *  period). No-ops entirely when the feature is off, so a disabled
+     *  feature never even schedules a wakeup for nothing. */
+    private fun scheduleEmergencyAlert(context: Context, type: EmergencyAlertType, value: Int, rate: Double?) {
+        if (!EmergencyContactsPrefs.isEnabled(context)) return
+        // Read once, reused for both the message text and the actual alarm
+        // delay below - see EmergencyAlertScheduler.schedule's doc for why
+        // this can't be two independent reads.
+        val timeoutMinutes = EmergencyContactsPrefs.alertTimeoutMinutes(context)
+        val message = EmergencyAlertRepository.messageFor(context, type, value, rate, timeoutMinutes)
+        EmergencyAlertScheduler.schedule(context, type, message, timeoutMinutes)
     }
 
     /**

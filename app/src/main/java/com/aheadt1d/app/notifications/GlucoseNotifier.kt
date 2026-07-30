@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
+import androidx.core.content.ContextCompat
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
 import com.aheadt1d.app.state.staleGuidance
@@ -83,7 +84,7 @@ object GlucoseNotifier {
             Notification.VISIBILITY_PRIVATE
         }
 
-        return Notification.Builder(context, CHANNEL_ID)
+        val builder = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(icon)
             .setContentTitle(title)
             .setContentText(text)
@@ -93,7 +94,31 @@ object GlucoseNotifier {
             .setVisibility(visibility)
             .setCustomBigContentView(buildExpandedView(context, state))
             .setStyle(Notification.DecoratedCustomViewStyle())
-            .build()
+
+        // Accent color tracks the same severity tier the title's 🔴/⚠️ prefix
+        // already shows (LatestTrend.severity, i.e. trend-detector.js's
+        // classification, tolerance-gated in GlucoseStatusService) - so the
+        // shade's icon tint reads at a glance: green in range, amber caution,
+        // red urgent. Same accent colors the interrupting alerts already use
+        // (AlertNotifier sets R.color.low/high), so the two notification
+        // layers can never disagree about what a tier looks like. Display
+        // only - never carries meaning alone (prefix + text remain the
+        // accessible channel), and Stale/NoData stay neutral: an accent there
+        // would falsely suggest a known-current severity.
+        severityAccentRes(state)?.let { builder.setColor(ContextCompat.getColor(context, it)) }
+
+        return builder.build()
+    }
+
+    /** Accent color resource for the ongoing notification, or null for the
+     *  states (stale / no data) that should stay neutral. */
+    private fun severityAccentRes(state: GlucoseDisplayState): Int? {
+        val reading = state as? GlucoseDisplayState.Reading ?: return null
+        return when (reading.severity) {
+            "red" -> R.color.low
+            "yellow" -> R.color.high
+            else -> R.color.glucose_normal
+        }
     }
 
     private fun buildExpandedView(context: Context, state: GlucoseDisplayState): RemoteViews {

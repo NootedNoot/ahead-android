@@ -141,6 +141,13 @@
             android:name=".work.WatchdogAlarmReceiver"
             android:exported="false" />
 
+        <!-- Fires the emergency-contact auto-text if a red alert goes 15 min
+             unacknowledged (see EmergencyAlertScheduler). exported=false:
+             only our own PendingIntent ever triggers it. -->
+        <receiver
+            android:name=".emergency.EmergencyAlertReceiver"
+            android:exported="false" />
+
         <!-- CSV event export: hands a cache file to whatever share target the
              user picks (email, Drive, etc) without exposing the whole cache dir. -->
         <provider

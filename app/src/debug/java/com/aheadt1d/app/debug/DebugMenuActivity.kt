@@ -20,7 +20,10 @@ import com.aheadt1d.app.alerts.RedAlertActivity
 import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
 import com.aheadt1d.app.state.DebugGlucoseOverride
+import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.voice.VoiceAlertPrefs
+import com.aheadt1d.app.work.WorkScheduler
+import androidx.core.content.edit
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -93,6 +96,7 @@ class DebugMenuActivity : AppCompatActivity() {
             com.aheadt1d.app.events.EventTag.entries.map { "${it.glyph} ${it.label}" }
         )
 
+        setupResetAll()
         setupGlucoseInjection()
         setupNotificationTesting()
         setupChartTesting()
@@ -106,6 +110,42 @@ class DebugMenuActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshSystemState()
+    }
+
+    // ===================== Reset everything =====================
+
+    /**
+     * Broader than clearInjectionButton below: that one only clears the
+     * chart's DebugGlucoseOverride. A test session can also leave the alert
+     * and plateau coordinators' cooldown/latch state (last severity, red
+     * peak tracking, signal-lost-fired, plateau tier) sitting on whatever a
+     * forced injection last set, which would otherwise quietly skew how the
+     * NEXT real reading gets evaluated - e.g. a real fresh red reading not
+     * re-alerting because the coordinator still thinks it already fired for
+     * "this episode" from a test injection. This wipes all of it, including
+     * the last-known reading/trend itself (so nothing fake lingers as "the
+     * current value" even from before the next check runs), then forces one
+     * real Health Connect check immediately so the display doesn't just sit
+     * on "no data" until the next natural cycle.
+     */
+    private fun setupResetAll() {
+        findViewById<Button>(R.id.resetAllTestStateButton).setOnClickListener {
+            stopScenario(null)
+            DebugGlucoseOverride.clear()
+
+            AlertNotifier.cancelAlerts(this)
+            AlertNotifier.cancelPlateau(this)
+            AlertNotifier.cancelCorrection(this)
+
+            getSharedPreferences("ahead_alert_state", MODE_PRIVATE).edit { clear() }
+            getSharedPreferences("ahead_plateau_state", MODE_PRIVATE).edit { clear() }
+
+            LatestTrendRepository.clear(this)
+
+            refreshSystemState()
+            scenarioProgressText.text = "Test state cleared - alert/plateau history reset. Running a real check now..."
+            WorkScheduler.runOnce(applicationContext)
+        }
     }
 
     // ===================== Glucose injection =====================
@@ -339,9 +379,14 @@ class DebugMenuActivity : AppCompatActivity() {
                 this,
                 lastValue = 65,
                 lastArrow = GlucoseTrendArrow.fromRatePerMinute(-2.0),
-                lastSeverity = "red",
                 ageMinutes = 20
             )
+            // Signal-lost is now full red-tier delivery (see AlertNotifier) -
+            // directly start the takeover screen's signal-lost variant too,
+            // same reasoning as forceRedButton below: the FSI degrades to a
+            // plain heads-up while the device is already in active use,
+            // which is exactly the state you're in while testing from here.
+            startActivity(RedAlertActivity.createSignalLostIntent(this, 65, GlucoseTrendArrow.fromRatePerMinute(-2.0), 20))
             afterForcedAlert()
         }
         findViewById<Button>(R.id.cancelAlertsButton).setOnClickListener {

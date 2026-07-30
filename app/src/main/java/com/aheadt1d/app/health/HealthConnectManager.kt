@@ -35,6 +35,17 @@ object HealthConnectManager {
     fun getClientOrNull(context: Context): HealthConnectClient? =
         if (isAvailable(context)) HealthConnectClient.getOrCreate(context) else null
 
+    /** Whether a glucose read can actually succeed right now - not just
+     *  whether the SDK is available, but whether this app currently holds
+     *  the read-glucose grant. Deliberately narrower than GlucoseCheckRunner's
+     *  ALL_PERMISSIONS check (which also requires READ_HEALTH_DATA_IN_BACKGROUND,
+     *  only needed by a background execution context): callers running in the
+     *  foreground, like MainActivity's own chart read, only need this one. */
+    suspend fun canReadGlucose(context: Context): Boolean {
+        val client = getClientOrNull(context) ?: return false
+        return READ_GLUCOSE_PERMISSION in client.permissionController.getGrantedPermissions()
+    }
+
     /**
      * Shared by GlucoseCheckWorker (backend upload) and the chart (on-device
      * display) - both just want "the last N minutes of readings" and neither

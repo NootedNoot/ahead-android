@@ -89,6 +89,7 @@ class GlucoseStatusService : Service() {
         val freshlyStarted = scope == null
         if (freshlyStarted) {
             val initialState = toDisplayState(
+                this,
                 LatestTrendRepository.latestRawReading.value,
                 LatestTrendRepository.latestTrend.value,
                 LatestTrendRepository.readBlocked.value,
@@ -205,7 +206,7 @@ class GlucoseStatusService : Service() {
     // other way; this try/catch is preventing it in the first place.
     private fun render(raw: RawReading?, trend: LatestTrend?, blocked: ReadBlockedReason?) {
         try {
-            val state = toDisplayState(raw, trend, blocked)
+            val state = toDisplayState(this, raw, trend, blocked)
 
             // Must run BEFORE the signature early-return below: the coordinator's
             // red re-alert cooldown depends on being called on every 60s tick,
@@ -229,101 +230,6 @@ class GlucoseStatusService : Service() {
             if (e is kotlinx.coroutines.CancellationException) throw e
             Log.w(TAG, "render: failed - notification/alert skipped this cycle, will retry next tick", e)
         }
-    }
-
-    private fun toDisplayState(raw: RawReading?, trend: LatestTrend?, blocked: ReadBlockedReason?): GlucoseDisplayState {
-        if (raw == null) return GlucoseDisplayState.NoData
-
-        // Staleness routes through the shared isStale() (state package) - the
-        // same rule MainActivity and the wizard use - so the two surfaces can
-        // never disagree about the boundary.
-        if (isStale(this, raw)) {
-            return GlucoseDisplayState.Stale(
-                lastValue = raw.value,
-                lastReadingTime = raw.time,
-                ageMinutes = minutesSinceReading(raw) ?: 0,
-                lastArrow = GlucoseTrendArrow.fromRatePerMinute(raw.ratePerMinute),
-                blockedReason = blocked
-            )
-        }
-
-        // Primary: rate calculated on-device from the two most recent consecutive
-        // Health Connect readings. Independent of the backend - never stale from
-        // dedup or network issues.
-        // Fallback: backend trend rate, but only trusted when its scored timestamp
-        // is close enough to this raw reading's time (within tolerance) - if it's
-        // stale/dedup'd its direction could be hours out of date.
-        // When neither source has a rate, null → fromRatePerMinute → FLAT.
-        // Rate comes from the shared effectiveRatePerMinute() - the same
-        // function MainActivity displays from, so the notification and the
-        // main screen can never disagree about the rate for one check cycle.
-        // The same tolerance gate covers severity/projection: only trust
-        // backend fields scored around this same reading.
-        val trendIsCurrent = trend != null && abs(trend.date - raw.time) <= TREND_MATCH_TOLERANCE_MS
-
-        val rate = effectiveRatePerMinute(raw, trend)
-
-        // Local, client-side 15-min-ahead projection from this poll's own
-        // raw value/rate - independent of the backend. Used only as a
-        // fallback below, when the backend's trend hasn't caught up yet.
-        val localProjected = rate?.let { (raw.value + it * 15).roundToInt() }
-
-        // Hard safety floor: an actual reading this low is RED regardless of
-        // what the backend's trend/projection says (mirrors SEVERE_LOW_RED_FLOOR
-        // in trend-detector.js and GlucoseSeverity.kt's display floor).
-        val finalSeverity = if (raw.value <= 60) {
-            "red"
-        } else if (trendIsCurrent) {
-            trend?.severity
-        } else {
-            // Backend classification only runs on GlucoseCheckWorker's ~15-min
-            // WorkManager cadence (true 5-min periodic work isn't available on
-            // Android) or a manual Check Now - this poll runs every 5 min, so a
-            // fast-moving crossing can otherwise sit unclassified for up to a
-            // full Worker cycle. Falls back to a local yellow-only nudge using
-            // the same 15-min projection shape, and both the projection AND
-            // rate default thresholds trend-detector.js uses
-            // (YELLOW_PROJECTED_LOW/HIGH, YELLOW_RATE_FALLING/RISING - kept in
-            // sync by hand, no shared source of truth across the two repos).
-            //
-            // Deliberately capped at yellow, never red: the backend's red path
-            // has noise-suppression this simple straight-line projection
-            // doesn't (assessRateTrajectory dampens/suppresses on a single noisy
-            // reading before trusting a RED escalation) - a false-positive
-            // full-screen takeover off one bad Health Connect point would be a
-            // worse failure than a several-minute-late yellow. The raw.value<=60
-            // hard floor above already covers the one local-only RED case that
-            // matters most (a genuinely severe low), independent of the backend.
-            localFallbackYellowSeverity(localProjected, rate)
-        }
-
-        return GlucoseDisplayState.Reading(
-            value = raw.value,
-            arrow = GlucoseTrendArrow.fromRatePerMinute(rate),
-            readingTime = raw.time,
-            deltaFromPrevious = raw.deltaFromPrevious,
-            trendIsComputed = rate != null,
-            severity = finalSeverity,
-            // Backend's own 15-min projection when it's current; otherwise the
-            // local fallback projection (so the alert/notification text shown
-            // for a locally-detected yellow has a real number, not "trending
-            // out of range") - never both, never stale-backend-mixed-with-local.
-            projected = if (trendIsCurrent) trend?.projected else localProjected,
-            projectedExtended = if (trendIsCurrent) trend?.projectedExtended else null,
-            ratePerMinute = rate
-        )
-    }
-
-    /** See toDisplayState's fallback branch above for why this is yellow-only.
-     *  Rate is checked first, independent of projection - mirrors
-     *  trend-detector.js's classifySeverity ordering (rate escalation before
-     *  the projection check), so a fast-moving crossing isn't missed here just
-     *  because it hasn't been caught by the (possibly local, less precise)
-     *  15-min projection yet. */
-    private fun localFallbackYellowSeverity(projected: Int?, rate: Double?): String? {
-        if (rate != null && (rate <= LOCAL_YELLOW_RATE_FALLING || rate >= LOCAL_YELLOW_RATE_RISING)) return "yellow"
-        if (projected == null) return null
-        return if (projected <= LOCAL_YELLOW_PROJECTED_LOW || projected >= LOCAL_YELLOW_PROJECTED_HIGH) "yellow" else null
     }
 
     /** Exact reading timestamp is part of the signature (not just value/arrow)
@@ -379,6 +285,151 @@ class GlucoseStatusService : Service() {
         // hand-synced scope note as the projection thresholds above.
         private const val LOCAL_YELLOW_RATE_FALLING = -1.5
         private const val LOCAL_YELLOW_RATE_RISING = 2.5
+
+        // Companion (not instance-scoped) so refreshNotification below can call
+        // it without a live service instance - see refreshNotification's doc
+        // comment for why that matters. Takes context explicitly instead of an
+        // implicit Service `this`; behavior is unchanged from when this lived
+        // as an instance method.
+        private fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, blocked: ReadBlockedReason?): GlucoseDisplayState {
+            if (raw == null) return GlucoseDisplayState.NoData
+
+            // Staleness routes through the shared isStale() (state package) - the
+            // same rule MainActivity and the wizard use - so the two surfaces can
+            // never disagree about the boundary.
+            if (isStale(context, raw)) {
+                return GlucoseDisplayState.Stale(
+                    lastValue = raw.value,
+                    lastReadingTime = raw.time,
+                    ageMinutes = minutesSinceReading(raw) ?: 0,
+                    lastArrow = GlucoseTrendArrow.fromRatePerMinute(raw.ratePerMinute),
+                    blockedReason = blocked
+                )
+            }
+
+            // Primary: rate calculated on-device from the two most recent consecutive
+            // Health Connect readings. Independent of the backend - never stale from
+            // dedup or network issues.
+            // Fallback: backend trend rate, but only trusted when its scored timestamp
+            // is close enough to this raw reading's time (within tolerance) - if it's
+            // stale/dedup'd its direction could be hours out of date.
+            // When neither source has a rate, null → fromRatePerMinute → FLAT.
+            // Rate comes from the shared effectiveRatePerMinute() - the same
+            // function MainActivity displays from, so the notification and the
+            // main screen can never disagree about the rate for one check cycle.
+            // The same tolerance gate covers severity/projection: only trust
+            // backend fields scored around this same reading.
+            val trendIsCurrent = trend != null && abs(trend.date - raw.time) <= TREND_MATCH_TOLERANCE_MS
+
+            val rate = effectiveRatePerMinute(raw, trend)
+
+            // Local, client-side 15-min-ahead projection from this poll's own
+            // raw value/rate - independent of the backend. Used only as a
+            // fallback below, when the backend's trend hasn't caught up yet.
+            val localProjected = rate?.let { (raw.value + it * 15).roundToInt() }
+
+            // Hard safety floor: an actual reading this low is RED regardless of
+            // what the backend's trend/projection says (mirrors SEVERE_LOW_RED_FLOOR
+            // in trend-detector.js and GlucoseSeverity.kt's display floor).
+            val finalSeverity = if (raw.value <= 60) {
+                "red"
+            } else if (trendIsCurrent) {
+                trend?.severity
+            } else {
+                // Backend classification only runs on GlucoseCheckWorker's ~15-min
+                // WorkManager cadence (true 5-min periodic work isn't available on
+                // Android) or a manual Check Now - this poll runs every 5 min, so a
+                // fast-moving crossing can otherwise sit unclassified for up to a
+                // full Worker cycle. Falls back to a local yellow-only nudge using
+                // the same 15-min projection shape, and both the projection AND
+                // rate default thresholds trend-detector.js uses
+                // (YELLOW_PROJECTED_LOW/HIGH, YELLOW_RATE_FALLING/RISING - kept in
+                // sync by hand, no shared source of truth across the two repos).
+                //
+                // Deliberately capped at yellow, never red: the backend's red path
+                // has noise-suppression this simple straight-line projection
+                // doesn't (assessRateTrajectory dampens/suppresses on a single noisy
+                // reading before trusting a RED escalation) - a false-positive
+                // full-screen takeover off one bad Health Connect point would be a
+                // worse failure than a several-minute-late yellow. The raw.value<=60
+                // hard floor above already covers the one local-only RED case that
+                // matters most (a genuinely severe low), independent of the backend.
+                localFallbackYellowSeverity(localProjected, rate)
+            }
+
+            return GlucoseDisplayState.Reading(
+                value = raw.value,
+                arrow = GlucoseTrendArrow.fromRatePerMinute(rate),
+                readingTime = raw.time,
+                deltaFromPrevious = raw.deltaFromPrevious,
+                trendIsComputed = rate != null,
+                severity = finalSeverity,
+                // Backend's own 15-min projection when it's current; otherwise the
+                // local fallback projection (so the alert/notification text shown
+                // for a locally-detected yellow has a real number, not "trending
+                // out of range") - never both, never stale-backend-mixed-with-local.
+                projected = if (trendIsCurrent) trend?.projected else localProjected,
+                projectedExtended = if (trendIsCurrent) trend?.projectedExtended else null,
+                ratePerMinute = rate
+            )
+        }
+
+        /** See toDisplayState's fallback branch above for why this is yellow-only.
+         *  Rate is checked first, independent of projection - mirrors
+         *  trend-detector.js's classifySeverity ordering (rate escalation before
+         *  the projection check), so a fast-moving crossing isn't missed here just
+         *  because it hasn't been caught by the (possibly local, less precise)
+         *  15-min projection yet. */
+        private fun localFallbackYellowSeverity(projected: Int?, rate: Double?): String? {
+            if (rate != null && (rate <= LOCAL_YELLOW_RATE_FALLING || rate >= LOCAL_YELLOW_RATE_RISING)) return "yellow"
+            if (projected == null) return null
+            return if (projected <= LOCAL_YELLOW_PROJECTED_LOW || projected >= LOCAL_YELLOW_PROJECTED_HIGH) "yellow" else null
+        }
+
+        /**
+         * Refreshes the persistent status notification (and re-evaluates
+         * AlertCoordinator) directly from whatever LatestTrendRepository
+         * currently holds - independent of whether this service instance is
+         * alive. Both used to only happen inside a live service's render()
+         * loop, which observes the repository's Flows; GlucoseCheckWorker's
+         * watchdog run (and the service's own resurrection attempt via
+         * ensureRunning()) write fresh data into that repository too, but
+         * ensureRunning() can silently fail to actually restart a dead
+         * foreground service (starting an FGS from a background WorkManager
+         * context is restricted on API 31+ and the failure is swallowed - see
+         * ensureRunning's doc comment). When that happens, nothing turned the
+         * Worker's fresh data into an updated notification until the user
+         * opened the app (a real foreground launch, the one start path
+         * Android never restricts) - matching the reported bug exactly.
+         *
+         * Called unconditionally from GlucoseCheckRunner.run() after every
+         * check cycle, so the notification is never more than one cycle
+         * behind the CGM regardless of the foreground service's actual
+         * process state. If the service also happens to be alive, its own
+         * render() loop will react to the same repository update and post
+         * the identical content again shortly after - a harmless redundant
+         * notify(), not a visible duplicate (same notification ID).
+         */
+        fun refreshNotification(context: Context) {
+            val raw = LatestTrendRepository.latestRawReading.value
+            val trend = LatestTrendRepository.latestTrend.value
+            val blocked = LatestTrendRepository.readBlocked.value
+            val state = toDisplayState(context, raw, trend, blocked)
+
+            AlertCoordinator.evaluate(context, state, trend)
+
+            if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+                // Defensive: guarantees the channel exists even if this fires
+                // before the service has ever been created once (channel
+                // creation is idempotent and persists independent of service
+                // lifecycle once registered).
+                GlucoseNotifier.createChannel(context)
+                NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, GlucoseNotifier.buildNotification(context, state))
+                Log.d(TAG, "refreshNotification: notification re-posted for $state")
+            } else {
+                Log.w(TAG, "refreshNotification: POST_NOTIFICATIONS not granted - notification NOT updated")
+            }
+        }
 
         /**
          * Best-effort: starting a foreground service can throw

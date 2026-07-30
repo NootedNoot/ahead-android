@@ -77,6 +77,22 @@
                 android:layout_height="wrap_content" />
         </LinearLayout>
 
+        <!-- Re-checked on every onResume() against the REAL current SEND_SMS
+             grant, since it can be revoked externally (system Settings) at
+             any time without this screen knowing. GONE when the master
+             switch is off - nothing to report while the feature isn't even
+             active. Tappable when it's showing the "revoked" warning, to
+             jump straight back into the same permission-request flow. -->
+        <TextView
+            android:id="@+id/smsPermissionStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:padding="10dp"
+            android:background="@drawable/card_background"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
         <!-- Your name + cooldown -->
         <LinearLayout
             android:id="@+id/settingsCard"
@@ -100,6 +116,23 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:inputType="textPersonName"
+                android:textColor="@color/text_primary"
+                android:textColorHint="@color/muted" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="@string/emergency_alert_timeout_label"
+                android:textColor="@color/text_primary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+            <EditText
+                android:id="@+id/alertTimeoutInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:inputType="number"
                 android:textColor="@color/text_primary"
                 android:textColorHint="@color/muted" />
 

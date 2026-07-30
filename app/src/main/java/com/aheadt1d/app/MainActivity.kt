@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.widget.Button
@@ -18,8 +19,10 @@ import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.aheadt1d.app.alerts.AlertChannels
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
+import com.aheadt1d.app.health.NightscoutFallbackClient
 import com.aheadt1d.app.events.EventLogDialogs
 import com.aheadt1d.app.notifications.GlucoseStatusService
 import com.aheadt1d.app.setup.SetupPrefs
@@ -27,6 +30,7 @@ import com.aheadt1d.app.setup.SetupWizardActivity
 import com.aheadt1d.app.state.DebugGlucoseOverride
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
+import com.aheadt1d.app.state.RawReading
 import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.isStale
 import com.aheadt1d.app.state.staleGuidance
@@ -128,6 +132,13 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // Jumps straight to the DND-access settings screen - same destination
+        // the setup wizard's own DND step uses. Visibility itself is toggled
+        // in updateDndRegressionBanner(), called from onResume.
+        findViewById<View>(R.id.dndRegressionBanner).setOnClickListener {
+            runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+        }
+
         // No manual "Check now" control by design: the foreground service's own
         // 5-min loop is the single source of fresh data, backed by the exact-alarm
         // + WorkManager watchdogs. If a manual refresh ever felt necessary, that
@@ -221,6 +232,11 @@ class MainActivity : AppCompatActivity() {
     // resume would be obnoxious.
     override fun onResume() {
         super.onResume()
+        // Catches a DND-access revocation that happened while the app wasn't
+        // in the foreground (system "clean up permissions" prompt, an OEM
+        // auto-revoke, the user toggling it off in Settings) - the wizard
+        // only ever surfaces this once, during first-run setup.
+        updateDndRegressionBanner()
         if (!HealthConnectManager.isAvailable(this)) return
         lifecycleScope.launch {
             val client = HealthConnectClient.getOrCreate(this@MainActivity)
@@ -230,6 +246,11 @@ class MainActivity : AppCompatActivity() {
                 refreshChart()
             }
         }
+    }
+
+    private fun updateDndRegressionBanner() {
+        findViewById<View>(R.id.dndRegressionBanner).visibility =
+            if (AlertChannels.dndAccessRegressed(this)) View.VISIBLE else View.GONE
     }
 
     // GlucoseCheckWorker runs in this same process and publishes to
@@ -275,11 +296,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshChart() {
-        if (!HealthConnectManager.isAvailable(this)) return
         updateDebugOverrideBanner()
         lifecycleScope.launch {
-            cachedPoints = HealthConnectManager.readGlucosePoints(applicationContext, WINDOW_6H)
+            val canReadHealthConnect = HealthConnectManager.canReadGlucose(applicationContext)
+            cachedPoints = if (canReadHealthConnect) {
+                HealthConnectManager.readGlucosePoints(applicationContext, WINDOW_6H)
+            } else {
+                emptyList()
+            }
+
+            if (cachedPoints.isEmpty() && !canReadHealthConnect) {
+                // Health Connect itself can't be read right now (not
+                // installed, or this app's permission was revoked) - same
+                // fallback GlucoseCheckRunner uses for the notification/
+                // backend pipeline, so this screen's own chart/number don't
+                // sit blank while the notification elsewhere on the phone is
+                // already showing real data from the same underlying CGM.
+                cachedPoints = NightscoutFallbackClient.readGlucosePoints(WINDOW_6H)
+                Log.i(TAG, "refreshChart: Health Connect unavailable - using Nightscout fallback (${cachedPoints.size} point(s))")
+            }
+
             Log.d(TAG, "refreshChart: read ${cachedPoints.size} point(s), latest=${cachedPoints.lastOrNull()}")
+            syncRawReadingToRepository()
             renderCurrentValue()
             // Re-checked here too (not just from observeLatestTrend's reactive
             // collector) since staleness is a function of the clock, not just
@@ -290,6 +328,39 @@ class MainActivity : AppCompatActivity() {
             renderTrendState(LatestTrendRepository.latestTrend.value)
             renderChart()
         }
+    }
+
+    /**
+     * Closes a phase gap between this screen and the persistent notification:
+     * this poll and GlucoseStatusService's own 5-min check loop both read
+     * Health Connect independently, on unsynchronized timers (this one anchored
+     * to whenever the screen was opened, the service's to whenever it last
+     * started) - so it's routine for this poll to see a fresh CGM sync a few
+     * minutes before the service's own loop happens to tick. Previously that
+     * meant the number on this screen could be visibly ahead of what the
+     * notification showed, by up to a full cycle, purely from the two timers'
+     * offset - not from either being broken. Writing straight into
+     * LatestTrendRepository (the same store GlucoseCheckRunner writes to) and
+     * immediately refreshing the notification means whichever of the app's
+     * three Health Connect pollers (this one, the service loop, the Worker
+     * watchdog) sees new data first is the one that updates it - the other two
+     * just no-op next time since nothing's newer.
+     */
+    private fun syncRawReadingToRepository() {
+        val latest = cachedPoints.lastOrNull() ?: return
+        val current = LatestTrendRepository.latestRawReading.value
+        if (current != null && latest.time.toEpochMilli() <= current.time) return
+
+        LatestTrendRepository.updateRawReading(
+            applicationContext,
+            RawReading(
+                value = latest.sgv,
+                time = latest.time.toEpochMilli(),
+                ratePerMinute = HealthConnectManager.calculateRatePerMinute(cachedPoints),
+                deltaFromPrevious = HealthConnectManager.calculateDelta(cachedPoints)
+            )
+        )
+        GlucoseStatusService.refreshNotification(applicationContext)
     }
 
     // The glucose number comes straight from Health Connect, not from waiting

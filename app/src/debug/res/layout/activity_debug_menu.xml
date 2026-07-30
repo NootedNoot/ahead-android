@@ -18,6 +18,14 @@
             android:textSize="20sp"
             android:textStyle="bold" />
 
+        <!-- ===================== Reset everything ===================== -->
+
+        <TextView style="@style/DebugSectionHeader" android:text="RESET" />
+        <TextView
+            style="@style/DebugLabel"
+            android:text="Clears ALL test state - injected data, forced alerts, alert/plateau cooldown history - then runs one real Health Connect check so the display repopulates from live data immediately." />
+        <Button android:id="@+id/resetAllTestStateButton" style="@style/DebugButton" android:text="Reset everything to normal" android:backgroundTint="@color/low" />
+
         <!-- ===================== Glucose injection ===================== -->
 
         <TextView style="@style/DebugSectionHeader" android:text="GLUCOSE INJECTION — MANUAL OVERRIDE" />

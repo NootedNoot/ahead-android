@@ -13,7 +13,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import com.aheadt1d.app.R
 import com.aheadt1d.app.emergency.EmergencyAlertRepository
@@ -35,11 +34,19 @@ import kotlinx.coroutines.launch
  * when the feature is enabled and at least one contact is configured, asks
  * "Send emergency alert to X?" before ever sending anything. Nothing here
  * sends silently - every SMS traces back to an explicit Yes tap.
+ *
+ * Two content modes, same screen: a live glucose reading ([createIntent]) or
+ * a signal-lost blackout ([createSignalLostIntent], see AlertNotifier's
+ * showSignalLostAlert). The signal-lost mode never shows a live glucose
+ * number or claims a severity - there isn't one to confirm - and hides the
+ * Emergency Contact button, since EmergencyAlertRepository only knows how to
+ * word a HIGH/LOW alert and neither is true here.
  */
 class RedAlertActivity : AppCompatActivity() {
 
     private var currentValue = 0
     private var currentRate: Double? = null
+    private var isSignalLostMode = false
 
     private val requestSmsPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -59,9 +66,12 @@ class RedAlertActivity : AppCompatActivity() {
         setContentView(R.layout.activity_red_alert)
 
         findViewById<Button>(R.id.dismissButton).setOnClickListener {
-            // Cancelling the notification here (not just finishing) is what
-            // stops any still-playing alert audio tied to it.
-            NotificationManagerCompat.from(this).cancel(AlertNotifier.RED_ALERT_NOTIFICATION_ID)
+            // AlertNotifier.cancelRed (not just NotificationManagerCompat's
+            // plain cancel) - it's also the one place a pending emergency-
+            // contact auto-text timer gets torn down, so an explicit dismiss
+            // here means Gma is NOT texted for this episode. Also stops any
+            // still-playing alert audio tied to the notification.
+            AlertNotifier.cancelRed(this)
             finish()
         }
 
@@ -79,6 +89,31 @@ class RedAlertActivity : AppCompatActivity() {
     }
 
     private fun bind(intent: Intent) {
+        isSignalLostMode = intent.getBooleanExtra(EXTRA_SIGNAL_LOST, false)
+        val headingView = findViewById<TextView>(R.id.alertHeadingText)
+
+        if (isSignalLostMode) {
+            val lastValue = intent.getIntExtra(EXTRA_VALUE, 0)
+            val ageMinutes = intent.getLongExtra(EXTRA_AGE_MINUTES, 0L)
+            val arrow = intent.getStringExtra(EXTRA_ARROW)?.let {
+                runCatching { GlucoseTrendArrow.valueOf(it) }.getOrNull()
+            } ?: GlucoseTrendArrow.FLAT
+            currentValue = lastValue
+            currentRate = null
+
+            headingView.setText(R.string.red_alert_signal_lost_heading)
+            // Deliberately NOT a glucose number here (see the class doc) - a
+            // glyph in the same giant/bold/red slot the live reading normally
+            // occupies, so the screen still reads as urgent at a glance
+            // without implying a confirmed current value.
+            findViewById<TextView>(R.id.alertValueText).text = "⚠"
+            findViewById<TextView>(R.id.alertTrendText).text = "Last known: $lastValue mg/dL ${arrow.label}"
+            findViewById<TextView>(R.id.alertProjectedText).text =
+                "${ageMinutes}m since the last reading — check your sensor or connection now"
+            return
+        }
+
+        headingView.setText(R.string.red_alert_heading)
         val value = intent.getIntExtra(EXTRA_VALUE, 0)
         val projected = if (intent.hasExtra(EXTRA_PROJECTED)) intent.getIntExtra(EXTRA_PROJECTED, 0) else null
         val rate = if (intent.hasExtra(EXTRA_RATE)) intent.getDoubleExtra(EXTRA_RATE, 0.0) else null
@@ -98,13 +133,21 @@ class RedAlertActivity : AppCompatActivity() {
     }
 
     /** Red fires for both a critically low and a critically high reading -
-     *  the same 70 mg/dL split the chart's low/high limit lines use. */
-    private fun alertType(): EmergencyAlertType =
-        if (currentValue <= LOW_HIGH_SPLIT) EmergencyAlertType.LOW else EmergencyAlertType.HIGH
+     *  the same 70 mg/dL split the chart's low/high limit lines use. Signal-
+     *  lost mode overrides both: there's no confirmed high/low to report,
+     *  only that the data feed itself stopped. */
+    private fun alertType(): EmergencyAlertType = when {
+        isSignalLostMode -> EmergencyAlertType.NO_DATA
+        currentValue <= LOW_HIGH_SPLIT -> EmergencyAlertType.LOW
+        else -> EmergencyAlertType.HIGH
+    }
 
     private fun refreshEmergencyButtonVisibility() {
         val button = findViewById<Button>(R.id.emergencyButton)
-        if (!EmergencyContactsPrefs.isEnabled(this)) {
+        // No confirmed high/low to report in signal-lost mode - see the class
+        // doc. Checked before the enabled/contacts lookup below so this mode
+        // never even flashes the button on before hiding it.
+        if (isSignalLostMode || !EmergencyContactsPrefs.isEnabled(this)) {
             button.visibility = android.view.View.GONE
             return
         }
@@ -153,7 +196,7 @@ class RedAlertActivity : AppCompatActivity() {
         }
         AlertDialog.Builder(this)
             .setTitle("SMS permission needed")
-            .setMessage(R.string.emergency_sms_rationale)
+            .setMessage(getString(R.string.emergency_sms_rationale, EmergencyContactsPrefs.alertTimeoutMinutes(this)))
             .setPositiveButton("Continue") { _, _ -> requestSmsPermission.launch(Manifest.permission.SEND_SMS) }
             .setNegativeButton("Cancel", null)
             .show()
@@ -161,12 +204,17 @@ class RedAlertActivity : AppCompatActivity() {
 
     private fun sendToEligibleContacts() {
         lifecycleScope.launch {
+            val type = alertType()
+            // No minutesUnacknowledged here - a manual tap is an in-the-moment
+            // confirmation, not a measured wait (that framing belongs to the
+            // automatic 15-min timeout - see EmergencyAlertScheduler).
+            val message = EmergencyAlertRepository.messageFor(this@RedAlertActivity, type, currentValue, currentRate, minutesUnacknowledged = null)
             val allContacts = EmergencyAlertRepository.contacts(this@RedAlertActivity).first()
             val eligible = EmergencyAlertRepository.eligibleContacts(this@RedAlertActivity, allContacts)
             var sentCount = 0
             for (contact in eligible) {
                 runCatching {
-                    EmergencyAlertRepository.send(this@RedAlertActivity, contact, alertType())
+                    EmergencyAlertRepository.sendMessage(this@RedAlertActivity, contact, type, message)
                     sentCount++
                 }.onFailure {
                     Toast.makeText(this@RedAlertActivity, getString(R.string.emergency_send_failed), Toast.LENGTH_LONG).show()
@@ -182,6 +230,9 @@ class RedAlertActivity : AppCompatActivity() {
         private const val EXTRA_VALUE = "value"
         private const val EXTRA_PROJECTED = "projected"
         private const val EXTRA_RATE = "rate"
+        private const val EXTRA_SIGNAL_LOST = "signal_lost"
+        private const val EXTRA_AGE_MINUTES = "age_minutes"
+        private const val EXTRA_ARROW = "arrow"
         private const val LOW_HIGH_SPLIT = 70
 
         fun createIntent(context: Context, value: Int, projected: Int?, rate: Double?): Intent =
@@ -192,5 +243,16 @@ class RedAlertActivity : AppCompatActivity() {
                     projected?.let { putExtra(EXTRA_PROJECTED, it) }
                     rate?.let { putExtra(EXTRA_RATE, it) }
                 }
+
+        /** The signal-lost variant of the same takeover screen - see the
+         *  class doc. [lastArrow] rides as its enum name (a plain String
+         *  extra) rather than needing GlucoseTrendArrow to be Parcelable. */
+        fun createSignalLostIntent(context: Context, lastValue: Int, lastArrow: GlucoseTrendArrow, ageMinutes: Long): Intent =
+            Intent(context, RedAlertActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(EXTRA_SIGNAL_LOST, true)
+                .putExtra(EXTRA_VALUE, lastValue)
+                .putExtra(EXTRA_ARROW, lastArrow.name)
+                .putExtra(EXTRA_AGE_MINUTES, ageMinutes)
     }
 }

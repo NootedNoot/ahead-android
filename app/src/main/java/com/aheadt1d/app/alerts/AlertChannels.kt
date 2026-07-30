@@ -30,12 +30,18 @@ import androidx.core.content.edit
  *
  * If the user later revokes policy access, the existing channel keeps
  * whatever bypass flag it has; there is no downward migration.
+ *
+ * Separately, [dndAccessRegressed] tracks whether policy access was ever
+ * observed granted and has since gone missing - see its doc for why a
+ * REGRESSION (as opposed to never having granted it) is what's worth
+ * surfacing to the user.
  */
 object AlertChannels {
     const val YELLOW_CHANNEL_ID = "glucose_alerts_yellow"
 
     private const val PREFS_NAME = "ahead_alert_channels"
     private const val KEY_RED_CHANNEL_ID = "red_channel_id"
+    private const val KEY_DND_EVER_GRANTED = "dnd_ever_granted"
     private const val DEFAULT_RED_CHANNEL_ID = "glucose_alerts_active"
     private const val TAG = "AlertChannels"
 
@@ -48,6 +54,16 @@ object AlertChannels {
      *  screen (that last one is what actually triggers the migration). */
     fun ensure(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
+
+        // Latches "this device has had DND access granted at least once" -
+        // read by dndAccessRegressed below. ensure() runs often enough (app
+        // start, every alert, return-from-settings) that this stays current
+        // without any dedicated polling.
+        if (nm.isNotificationPolicyAccessGranted) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+                putBoolean(KEY_DND_EVER_GRANTED, true)
+            }
+        }
 
         if (nm.getNotificationChannel(YELLOW_CHANNEL_ID) == null) {
             nm.createNotificationChannel(
@@ -99,5 +115,24 @@ object AlertChannels {
     private fun nextVersionedId(currentId: String): String {
         val version = Regex("_v(\\d+)$").find(currentId)?.groupValues?.get(1)?.toIntOrNull()
         return "${DEFAULT_RED_CHANNEL_ID}_v${(version ?: 1) + 1}"
+    }
+
+    /**
+     * True when DND access was observed granted at some point (per the latch
+     * in [ensure]) but is NOT granted right now - i.e. it REGRESSED, as
+     * distinct from never having been granted. A user who consciously skipped
+     * the setup wizard's DND step made that choice already; nagging them on
+     * every home-screen visit would just be alarm fatigue for a non-change.
+     * A user who granted it and then had it silently revoked (a "clean up
+     * permissions" system prompt, an OEM battery/permission auto-revoke,
+     * manually toggling it off) is the case actually worth surfacing, since
+     * it means a red alert could arrive muted with no warning.
+     */
+    fun dndAccessRegressed(context: Context): Boolean {
+        val everGranted = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_DND_EVER_GRANTED, false)
+        if (!everGranted) return false
+        val nm = context.getSystemService(NotificationManager::class.java)
+        return !nm.isNotificationPolicyAccessGranted
     }
 }

@@ -6,7 +6,15 @@ import androidx.core.content.edit
 /**
  * First-launch setup state. MainActivity checks isComplete() and bounces to
  * the wizard when it's false; the wizard sets it true on finish (or skip).
- * cgm_path just tailors the wizard copy - nothing downstream depends on it.
+ *
+ * cgm_path started out tailoring only the wizard's copy, but LatestTrendStore's
+ * staleThresholdMinutes() now also branches on it (Dexcom gets a tighter
+ * staleness cutoff than Juggluco/unsure, which have looser normal sync gaps) -
+ * 2026-07-28: a real user's path was recorded as "juggluco" from early setup
+ * testing despite running actual Dexcom apps, silently landing them on the
+ * looser default threshold with no in-app way to notice or correct it short of
+ * resetting the whole wizard. There's currently no settings screen to change
+ * this after setup - only DebugMenuActivity's "Reset setup wizard".
  */
 object SetupPrefs {
     const val PATH_DEXCOM = "dexcom"

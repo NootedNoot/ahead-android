@@ -14,10 +14,21 @@ object EmergencyContactsPrefs {
     private const val PREFS_NAME = "ahead_emergency_contacts"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_COOLDOWN_MINUTES = "cooldown_minutes"
+    private const val KEY_ALERT_TIMEOUT_MINUTES = "alert_timeout_minutes"
     private const val KEY_USER_NAME = "user_name"
     private const val KEY_LAST_SENT_PREFIX = "last_sent_"
 
     private const val DEFAULT_COOLDOWN_MINUTES = 15
+
+    // How long a red alert may go unacknowledged before the auto-text fires
+    // (EmergencyAlertScheduler/AlertCoordinator). A DIFFERENT concept from
+    // cooldownMinutes above despite sharing the same default number - that one
+    // paces repeat texts to the same contact after a send has already
+    // happened; this one is "how long do you get to dismiss it yourself
+    // first." Both are exposed as separate fields on the settings screen for
+    // exactly that reason - a single "cooldown" field would leave no way to
+    // control (or even see) this delay at all.
+    private const val DEFAULT_ALERT_TIMEOUT_MINUTES = 15L
 
     fun isEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_ENABLED, false)
 
@@ -30,6 +41,15 @@ object EmergencyContactsPrefs {
 
     fun setCooldownMinutes(context: Context, minutes: Int) {
         prefs(context).edit { putInt(KEY_COOLDOWN_MINUTES, minutes.coerceAtLeast(0)) }
+    }
+
+    fun alertTimeoutMinutes(context: Context): Long =
+        prefs(context).getLong(KEY_ALERT_TIMEOUT_MINUTES, DEFAULT_ALERT_TIMEOUT_MINUTES)
+
+    /** Floored at 1: zero would mean "auto-text instantly, no chance to
+     *  dismiss first," which defeats the whole point of the timer. */
+    fun setAlertTimeoutMinutes(context: Context, minutes: Long) {
+        prefs(context).edit { putLong(KEY_ALERT_TIMEOUT_MINUTES, minutes.coerceAtLeast(1)) }
     }
 
     /** Free-form name substituted into the SMS body ("[User's name]'s glucose..."). */

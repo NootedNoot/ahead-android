@@ -11,6 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
+import com.aheadt1d.app.emergency.EmergencyAlertScheduler
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
 import com.aheadt1d.app.notifications.NotificationIconFactory
 import com.aheadt1d.app.state.ReadBlockedReason
@@ -40,6 +41,7 @@ object AlertNotifier {
     private const val REQ_SIGNAL_LOST_CONTENT = 2104
     private const val REQ_PLATEAU_CONTENT = 2105
     private const val REQ_CORRECTION_CONTENT = 2106
+    private const val REQ_SIGNAL_LOST_FSI = 2107
 
     /**
      * @param recovering True only for a low-side red that's rising as
@@ -130,11 +132,18 @@ object AlertNotifier {
     }
 
     /**
-     * Fired when data goes stale while the last CONFIRMED reading was already
-     * concerning (yellow/red). Deliberately yellow-tier, never a red takeover:
-     * the projection that would justify red is built on a reading we can no
-     * longer confirm, so we warn ("you were heading somewhere bad and we've
-     * lost signal") rather than escalate on a guess. Reuses the yellow slot.
+     * Fired once glucose data has gone stale (see AlertCoordinator.handleStale) -
+     * unconditionally, regardless of what the last CONFIRMED severity was.
+     * RED-tier, same delivery as [showRedAlert]: the red/DND-bypassing channel,
+     * full-screen takeover, alarm-stream sound. 2026-07-27: previously
+     * yellow-tier and only fired if the last known reading was already
+     * concerning ("you were heading somewhere bad and we've lost signal,
+     * rather than escalate on a guess"). Reclassified because a total data
+     * blackout is dangerous on its own merits - the person could be dropping
+     * or climbing fast starting the MOMENT signal was lost, with zero
+     * indication, regardless of what the last confirmed value happened to be.
+     * Never claims a glucose number or severity, since none is confirmed -
+     * see RedAlertActivity.createSignalLostIntent's distinct "no data" screen.
      *
      * [blockedReason] is the runner's app-side diagnosis when one exists -
      * the guidance sentence (shared staleGuidance) then points at the app-side
@@ -145,34 +154,54 @@ object AlertNotifier {
         context: Context,
         lastValue: Int,
         lastArrow: GlucoseTrendArrow,
-        lastSeverity: String,
         ageMinutes: Long,
         blockedReason: ReadBlockedReason? = null,
     ) {
         AlertChannels.ensure(context)
-        val heading = if (lastSeverity == "red") "was heading into danger" else "was trending out of range"
 
-        val notification = Notification.Builder(context, AlertChannels.YELLOW_CHANNEL_ID)
+        // FLAG_UPDATE_CURRENT for the same reason showRedAlert's does: successive
+        // signal-lost intents are filterEquals-identical, so without it a cached
+        // PendingIntent would relaunch the takeover with the FIRST episode's values.
+        val fullScreenIntent = PendingIntent.getActivity(
+            context,
+            REQ_SIGNAL_LOST_FSI,
+            RedAlertActivity.createSignalLostIntent(context, lastValue, lastArrow, ageMinutes),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
-            .setContentTitle("⚠️ No new glucose data — ${ageMinutes}m")
-            .setContentText("Last reading $lastValue mg/dL ${lastArrow.label} $heading. ${staleGuidance(blockedReason)}")
-            .setCategory(Notification.CATEGORY_STATUS)
+            .setContentTitle("🔴 No new glucose data — ${ageMinutes}m")
+            .setContentText("Last reading $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. ${staleGuidance(blockedReason)}")
+            .setCategory(Notification.CATEGORY_ALARM)
+            // Same reasoning as showRedAlert: hiding the last-known number
+            // behind "notification hidden" would defeat the point of a
+            // takeover-tier alert.
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
-            .setColor(ContextCompat.getColor(context, R.color.high))
+            .setColor(ContextCompat.getColor(context, R.color.low))
             .setContentIntent(mainActivityIntent(context, REQ_SIGNAL_LOST_CONTENT))
+            .setFullScreenIntent(fullScreenIntent, true)
             .build()
 
-        notifyIfAllowed(context) { nm -> nm.notify(YELLOW_ALERT_NOTIFICATION_ID, notification) }
+        // Shares RED_ALERT_NOTIFICATION_ID with showRedAlert - deliberately: a
+        // live glucose-red notification left over from before the blackout
+        // started is now unconfirmed information anyway, so the more accurate
+        // "we don't actually know your current state" message should replace
+        // it rather than stack alongside it (same one-urgent-slot-at-a-time
+        // precedent as yellow/signal-lost sharing YELLOW_ALERT_NOTIFICATION_ID
+        // before this change).
+        notifyIfAllowed(context) { nm -> nm.notify(RED_ALERT_NOTIFICATION_ID, notification) }
 
         val spokenAdvice = when (blockedReason) {
             ReadBlockedReason.PERMISSION_MISSING -> "Ahead lost its Health Connect permission. Open the app to fix it."
             ReadBlockedReason.HC_UNAVAILABLE -> "Health Connect is unavailable. Open the Ahead app."
-            null -> "Check your sensor."
+            null -> "Check your sensor or connection now."
         }
         VoiceAlertEngine.speak(
             context,
             VoiceAlertCategory.SIGNAL_LOST,
-            "No new glucose data. Last reading $lastValue, $heading. $spokenAdvice"
+            "Urgent. No new glucose data for $ageMinutes minutes. Last reading was $lastValue. $spokenAdvice"
         )
     }
 
@@ -286,8 +315,15 @@ object AlertNotifier {
         NotificationManagerCompat.from(context).cancel(CORRECTION_ALERT_NOTIFICATION_ID)
     }
 
+    /** Every call site that clears the red slot is, by construction, the app
+     *  itself determining a red episode is no longer active (dismissed by the
+     *  user, downgraded, or auto-resolved after a signal-loss reconnect) - so
+     *  this is also the one place a pending emergency-contact auto-text timer
+     *  (see EmergencyAlertScheduler) should be torn down. Safe/no-op when
+     *  nothing is pending. */
     fun cancelRed(context: Context) {
         NotificationManagerCompat.from(context).cancel(RED_ALERT_NOTIFICATION_ID)
+        EmergencyAlertScheduler.cancel(context)
     }
 
     /** Just the shared yellow/signal-lost slot - deliberately narrower than
@@ -298,10 +334,8 @@ object AlertNotifier {
     }
 
     fun cancelAlerts(context: Context) {
-        NotificationManagerCompat.from(context).apply {
-            cancel(RED_ALERT_NOTIFICATION_ID)
-            cancel(YELLOW_ALERT_NOTIFICATION_ID)
-        }
+        cancelRed(context)
+        NotificationManagerCompat.from(context).cancel(YELLOW_ALERT_NOTIFICATION_ID)
     }
 
     private fun projectionLine(projected: Int?): String =

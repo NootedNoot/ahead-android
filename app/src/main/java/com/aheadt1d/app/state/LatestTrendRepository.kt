@@ -63,4 +63,22 @@ object LatestTrendRepository {
     fun updateReadBlocked(reason: ReadBlockedReason?) {
         _readBlocked.value = reason
     }
+
+    /** Debug-only: wipes every piece of state this repository holds, in
+     *  memory and on disk - not just the debug chart override. A test
+     *  injection (manual value, forced scenario, forced alert) can leave a
+     *  fake reading sitting here as "the latest known value" indefinitely,
+     *  since nothing else overwrites it until the next real check cycle
+     *  happens to run. Called from the debug menu's "Reset everything"
+     *  button, immediately followed by a forced real check so the display
+     *  repopulates from Health Connect right away instead of sitting on
+     *  "no data" until the next natural cycle. */
+    fun clear(context: Context) {
+        LatestTrendStore.clear(context.applicationContext)
+        RawReadingStore.clear(context.applicationContext)
+        _latestTrend.value = null
+        _latestRawReading.value = null
+        _lastCheckedAt.value = 0L
+        _readBlocked.value = null
+    }
 }

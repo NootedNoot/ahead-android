@@ -22,11 +22,18 @@ import org.json.JSONObject
 // Dexcom had ~2 min of real headroom and ordinary sync jitter produced false
 // "No new data" flickers - each of which is also a brief alert-blind window,
 // since severity evaluation stops while the state is Stale.
-//   Dexcom 18  = two missed 5-min cycles (15) + typical remaining pipeline lag.
+// 2026-07-28: widening to 18 traded too far the other way - a real gap sat
+// silent as a normal-looking reading for up to 18 minutes, which is what
+// prompted this note (a genuine Dexcom disconnect only got flagged at 16+
+// min in, well past what "3 missed readings" should mean). Re-tightened to
+// exactly 3 missed 5-min cycles: deliberately accepting back some of the
+// false-flicker risk described above in exchange for a disconnect never
+// silently sitting past 15 minutes.
+//   Dexcom 15  = exactly 3 missed 5-min cycles, no extra pipeline-lag padding.
 //   Default 22 = Juggluco's normal 10-15 min gaps (see HealthConnectManager's
 //                gap log) + worst-case 5-min read lag + sync latency.
 // A true outage is still declared well inside the runner's 45-min read window.
-const val STALE_THRESHOLD_DEXCOM_MINUTES = 18L
+const val STALE_THRESHOLD_DEXCOM_MINUTES = 15L
 const val STALE_THRESHOLD_DEFAULT_MINUTES = 22L
 
 /** The staleness cutoff for the currently configured CGM source. */
@@ -69,7 +76,7 @@ enum class ReadBlockedReason { PERMISSION_MISSING, HC_UNAVAILABLE }
 fun staleGuidance(reason: ReadBlockedReason?): String = when (reason) {
     ReadBlockedReason.PERMISSION_MISSING -> "Check Ahead's app permissions — Health Connect access was lost."
     ReadBlockedReason.HC_UNAVAILABLE -> "Health Connect isn't available — open Ahead to reconnect."
-    null -> "Check your CGM app — readings stopped syncing."
+    null -> "Ahead is not getting CGM data — check your CGM app or sensor."
 }
 
 // How close the backend trend's scored timestamp must be to the raw Health
@@ -207,6 +214,10 @@ object LatestTrendStore {
             }
         }
     }.getOrDefault(emptyList())
+
+    fun clear(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit { clear() }
+    }
 }
 
 /** Same persistence pattern as LatestTrendStore, kept in its own small prefs
@@ -240,5 +251,9 @@ object RawReadingStore {
             ratePerMinute = if (rate.isNaN()) null else rate.toDouble(),
             deltaFromPrevious = if (delta == NO_DELTA) null else delta
         )
+    }
+
+    fun clear(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit { clear() }
     }
 }
