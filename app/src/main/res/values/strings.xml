@@ -87,6 +87,14 @@
     <string name="emergency_sms_permission_granted">✓ SMS permission granted</string>
     <string name="emergency_sms_permission_missing">⚠ SMS permission was revoked — texts will NOT send. Tap to fix.</string>
 
+    <!-- CGM path setting - which reader app syncs your glucose data, used only
+         to pick the staleness-alert threshold (see LatestTrendStore). Exposed
+         here because it's otherwise invisible after first setup, with no way
+         to notice or fix a wrong choice short of a full wizard reset. -->
+    <string name="cgm_path_entry">CGM Sync</string>
+    <string name="cgm_path_dialog_title">How does your CGM data reach this phone?</string>
+    <string name="cgm_path_dialog_message">Sets how long Ahead waits before warning that data has stopped syncing. Dexcom syncs on a tight, predictable cadence; Juggluco and other setups can have looser normal gaps.</string>
+
     <!-- Voice alerts settings -->
     <string name="voice_alerts_title">Voice Alerts</string>
     <string name="voice_alerts_entry">🔊 Voice alerts</string>

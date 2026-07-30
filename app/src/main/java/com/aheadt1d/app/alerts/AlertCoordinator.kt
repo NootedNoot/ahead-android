@@ -50,6 +50,7 @@ object AlertCoordinator {
     private const val KEY_LAST_SEVERITY = "last_handled_severity"
     private const val KEY_LAST_RED_FIRED_AT = "last_red_fired_at_ms"
     private const val KEY_SIGNAL_LOST_FIRED = "signal_lost_fired"
+    private const val KEY_SIGNAL_LOST_LAST_FIRED_AT = "signal_lost_last_fired_at_ms"
     private const val KEY_RED_PEAK_VALUE = "red_peak_value"
     private const val KEY_RED_LAST_VALUE = "red_last_value"
     private const val KEY_LOW_WAS_RECOVERING = "low_was_recovering"
@@ -57,6 +58,10 @@ object AlertCoordinator {
     private const val KEY_YELLOW_LAST_ALERTED_PROJECTED = "yellow_last_alerted_projected"
 
     private const val RED_REALERT_COOLDOWN_MS = 15 * 60_000L
+    // Same cadence as the red re-alert heartbeat - an ongoing blackout is at
+    // least as urgent as an ongoing red glucose reading, and there's no
+    // reason for it to go quiet just because the first alert already fired.
+    private const val SIGNAL_LOST_REALERT_COOLDOWN_MS = 15 * 60_000L
     // Same 70 mg/dL split the chart's low/high threshold lines and
     // RedAlertActivity's emergency-contact classifier already use - red only
     // ever fires for a critical low or critical high, never the 70-180 band,
@@ -139,22 +144,39 @@ object AlertCoordinator {
      * red-tier delivery as a live glucose alert: a total data blackout is
      * dangerous on its own, regardless of what the last confirmed severity
      * was (the person could be dropping or climbing fast starting the moment
-     * signal was lost). Fires once per dark period; see the Reading branch of
-     * evaluate() for how the latch clears and forces a fresh announcement
-     * when data resumes. 2026-07-27: previously gated on prevSeverity being
+     * signal was lost). 2026-07-27: previously gated on prevSeverity being
      * yellow/red and delivered as yellow-tier - see showSignalLostAlert's doc
      * for the full reasoning on both changes.
+     *
+     * 2026-07-30: previously fired exactly once per dark period, then went
+     * silent for however long the blackout continued - a real overnight gap
+     * (Bluetooth reconnect failure, reader app dying in the background) could
+     * run for hours on a single alert the person may have slept through.
+     * Mirrors fireRedIfWarranted's heartbeat: first fire is immediate and
+     * unconditional, then it re-alerts every SIGNAL_LOST_REALERT_COOLDOWN_MS
+     * for as long as the blackout persists. See the Reading branch of
+     * evaluate() for how the latch clears and forces a fresh announcement
+     * when data resumes.
      */
     private fun handleStale(context: Context, prefs: android.content.SharedPreferences, stale: GlucoseDisplayState.Stale) {
         val alreadyFired = prefs.getBoolean(KEY_SIGNAL_LOST_FIRED, false)
+        val lastFiredAt = prefs.getLong(KEY_SIGNAL_LOST_LAST_FIRED_AT, 0L)
+        val now = System.currentTimeMillis()
+
+        if (alreadyFired && now - lastFiredAt < SIGNAL_LOST_REALERT_COOLDOWN_MS) return
+
+        AlertNotifier.showSignalLostAlert(
+            context, stale.lastValue, stale.lastArrow, stale.ageMinutes,
+            blockedReason = stale.blockedReason
+        )
+        prefs.edit {
+            putBoolean(KEY_SIGNAL_LOST_FIRED, true)
+            putLong(KEY_SIGNAL_LOST_LAST_FIRED_AT, now)
+        }
         if (!alreadyFired) {
-            AlertNotifier.showSignalLostAlert(
-                context, stale.lastValue, stale.lastArrow, stale.ageMinutes,
-                blockedReason = stale.blockedReason
-            )
-            prefs.edit { putBoolean(KEY_SIGNAL_LOST_FIRED, true) }
-            // Guarded by !alreadyFired, same as the alert itself - so this
-            // arms exactly once per dark period, not once per render tick.
+            // Guarded by !alreadyFired - arms exactly once per dark period,
+            // not once per re-alert, so the emergency-contact timeout (its
+            // own separate escalation) isn't reset every 15 minutes forever.
             scheduleEmergencyAlert(context, EmergencyAlertType.NO_DATA, stale.lastValue, rate = null)
         }
     }

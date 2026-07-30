@@ -340,6 +340,16 @@
             android:textColor="@color/accent2"
             android:textSize="12sp" />
 
+        <TextView
+            android:id="@+id/cgmPathEntry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingHorizontal="8dp"
+            android:paddingVertical="8dp"
+            android:text="@string/cgm_path_entry"
+            android:textColor="@color/accent2"
+            android:textSize="12sp" />
+
         <!-- Spacer: keeps voiceAlertsEntry, debugLabel, and versionText each
              sized to their own text (wrap_content) instead of one of them
              stretching to fill the row and stealing taps meant for empty

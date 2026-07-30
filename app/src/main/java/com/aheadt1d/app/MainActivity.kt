@@ -192,6 +192,9 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.emergencyContactsEntry).setOnClickListener {
             startActivity(com.aheadt1d.app.emergency.EmergencyContactsActivity.createIntent(this))
         }
+        findViewById<TextView>(R.id.cgmPathEntry).setOnClickListener {
+            showCgmPathDialog()
+        }
 
         val versionText = findViewById<TextView>(R.id.versionText)
         val suffix = if (BuildConfig.DEBUG) " (debug)" else ""
@@ -221,6 +224,29 @@ class MainActivity : AppCompatActivity() {
                 .show()
             true
         }
+    }
+
+    /**
+     * Lets the CGM sync path (see SetupPrefs doc) be corrected any time after
+     * setup, in both debug and release builds - previously the wizard's
+     * choice was permanent short of a full "Reset setup wizard," so a wrong
+     * pick (or the wizard silently re-running and re-picking a default)
+     * quietly widened the staleness-alert threshold with no way to notice.
+     */
+    private fun showCgmPathDialog() {
+        val paths = arrayOf(SetupPrefs.PATH_DEXCOM, SetupPrefs.PATH_JUGGLUCO, SetupPrefs.PATH_UNSURE)
+        val labels = arrayOf("Dexcom", "Juggluco", "Not sure")
+        val current = paths.indexOf(SetupPrefs.cgmPath(this)).coerceAtLeast(0)
+
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.cgm_path_dialog_title))
+            .setMessage(getString(R.string.cgm_path_dialog_message))
+            .setSingleChoiceItems(labels, current) { dialog, which ->
+                SetupPrefs.setCgmPath(this, paths[which])
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // Health Connect's own permission screen is a separate app the user
