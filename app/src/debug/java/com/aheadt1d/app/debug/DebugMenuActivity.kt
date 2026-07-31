@@ -16,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import com.aheadt1d.app.GraphActivity
 import com.aheadt1d.app.R
 import com.aheadt1d.app.alerts.AlertNotifier
+import com.aheadt1d.app.alerts.DebugAlertPrefs
 import com.aheadt1d.app.alerts.RedAlertActivity
 import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
@@ -56,6 +57,7 @@ class DebugMenuActivity : AppCompatActivity() {
     private lateinit var randomCountInput: EditText
     private lateinit var autoBackgroundSwitch: Switch
     private lateinit var voiceMasterSwitch: Switch
+    private lateinit var disableFullScreenSwitch: Switch
     private lateinit var batteryStatusText: TextView
     private lateinit var hcPermsStatusText: TextView
     private lateinit var dndStatusText: TextView
@@ -77,6 +79,7 @@ class DebugMenuActivity : AppCompatActivity() {
         randomCountInput = findViewById(R.id.randomCountInput)
         autoBackgroundSwitch = findViewById(R.id.autoBackgroundSwitch)
         voiceMasterSwitch = findViewById(R.id.voiceMasterSwitch)
+        disableFullScreenSwitch = findViewById(R.id.disableFullScreenSwitch)
         batteryStatusText = findViewById(R.id.batteryStatusText)
         hcPermsStatusText = findViewById(R.id.hcPermsStatusText)
         dndStatusText = findViewById(R.id.dndStatusText)
@@ -396,6 +399,11 @@ class DebugMenuActivity : AppCompatActivity() {
         voiceMasterSwitch.isChecked = VoiceAlertPrefs.isMasterEnabled(this)
         voiceMasterSwitch.setOnCheckedChangeListener { _, checked ->
             VoiceAlertPrefs.setMasterEnabled(this, checked)
+        }
+
+        disableFullScreenSwitch.isChecked = DebugAlertPrefs.isFullScreenDisabled(this)
+        disableFullScreenSwitch.setOnCheckedChangeListener { _, checked ->
+            DebugAlertPrefs.setFullScreenDisabled(this, checked)
         }
     }
 

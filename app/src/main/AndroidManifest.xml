@@ -168,6 +168,14 @@
             android:name=".alerts.CriticalLowEmergencyReceiver"
             android:exported="false" />
 
+        <!-- Fires when the critical-low notification is swiped away from the
+             shade (see CriticalLowSiren.postNotification's setDeleteIntent) -
+             stops the siren, same as the in-app dismiss button.
+             exported=false: only our own PendingIntent triggers it. -->
+        <receiver
+            android:name=".alerts.CriticalLowDismissReceiver"
+            android:exported="false" />
+
         <!-- CSV event export: hands a cache file to whatever share target the
              user picks (email, Drive, etc) without exposing the whole cache dir. -->
         <provider

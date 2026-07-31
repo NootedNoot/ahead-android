@@ -21,6 +21,7 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.edit
+import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.emergency.EmergencyAlertRepository
 import com.aheadt1d.app.emergency.EmergencyAlertType
@@ -76,6 +77,7 @@ object CriticalLowSiren {
     const val CHANNEL_ID = "glucose_critical_low_emergency"
     private const val NOTIFICATION_ID = 2005 // distinct from AlertNotifier's 2001-2004
     private const val REQUEST_CODE = 4713 // distinct from AlarmScheduler(4711)/EmergencyAlertScheduler(4712)
+    private const val REQUEST_CODE_DISMISS = 4715 // distinct from CriticalLowEmergencyScheduler(4714)
 
     private const val TICK_INTERVAL_MS = 25_000L
 
@@ -116,54 +118,63 @@ object CriticalLowSiren {
     /** Entry point - called every check cycle alongside (never instead of)
      *  AlertCoordinator.evaluate(), from GlucoseStatusService. Reconciles all
      *  three states in one call rather than only ever starting:
-     *   - not critical, but still marked active -> the tick loop's own
-     *     recovery check never got to run (e.g. the chain was dead) - clean
-     *     it up here instead of leaving a stale active flag sitting around.
-     *   - critical, not yet active -> start a fresh loop.
-     *   - critical, already active -> doubles as a heartbeat check (see
-     *     HEARTBEAT_STALL_MS) rather than trusting KEY_ACTIVE blindly - a
-     *     repeat call must not restart the pattern from scratch while it's
-     *     genuinely still looping, but must resurrect it if the tick chain
-     *     has actually gone quiet (found via live testing: an app
-     *     reinstall/update cancels pending AlarmManager alarms without
-     *     clearing KEY_ACTIVE). */
+     *   - genuinely recovered (CriticalLowMath.hasRecovered, >= 70) -> the
+     *     only condition that stops an active siren or clears an
+     *     acknowledged episode. 2026-08-01 fix: this used to stop as soon as
+     *     the value merely climbed back above the 55 critical floor - e.g.
+     *     58, still a real low - because it checked isCriticalLow's negation
+     *     instead of the actual recovery threshold. Since this runs far more
+     *     often than tick()'s own (correct) recovery check, it almost always
+     *     won that race, so the siren could go quiet well before a genuine
+     *     recovery. Now both checks agree.
+     *   - not recovered, still active -> keep going regardless of whether
+     *     the value is <= floor or sitting in the 56-69 gray zone; only the
+     *     heartbeat check applies.
+     *   - not recovered, not active, value <= floor -> start a fresh loop
+     *     (unless already acknowledged - see below). A gray-zone value with
+     *     nothing currently running starts nothing; isCriticalLow's own hard
+     *     floor still gates what counts as "critical enough to start".
+     *   - acknowledged (already dismissed this episode) suppresses a fresh
+     *     start until a genuine recovery clears it - dismissing a
+     *     notification doesn't change actual blood sugar, so a still-low
+     *     value right after dismissing must not read as a new episode. */
     fun check(context: Context, value: Int, floor: Int = CriticalLowMath.DEFAULT_FLOOR) {
         val appContext = context.applicationContext
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val currentlyActive = prefs.getBoolean(KEY_ACTIVE, false)
 
-        if (!CriticalLowMath.isCriticalLow(value, floor)) {
+        if (CriticalLowMath.hasRecovered(value)) {
             if (currentlyActive) {
-                Log.i(TAG, "value no longer critical ($value) - stopping siren")
+                Log.i(TAG, "value recovered ($value) - stopping siren")
                 stop(appContext)
             } else if (prefs.getBoolean(KEY_ACKNOWLEDGED, false)) {
-                Log.i(TAG, "value no longer critical ($value) - clearing acknowledged episode")
+                Log.i(TAG, "value recovered ($value) - clearing acknowledged episode")
                 prefs.edit { putBoolean(KEY_ACKNOWLEDGED, false) }
             }
             return
         }
 
-        if (!currentlyActive) {
-            if (prefs.getBoolean(KEY_ACKNOWLEDGED, false)) {
-                // Same episode the user already dismissed - still critical
-                // (dismissing a notification doesn't change actual blood
-                // sugar), but they've already seen it. Stay quiet until
-                // either a real recovery clears the flag above, or a fresh
-                // start() call happens some other way.
-                return
+        if (currentlyActive) {
+            val lastTickAt = prefs.getLong(KEY_LAST_TICK_AT, 0L)
+            if (System.currentTimeMillis() - lastTickAt > HEARTBEAT_STALL_MS) {
+                Log.w(TAG, "siren marked active but no tick in over ${HEARTBEAT_STALL_MS / 1000}s - resurrecting")
+                stampTick(appContext, prefs)
+                fireTick(appContext, value)
+                scheduleNextTick(appContext)
             }
-            Log.w(TAG, "critical low ($value <= $floor) - starting emergency siren")
-            start(appContext, value)
             return
         }
 
-        val lastTickAt = prefs.getLong(KEY_LAST_TICK_AT, 0L)
-        if (System.currentTimeMillis() - lastTickAt > HEARTBEAT_STALL_MS) {
-            Log.w(TAG, "siren marked active but no tick in over ${HEARTBEAT_STALL_MS / 1000}s - resurrecting")
-            stampTick(appContext, prefs)
-            fireTick(appContext, value)
-            scheduleNextTick(appContext)
+        if (!CriticalLowMath.isCriticalLow(value, floor)) return // gray zone (56-69ish) - nothing running, nothing to start
+
+        if (prefs.getBoolean(KEY_ACKNOWLEDGED, false)) {
+            // Same episode the user already dismissed - still not recovered,
+            // but they've already seen it. Stay quiet until a real recovery
+            // clears the flag above.
+            return
         }
+        Log.w(TAG, "critical low ($value <= $floor) - starting emergency siren")
+        start(appContext, value)
     }
 
     fun isActive(context: Context): Boolean =
@@ -308,19 +319,35 @@ object CriticalLowSiren {
             RedAlertActivity.createCriticalEmergencyIntent(context, value),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification = Notification.Builder(context, CHANNEL_ID)
+        // Swiping this away means the same thing as tapping "I'm treating
+        // this" on the takeover screen - stops the whole siren loop, not
+        // just the notification. 2026-08-01: previously setOngoing(true)
+        // (unswipeable, in-app dismiss only) - reported as a real usability
+        // downgrade in the exact moment it matters least (low and shaky is
+        // not when you want extra steps). A plain swipe now works and
+        // genuinely acknowledges the episode instead of leaving the loop
+        // silently still armed with the notification just gone from view.
+        val deleteIntent = PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE_DISMISS,
+            Intent(context, CriticalLowDismissReceiver::class.java).setAction(CriticalLowDismissReceiver.ACTION_DISMISSED),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val builder = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
             .setContentTitle("🚨 CRITICAL LOW: $value mg/dL")
-            .setContentText("Treat now — tap to open")
+            .setContentText("Treat now — swipe away once you're on it")
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            // Can't be swiped away - only an in-app dismiss (or recovery)
-            // clears this. A true emergency shouldn't be cancelable by accident.
-            .setOngoing(true)
             .setContentIntent(fullScreenIntent)
-            .setFullScreenIntent(fullScreenIntent, true)
-            .build()
-        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            .setDeleteIntent(deleteIntent)
+        // Debug-only: lets testing skip the forced lock-screen takeover while
+        // keeping sound/vibration/voice/notification exactly as they'd
+        // normally fire - see DebugAlertPrefs.
+        if (!(BuildConfig.DEBUG && DebugAlertPrefs.isFullScreenDisabled(context))) {
+            builder.setFullScreenIntent(fullScreenIntent, true)
+        }
+        NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, builder.build())
     }
 
     private fun forceAlarmVolumeAndPlaySound(context: Context) {

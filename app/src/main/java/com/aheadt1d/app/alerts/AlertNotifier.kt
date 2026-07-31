@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
 import com.aheadt1d.app.emergency.EmergencyAlertScheduler
@@ -92,7 +93,12 @@ object AlertNotifier {
                 // hiding the number behind "notification hidden" would
                 // defeat the point.
                 .setVisibility(Notification.VISIBILITY_PUBLIC)
-                .setFullScreenIntent(fullScreenIntent, true)
+            // Debug-only: lets testing skip the forced lock-screen takeover
+            // while keeping sound/vibration/voice/notification exactly as
+            // they'd normally fire - see DebugAlertPrefs.
+            if (!(BuildConfig.DEBUG && DebugAlertPrefs.isFullScreenDisabled(context))) {
+                builder.setFullScreenIntent(fullScreenIntent, true)
+            }
         }
 
         notifyIfAllowed(context) { nm ->
@@ -183,7 +189,7 @@ object AlertNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val notification = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
+        val signalLostBuilder = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
             .setContentTitle("🔴 No new glucose data — ${ageMinutes}m")
             .setContentText("Last reading $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. ${staleGuidance(blockedReason)}")
@@ -195,8 +201,13 @@ object AlertNotifier {
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.low))
             .setContentIntent(mainActivityIntent(context, REQ_SIGNAL_LOST_CONTENT))
-            .setFullScreenIntent(fullScreenIntent, true)
-            .build()
+        // Debug-only: lets testing skip the forced lock-screen takeover while
+        // keeping sound/vibration/voice/notification exactly as they'd
+        // normally fire - see DebugAlertPrefs.
+        if (!(BuildConfig.DEBUG && DebugAlertPrefs.isFullScreenDisabled(context))) {
+            signalLostBuilder.setFullScreenIntent(fullScreenIntent, true)
+        }
+        val notification = signalLostBuilder.build()
 
         // Shares RED_ALERT_NOTIFICATION_ID with showRedAlert - deliberately: a
         // live glucose-red notification left over from before the blackout
