@@ -43,6 +43,11 @@ object AlertNotifier {
     private const val REQ_CORRECTION_CONTENT = 2106
     private const val REQ_SIGNAL_LOST_FSI = 2107
 
+    // Same 70 mg/dL split AlertCoordinator/RedAlertActivity each keep their
+    // own copy of - decides which direction's tone plays.
+    private const val LOW_HIGH_SPLIT = 70
+    private fun isLowSide(value: Int): Boolean = value <= LOW_HIGH_SPLIT
+
     /**
      * @param recovering True only for a low-side red that's rising as
      *   expected (see AlertCoordinator's low-recovery handling) - the person
@@ -95,6 +100,11 @@ object AlertNotifier {
             nm.cancel(YELLOW_ALERT_NOTIFICATION_ID)
         }
 
+        // recovering is low-side-only (see the doc above) - its calmer
+        // treatment gets the softer warn tone, not the three-chirp urgent
+        // one, matching the visual softening already applied above.
+        AlertTones.play(context, if (recovering) AlertTones.Tone.WARN_LOW else if (isLowSide(value)) AlertTones.Tone.URGENT_LOW else AlertTones.Tone.URGENT_HIGH)
+
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
         val spokenText = if (recovering) {
@@ -106,13 +116,15 @@ object AlertNotifier {
     }
 
     /** Yellow never escalates: no full-screen intent, no DND bypass (its
-     *  channel never sets it), default lock-screen privacy. Sound comes from
-     *  the channel. */
+     *  channel never sets it), default lock-screen privacy. Tone is a
+     *  single directional sweep (deliberately calmer than red's three
+     *  chirps) and, like the channel itself, respects DND rather than
+     *  piercing it. */
     fun showYellowAlert(context: Context, value: Int, projected: Int?, rate: Double?) {
         AlertChannels.ensure(context)
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
 
-        val notification = Notification.Builder(context, AlertChannels.YELLOW_CHANNEL_ID)
+        val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, arrow))
             .setContentTitle("⚠️ $value mg/dL ${arrow.label}")
             .setContentText("${projectionLine(projected)} — keep an eye on it")
@@ -123,6 +135,8 @@ object AlertNotifier {
             .build()
 
         notifyIfAllowed(context) { nm -> nm.notify(YELLOW_ALERT_NOTIFICATION_ID, notification) }
+
+        AlertTones.play(context, if (isLowSide(value)) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH)
 
         VoiceAlertEngine.speak(
             context,
@@ -193,6 +207,8 @@ object AlertNotifier {
         // before this change).
         notifyIfAllowed(context) { nm -> nm.notify(RED_ALERT_NOTIFICATION_ID, notification) }
 
+        AlertTones.play(context, AlertTones.Tone.SIGNAL_LOST)
+
         val spokenAdvice = when (blockedReason) {
             ReadBlockedReason.PERMISSION_MISSING -> "Ahead lost its Health Connect permission. Open the app to fix it."
             ReadBlockedReason.HC_UNAVAILABLE -> "Health Connect is unavailable. Open the Ahead app."
@@ -232,7 +248,7 @@ object AlertNotifier {
                 "$value mg/dL — now over $durationMinutes minutes at or above $highThreshold mg/dL, longer than before. Still hasn't started trending down."
         }
 
-        val notification = Notification.Builder(context, AlertChannels.YELLOW_CHANNEL_ID)
+        val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, GlucoseTrendArrow.FLAT))
             .setContentTitle(title)
             .setContentText(text)
@@ -244,7 +260,18 @@ object AlertNotifier {
 
         notifyIfAllowed(context) { nm -> nm.notify(PLATEAU_ALERT_NOTIFICATION_ID, notification) }
 
-        VoiceAlertEngine.speak(context, VoiceAlertCategory.PLATEAU, text)
+        AlertTones.play(context, AlertTones.Tone.CALM_HIGH)
+
+        // Spoken separately from the visual `text` above - that copy reads
+        // dense/awkward aloud ("has been at or above X mg/dL for over Y
+        // minutes"); this is the same information in a shorter, more natural
+        // spoken cadence.
+        val spokenText = if (tier <= 1) {
+            "Heads up. Glucose has been elevated for over $highDurationMinutes minutes and hasn't started coming down."
+        } else {
+            "Heads up. Glucose is still elevated, now over $durationMinutes minutes — longer than before."
+        }
+        VoiceAlertEngine.speak(context, VoiceAlertCategory.PLATEAU, spokenText)
     }
 
     fun cancelPlateau(context: Context) {
@@ -283,7 +310,7 @@ object AlertNotifier {
         // of range this is about.
         val colorRes = if (isLow) R.color.low else R.color.high
 
-        val notification = Notification.Builder(context, AlertChannels.YELLOW_CHANNEL_ID)
+        val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, GlucoseTrendArrow.FLAT))
             .setContentTitle("⚠️ Correction logged ${minutesSinceCorrection}m ago")
             .setContentText(text)
@@ -295,7 +322,12 @@ object AlertNotifier {
 
         notifyIfAllowed(context) { nm -> nm.notify(CORRECTION_ALERT_NOTIFICATION_ID, notification) }
 
-        VoiceAlertEngine.speak(context, VoiceAlertCategory.CORRECTION, text)
+        AlertTones.play(context, if (isLow) AlertTones.Tone.CALM_LOW else AlertTones.Tone.CALM_HIGH)
+
+        // Spoken separately from the visual `text` above for the same
+        // reason showPlateauAlert's is - shorter, more natural aloud.
+        val spokenText = "Heads up. It's been $minutesSinceCorrection minutes since your correction, and glucose hasn't started $verb yet — still $value."
+        VoiceAlertEngine.speak(context, VoiceAlertCategory.CORRECTION, spokenText)
     }
 
     /**
@@ -313,7 +345,7 @@ object AlertNotifier {
         val text = "A second correction was logged $minutesSinceFirstCorrection minutes after the first, while glucose was still $direction."
         val colorRes = if (isLow) R.color.low else R.color.high
 
-        val notification = Notification.Builder(context, AlertChannels.YELLOW_CHANNEL_ID)
+        val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
             .setContentTitle("📝 Another correction logged")
             .setContentText(text)
@@ -325,7 +357,10 @@ object AlertNotifier {
 
         notifyIfAllowed(context) { nm -> nm.notify(CORRECTION_ALERT_NOTIFICATION_ID, notification) }
 
-        VoiceAlertEngine.speak(context, VoiceAlertCategory.CORRECTION, text)
+        AlertTones.play(context, if (isLow) AlertTones.Tone.CALM_LOW else AlertTones.Tone.CALM_HIGH)
+
+        val spokenText = "Just a note — another correction was logged $minutesSinceFirstCorrection minutes after the first, glucose still $direction."
+        VoiceAlertEngine.speak(context, VoiceAlertCategory.CORRECTION, spokenText)
     }
 
     fun cancelCorrection(context: Context) {

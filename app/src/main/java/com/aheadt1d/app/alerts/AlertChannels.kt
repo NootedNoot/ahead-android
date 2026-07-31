@@ -3,8 +3,6 @@ package com.aheadt1d.app.alerts
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
-import android.media.AudioAttributes
-import android.media.RingtoneManager
 import android.util.Log
 import androidx.core.content.edit
 
@@ -12,24 +10,33 @@ import androidx.core.content.edit
  * Owns the two alerting channels, kept separate from the silent ongoing
  * status channel in GlucoseNotifier:
  *
- *  - Yellow: high-importance, default notification sound. Never escalates -
- *    no DND bypass, no full-screen intent, nothing lock-screen-public. That's
- *    by construction: the escalation features only exist on the red path.
- *  - Red: high-importance, ALARM-stream sound, setBypassDnd(true) so red
- *    alerts pierce Do Not Disturb.
+ *  - Yellow: high-importance. Never escalates - no DND bypass, no
+ *    full-screen intent, nothing lock-screen-public. That's by construction:
+ *    the escalation features only exist on the red path.
+ *  - Red: high-importance, setBypassDnd(true) so the notification itself
+ *    (heads-up, vibration) pierces Do Not Disturb.
  *
- * The red channel id is versioned because of how bypassDnd actually works:
- * the flag only sticks if the app holds Notification Policy Access at the
- * moment the channel is CREATED, channels are immutable to the app after
- * creation, and deleting + recreating the same id resurrects the old
- * settings (anti-abuse). So when policy access is granted after the channel
- * already exists without bypass, the only fix is migrating to a fresh id:
- * create "glucose_alerts_active_v2" first (never a moment with no red
- * channel), delete the old one, persist the new id. Migration happens only
- * on that bypass mismatch - user tweaks to sound/importance are respected.
+ * Both channels are deliberately silent (setSound(null, null)) - actual
+ * alert sound plays via AlertTones' direct MediaPlayer playback instead (see
+ * its class doc), not the channel's own sound attribute. Playing both would
+ * double up.
  *
- * If the user later revokes policy access, the existing channel keeps
- * whatever bypass flag it has; there is no downward migration.
+ * BOTH channel ids are versioned (glucose_alerts_active_vN /
+ * glucose_alerts_yellow_vN), because Android channels are immutable to the
+ * app once created AND deleting + recreating the SAME id resurrects the old
+ * settings instead of applying the new ones (anti-abuse - learned the hard
+ * way migrating yellow off its old default sound: a straight delete+recreate
+ * with the same literal id silently kept the old sound). The only way to
+ * actually change a channel's settings post-creation is a fresh id: create
+ * the new one first (never a moment with no channel), delete the old one,
+ * persist the new id.
+ *
+ * Red's migration additionally triggers on a bypassDnd mismatch: the flag
+ * only sticks if the app holds Notification Policy Access at the moment the
+ * channel is CREATED, so when policy access is granted after the channel
+ * already exists without bypass, this is what fixes it. If the user later
+ * revokes policy access, the existing channel keeps whatever bypass flag it
+ * has; there is no downward migration.
  *
  * Separately, [dndAccessRegressed] tracks whether policy access was ever
  * observed granted and has since gone missing - see its doc for why a
@@ -37,45 +44,63 @@ import androidx.core.content.edit
  * surfacing to the user.
  */
 object AlertChannels {
-    const val YELLOW_CHANNEL_ID = "glucose_alerts_yellow"
-
     private const val PREFS_NAME = "ahead_alert_channels"
     private const val KEY_RED_CHANNEL_ID = "red_channel_id"
+    private const val KEY_YELLOW_CHANNEL_ID = "yellow_channel_id"
     private const val KEY_DND_EVER_GRANTED = "dnd_ever_granted"
+    private const val KEY_SOUND_SCHEME_VERSION = "sound_scheme_version"
     private const val DEFAULT_RED_CHANNEL_ID = "glucose_alerts_active"
+    private const val DEFAULT_YELLOW_CHANNEL_ID = "glucose_alerts_yellow"
     private const val TAG = "AlertChannels"
+
+    // 2026-07-31: bumped when alert sound moved from each channel's own
+    // sound attribute to AlertTones' direct playback. A channel created
+    // under the OLD scheme still has a baked-in sound that would now play
+    // ALONGSIDE the new direct tone, doubling up - any install below this
+    // version gets both channels migrated to a fresh id once, silent.
+    // v2->v3: the first pass at this migration deleted+recreated yellow
+    // using the SAME literal id, which - like red's already-documented
+    // anti-abuse quirk - resurrected the old sound instead of clearing it,
+    // while still marking the migration complete. v3 uses a versioned id
+    // for yellow too (see ensure()) and re-runs for anyone who landed on v2.
+    private const val SOUND_SCHEME_VERSION = 3
 
     fun currentRedChannelId(context: Context): String =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_RED_CHANNEL_ID, DEFAULT_RED_CHANNEL_ID) ?: DEFAULT_RED_CHANNEL_ID
 
+    fun currentYellowChannelId(context: Context): String =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_YELLOW_CHANNEL_ID, DEFAULT_YELLOW_CHANNEL_ID) ?: DEFAULT_YELLOW_CHANNEL_ID
+
     /** Idempotent and cheap - safe to call from Application.onCreate, before
      *  every alert post, and after returning from the DND-access settings
-     *  screen (that last one is what actually triggers the migration). */
+     *  screen (that last one is what actually triggers the DND migration). */
     fun ensure(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
         // Latches "this device has had DND access granted at least once" -
         // read by dndAccessRegressed below. ensure() runs often enough (app
         // start, every alert, return-from-settings) that this stays current
         // without any dedicated polling.
         if (nm.isNotificationPolicyAccessGranted) {
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
-                putBoolean(KEY_DND_EVER_GRANTED, true)
-            }
+            prefs.edit { putBoolean(KEY_DND_EVER_GRANTED, true) }
         }
 
-        if (nm.getNotificationChannel(YELLOW_CHANNEL_ID) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(
-                    YELLOW_CHANNEL_ID,
-                    "Glucose warnings",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "Early warnings when glucose is trending out of range"
-                    enableVibration(true)
-                }
-            )
+        val needsSoundMigration = prefs.getInt(KEY_SOUND_SCHEME_VERSION, 1) < SOUND_SCHEME_VERSION
+
+        val yellowId = currentYellowChannelId(context)
+        if (nm.getNotificationChannel(yellowId) == null) {
+            nm.createNotificationChannel(buildYellowChannel(yellowId))
+        } else {
+            val yellowChannel = nm.getNotificationChannel(yellowId)
+            if (needsSoundMigration && yellowChannel?.sound != null) {
+                val newId = nextVersionedId(yellowId, DEFAULT_YELLOW_CHANNEL_ID)
+                nm.createNotificationChannel(buildYellowChannel(newId))
+                nm.deleteNotificationChannel(yellowId)
+                prefs.edit { putString(KEY_YELLOW_CHANNEL_ID, newId) }
+            }
         }
 
         val redId = currentRedChannelId(context)
@@ -84,18 +109,29 @@ object AlertChannels {
         }
 
         val redChannel = nm.getNotificationChannel(redId) ?: return
-        if (!redChannel.canBypassDnd() && nm.isNotificationPolicyAccessGranted) {
-            val newId = nextVersionedId(redId)
+        val redNeedsDndMigration = !redChannel.canBypassDnd() && nm.isNotificationPolicyAccessGranted
+        val redNeedsSoundMigration = needsSoundMigration && redChannel.sound != null
+        if (redNeedsDndMigration || redNeedsSoundMigration) {
+            val newId = nextVersionedId(redId, DEFAULT_RED_CHANNEL_ID)
             nm.createNotificationChannel(buildRedChannel(newId))
             nm.deleteNotificationChannel(redId)
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
-                putString(KEY_RED_CHANNEL_ID, newId)
-            }
+            prefs.edit { putString(KEY_RED_CHANNEL_ID, newId) }
             if (nm.getNotificationChannel(newId)?.canBypassDnd() != true) {
                 Log.w(TAG, "Red channel $newId still can't bypass DND despite policy access")
             }
         }
+
+        if (needsSoundMigration) {
+            prefs.edit { putInt(KEY_SOUND_SCHEME_VERSION, SOUND_SCHEME_VERSION) }
+        }
     }
+
+    private fun buildYellowChannel(id: String): NotificationChannel =
+        NotificationChannel(id, "Glucose warnings", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Early warnings when glucose is trending out of range"
+            enableVibration(true)
+            setSound(null, null)
+        }
 
     private fun buildRedChannel(id: String): NotificationChannel =
         NotificationChannel(id, "Glucose red alerts", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -103,18 +139,12 @@ object AlertChannels {
             setBypassDnd(true)
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)
-            setSound(
-                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_ALARM)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
+            setSound(null, null)
         }
 
-    private fun nextVersionedId(currentId: String): String {
+    private fun nextVersionedId(currentId: String, baseId: String): String {
         val version = Regex("_v(\\d+)$").find(currentId)?.groupValues?.get(1)?.toIntOrNull()
-        return "${DEFAULT_RED_CHANNEL_ID}_v${(version ?: 1) + 1}"
+        return "${baseId}_v${(version ?: 1) + 1}"
     }
 
     /**
