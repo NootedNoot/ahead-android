@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
 import androidx.core.content.edit
+import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.emergency.EmergencyAlertRepository
 import com.aheadt1d.app.emergency.EmergencyAlertScheduler
 import com.aheadt1d.app.emergency.EmergencyAlertType
@@ -233,7 +234,9 @@ object AlertCoordinator {
             prefs.getBoolean(KEY_RED_LOW_SIDE, false) &&
             reading.value < LOW_RED_CLEAR_HYSTERESIS
         ) {
-            Log.d("AlertCoordinator", "low red held: value ${reading.value} < $LOW_RED_CLEAR_HYSTERESIS clear buffer")
+            if (BuildConfig.DEBUG) {
+                Log.d("AlertCoordinator", "low red held: value ${reading.value} < $LOW_RED_CLEAR_HYSTERESIS clear buffer")
+            }
             return
         }
 

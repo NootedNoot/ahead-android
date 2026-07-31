@@ -148,7 +148,10 @@ object GlucoseCheckRunner {
 
         return try {
             val responseJson = BackendClient.postCheckTrend(body)
-            Log.d(TAG, "check-trend response: $responseJson")
+            // Dumps the full payload (glucose value, severity, rate, guesses) -
+            // never in release, where a bugreport/logcat pull would otherwise
+            // expose real health data.
+            if (BuildConfig.DEBUG) Log.d(TAG, "check-trend response: $responseJson")
             updateLatestTrend(context, responseJson)
             Outcome.SUCCESS
         } catch (e: IOException) {
@@ -225,11 +228,20 @@ object GlucoseCheckRunner {
 
         val latest = processed.getJSONObject(processed.length() - 1)
         if (!latest.has("currentValue") || !latest.has("severity")) {
-            Log.w(TAG, "Backend's newest processed reading is missing currentValue/severity - dropping this trend update: $latest")
+            // Payload may still contain a partial glucose value even though
+            // it's malformed - keep the release-build warning breadcrumb, but
+            // only dump the raw JSON in debug.
+            if (BuildConfig.DEBUG) {
+                Log.w(TAG, "Backend's newest processed reading is missing currentValue/severity - dropping this trend update: $latest")
+            } else {
+                Log.w(TAG, "Backend's newest processed reading is missing currentValue/severity - dropping this trend update")
+            }
             return
         }
 
-        Log.d(TAG, "Publishing trend: currentValue=${latest.optInt("currentValue")} severity=${latest.optString("severity")}")
+        if (BuildConfig.DEBUG) {
+            Log.d(TAG, "Publishing trend: currentValue=${latest.optInt("currentValue")} severity=${latest.optString("severity")}")
+        }
 
         val trend = LatestTrend(
             currentValue = latest.getInt("currentValue"),

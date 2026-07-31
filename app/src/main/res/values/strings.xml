@@ -61,7 +61,11 @@
     <string name="red_alert_no_projection">Glucose is heading out of a safe range</string>
     <!-- Signal-lost variant of the same takeover screen (RedAlertActivity.createSignalLostIntent) -->
     <string name="red_alert_signal_lost_heading">NO GLUCOSE DATA</string>
+    <!-- Critical-low siren variant (RedAlertActivity.createCriticalEmergencyIntent, CriticalLowSiren) -->
+    <string name="red_alert_critical_emergency_heading">🚨 CRITICAL LOW — TREAT NOW</string>
+    <string name="red_alert_critical_emergency_subtext">Alarm repeats until you treat and confirm below</string>
     <string name="red_alert_dismiss">Dismiss</string>
+    <string name="red_alert_stop_alarm">I\'m treating this — stop the alarm</string>
     <string name="red_alert_send_emergency">Send Emergency Alert</string>
     <!-- %1$d is the CURRENT EmergencyContactsPrefs.alertTimeoutMinutes() value,
          not a fixed number - filled in at display time so this can never go

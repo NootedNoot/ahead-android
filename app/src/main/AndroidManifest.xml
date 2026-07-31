@@ -8,6 +8,10 @@
          reads throw RemoteException("must be in foreground to read ..."). -->
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- CriticalLowSiren vibrates directly via the Vibrator service, not
+         through a notification channel (see its class doc) - that direct
+         call needs its own permission independent of POST_NOTIFICATIONS. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Required alongside foregroundServiceType="specialUse" on API 34+. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -146,6 +150,22 @@
              only our own PendingIntent ever triggers it. -->
         <receiver
             android:name=".emergency.EmergencyAlertReceiver"
+            android:exported="false" />
+
+        <!-- Repeating tick for the critical-low emergency siren (see
+             CriticalLowSiren). exported=false: only our own
+             setAlarmClock() operation PendingIntent ever triggers it. -->
+        <receiver
+            android:name=".alerts.CriticalLowAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Fires the critical-low siren's own emergency-contact auto-text
+             if it goes 10 min unacknowledged (see
+             CriticalLowEmergencyScheduler) - independent of
+             EmergencyAlertReceiver's own 15-min timer for a normal red
+             alert. exported=false: only our own PendingIntent triggers it. -->
+        <receiver
+            android:name=".alerts.CriticalLowEmergencyReceiver"
             android:exported="false" />
 
         <!-- CSV event export: hands a cache file to whatever share target the

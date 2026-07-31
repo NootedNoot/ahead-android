@@ -93,13 +93,13 @@ class CorrectionResponseMathTest {
     }
 
     @Test
-    fun `missing current value fails safe as responding, never fires on absent data`() {
+    fun `missing current value is INCONCLUSIVE, never guessed as resolved`() {
         val outcome = CorrectionResponseMath.evaluate(
             correctionLoggedAt = loggedAt, now = minutesLater(50), windowMinutes = windowMinutes,
             currentValue = null, currentRatePerMinute = null,
             highThreshold = highThreshold, responseRateThreshold = responseRateThreshold,
         )
-        assertEquals(CorrectionResponseMath.Outcome.RESPONDING_OR_RESOLVED, outcome)
+        assertEquals(CorrectionResponseMath.Outcome.INCONCLUSIVE, outcome)
     }
 
     @Test
@@ -199,13 +199,13 @@ class CorrectionResponseMathTest {
     }
 
     @Test
-    fun `low- missing current value fails safe as responding, never fires on absent data`() {
+    fun `low- missing current value is INCONCLUSIVE, never guessed as resolved`() {
         val outcome = CorrectionResponseMath.evaluateLow(
             correctionLoggedAt = loggedAt, now = minutesLater(25), windowMinutes = lowWindowMinutes,
             currentValue = null, currentRatePerMinute = null,
             lowThreshold = lowThreshold, responseRateThreshold = lowResponseRateThreshold,
         )
-        assertEquals(CorrectionResponseMath.Outcome.RESPONDING_OR_RESOLVED, outcome)
+        assertEquals(CorrectionResponseMath.Outcome.INCONCLUSIVE, outcome)
     }
 
     @Test

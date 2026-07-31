@@ -230,6 +230,12 @@ object PlateauCoordinator {
 
         when (outcome) {
             CorrectionResponseMath.Outcome.WINDOW_OPEN -> Unit // still waiting
+            // No usable reading this cycle (e.g. a transient Health Connect
+            // gap) - keep the tracking window open rather than reading this
+            // as a resolution. A prolonged real blackout is already handled
+            // separately by AlertCoordinator's stale/signal-lost alert, so
+            // there's no need to cap how long this waits.
+            CorrectionResponseMath.Outcome.INCONCLUSIVE -> Unit
             CorrectionResponseMath.Outcome.RESPONDING_OR_RESOLVED -> {
                 // Worked (or resolved on its own) - stop tracking silently,
                 // no notification needed. Also clears the anchor so a later

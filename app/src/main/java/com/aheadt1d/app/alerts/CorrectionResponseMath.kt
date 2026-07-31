@@ -7,13 +7,21 @@ package com.aheadt1d.app.alerts
  * by the end of the tracking window.
  */
 object CorrectionResponseMath {
-    enum class Outcome { WINDOW_OPEN, RESPONDING_OR_RESOLVED, NOT_RESPONDING }
+    // INCONCLUSIVE is distinct from RESPONDING_OR_RESOLVED: the caller
+    // (PlateauCoordinator) clears its tracking state on a real resolution,
+    // but must keep tracking through INCONCLUSIVE, since a null reading here
+    // usually just means a transient Health Connect read gap, not that the
+    // correction actually worked - clearing state in that case would
+    // silently and permanently drop the "not responding" check for this
+    // episode the moment fresh data comes back.
+    enum class Outcome { WINDOW_OPEN, RESPONDING_OR_RESOLVED, NOT_RESPONDING, INCONCLUSIVE }
 
     /**
      * [currentValue]/[currentRatePerMinute] null means no current reading is
-     * available - treated as RESPONDING_OR_RESOLVED rather than guessing,
-     * since firing an alert off missing data would be worse than staying
-     * quiet for one cycle (the next cycle will re-evaluate with fresh data).
+     * available - never guessed as resolved (that would risk silently
+     * dropping a real "not responding" alert on an ordinary sync hiccup);
+     * returns INCONCLUSIVE so the caller keeps waiting for real data instead
+     * of finalizing this episode one way or the other.
      */
     fun evaluate(
         correctionLoggedAt: Long,
@@ -27,7 +35,8 @@ object CorrectionResponseMath {
         val elapsedMinutes = (now - correctionLoggedAt) / 60_000L
         if (elapsedMinutes < windowMinutes) return Outcome.WINDOW_OPEN
 
-        if (currentValue == null || currentValue < highThreshold) return Outcome.RESPONDING_OR_RESOLVED
+        if (currentValue == null) return Outcome.INCONCLUSIVE
+        if (currentValue < highThreshold) return Outcome.RESPONDING_OR_RESOLVED
         // Meaningfully negative = at or below the (negative) threshold, e.g.
         // -1.0 mg/dL/min - already trending down counts as responding even
         // if the value hasn't dropped under highThreshold yet.
@@ -56,7 +65,8 @@ object CorrectionResponseMath {
         val elapsedMinutes = (now - correctionLoggedAt) / 60_000L
         if (elapsedMinutes < windowMinutes) return Outcome.WINDOW_OPEN
 
-        if (currentValue == null || currentValue > lowThreshold) return Outcome.RESPONDING_OR_RESOLVED
+        if (currentValue == null) return Outcome.INCONCLUSIVE
+        if (currentValue > lowThreshold) return Outcome.RESPONDING_OR_RESOLVED
         if (currentRatePerMinute != null && currentRatePerMinute >= responseRateThreshold) return Outcome.RESPONDING_OR_RESOLVED
 
         return Outcome.NOT_RESPONDING

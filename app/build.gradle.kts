@@ -32,6 +32,15 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        unitTests {
+            // AlertCoordinator/PlateauCoordinator tests build real Notification
+            // objects (R.color.low/high, string resources) via Robolectric -
+            // needs actual resource loading, not just stub R values.
+            isIncludeAndroidResources = true
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -68,4 +77,11 @@ dependencies {
     // Pure-Kotlin local unit tests (AgpMetricsCalculator etc.) - JVM only, no
     // Android framework/emulator needed.
     testImplementation("junit:junit:4.13.2")
+
+    // AlertCoordinator/PlateauCoordinator tests: these are real Context/
+    // SharedPreferences/NotificationManager state machines, not pure
+    // functions, so exercising them for real (rather than reaching into
+    // private prefs keys) needs Robolectric's Android framework simulation.
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test:core:1.6.1")
 }

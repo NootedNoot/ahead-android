@@ -35,18 +35,29 @@ import kotlinx.coroutines.launch
  * "Send emergency alert to X?" before ever sending anything. Nothing here
  * sends silently - every SMS traces back to an explicit Yes tap.
  *
- * Two content modes, same screen: a live glucose reading ([createIntent]) or
+ * Three content modes, same screen: a live glucose reading ([createIntent]),
  * a signal-lost blackout ([createSignalLostIntent], see AlertNotifier's
- * showSignalLostAlert). The signal-lost mode never shows a live glucose
- * number or claims a severity - there isn't one to confirm - and hides the
- * Emergency Contact button, since EmergencyAlertRepository only knows how to
- * word a HIGH/LOW alert and neither is true here.
+ * showSignalLostAlert), or a critical-low siren episode
+ * ([createCriticalEmergencyIntent], see CriticalLowSiren). The signal-lost
+ * mode never shows a live glucose number or claims a severity - there isn't
+ * one to confirm - and hides the Emergency Contact button, since
+ * EmergencyAlertRepository only knows how to word a HIGH/LOW alert and
+ * neither is true here.
+ *
+ * The dismiss button always calls CriticalLowSiren.stop() as well as the
+ * normal AlertNotifier.cancelRed() - unconditionally, not just when this
+ * screen was opened in emergency mode - since the siren can start
+ * independently while this screen is already showing (singleTop delivers it
+ * via onNewIntent), and one dismiss action should reliably silence
+ * everything currently active rather than requiring the user to figure out
+ * which alert is which.
  */
 class RedAlertActivity : AppCompatActivity() {
 
     private var currentValue = 0
     private var currentRate: Double? = null
     private var isSignalLostMode = false
+    private var isCriticalEmergency = false
 
     private val requestSmsPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -72,6 +83,9 @@ class RedAlertActivity : AppCompatActivity() {
             // here means Gma is NOT texted for this episode. Also stops any
             // still-playing alert audio tied to the notification.
             AlertNotifier.cancelRed(this)
+            // Unconditional - see the class doc for why this always runs
+            // regardless of which mode this screen was opened in.
+            CriticalLowSiren.stop(this)
             finish()
         }
 
@@ -90,7 +104,11 @@ class RedAlertActivity : AppCompatActivity() {
 
     private fun bind(intent: Intent) {
         isSignalLostMode = intent.getBooleanExtra(EXTRA_SIGNAL_LOST, false)
+        isCriticalEmergency = intent.getBooleanExtra(EXTRA_CRITICAL_EMERGENCY, false)
         val headingView = findViewById<TextView>(R.id.alertHeadingText)
+        findViewById<Button>(R.id.dismissButton).setText(
+            if (isCriticalEmergency) R.string.red_alert_stop_alarm else R.string.red_alert_dismiss
+        )
 
         if (isSignalLostMode) {
             val lastValue = intent.getIntExtra(EXTRA_VALUE, 0)
@@ -113,7 +131,7 @@ class RedAlertActivity : AppCompatActivity() {
             return
         }
 
-        headingView.setText(R.string.red_alert_heading)
+        headingView.setText(if (isCriticalEmergency) R.string.red_alert_critical_emergency_heading else R.string.red_alert_heading)
         val value = intent.getIntExtra(EXTRA_VALUE, 0)
         val projected = if (intent.hasExtra(EXTRA_PROJECTED)) intent.getIntExtra(EXTRA_PROJECTED, 0) else null
         val rate = if (intent.hasExtra(EXTRA_RATE)) intent.getDoubleExtra(EXTRA_RATE, 0.0) else null
@@ -127,9 +145,11 @@ class RedAlertActivity : AppCompatActivity() {
             rate > 0 -> "${arrow.label}  +${"%.1f".format(rate)} mg/dL/min"
             else -> "${arrow.label}  ${"%.1f".format(rate)} mg/dL/min"
         }
-        findViewById<TextView>(R.id.alertProjectedText).text =
-            if (projected != null) getString(R.string.red_alert_projected, projected)
-            else getString(R.string.red_alert_no_projection)
+        findViewById<TextView>(R.id.alertProjectedText).text = when {
+            isCriticalEmergency -> getString(R.string.red_alert_critical_emergency_subtext)
+            projected != null -> getString(R.string.red_alert_projected, projected)
+            else -> getString(R.string.red_alert_no_projection)
+        }
     }
 
     /** Red fires for both a critically low and a critically high reading -
@@ -233,6 +253,7 @@ class RedAlertActivity : AppCompatActivity() {
         private const val EXTRA_SIGNAL_LOST = "signal_lost"
         private const val EXTRA_AGE_MINUTES = "age_minutes"
         private const val EXTRA_ARROW = "arrow"
+        private const val EXTRA_CRITICAL_EMERGENCY = "critical_emergency"
         private const val LOW_HIGH_SPLIT = 70
 
         fun createIntent(context: Context, value: Int, projected: Int?, rate: Double?): Intent =
@@ -254,5 +275,16 @@ class RedAlertActivity : AppCompatActivity() {
                 .putExtra(EXTRA_VALUE, lastValue)
                 .putExtra(EXTRA_ARROW, lastArrow.name)
                 .putExtra(EXTRA_AGE_MINUTES, ageMinutes)
+
+        /** The critical-low siren variant of the same takeover screen - see
+         *  the class doc and CriticalLowSiren. No projection/rate shown (the
+         *  siren re-fires every ~25s off whatever the latest cached reading
+         *  is, not a fresh backend projection) - just the value and the
+         *  "alarm repeats until you confirm" subtext. */
+        fun createCriticalEmergencyIntent(context: Context, value: Int): Intent =
+            Intent(context, RedAlertActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(EXTRA_CRITICAL_EMERGENCY, true)
+                .putExtra(EXTRA_VALUE, value)
     }
 }

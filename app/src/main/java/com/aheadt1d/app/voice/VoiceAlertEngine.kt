@@ -63,15 +63,21 @@ object VoiceAlertEngine {
      * Speaks [text] for [category], if allowed. Returns without any TTS or audio
      * work when the master toggle or the category toggle is off - the gate is
      * evaluated before anything else touches the audio system.
+     *
+     * EMERGENCY is the one exception: it skips both gates entirely (see
+     * VoiceAlertCategory's doc) - a critical-low siren must not be silenced
+     * by the user's general voice-alert preference.
      */
     fun speak(context: Context, category: VoiceAlertCategory, text: String) {
-        if (!VoiceAlertPrefs.isMasterEnabled(context)) {
-            Log.d(TAG, "Skipped $category: master voice toggle off")
-            return
-        }
-        if (!VoiceAlertPrefs.isCategoryEnabled(context, category)) {
-            Log.d(TAG, "Skipped $category: category toggle off")
-            return
+        if (category != VoiceAlertCategory.EMERGENCY) {
+            if (!VoiceAlertPrefs.isMasterEnabled(context)) {
+                Log.d(TAG, "Skipped $category: master voice toggle off")
+                return
+            }
+            if (!VoiceAlertPrefs.isCategoryEnabled(context, category)) {
+                Log.d(TAG, "Skipped $category: category toggle off")
+                return
+            }
         }
 
         val engine = tts
