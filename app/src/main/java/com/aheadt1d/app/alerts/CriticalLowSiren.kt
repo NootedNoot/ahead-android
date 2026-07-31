@@ -50,11 +50,25 @@ import com.aheadt1d.app.voice.VoiceAlertEngine
  * at [MAX_TICKS] as a hard backstop against a runaway loop if something
  * breaks - better to eventually go quiet than to drain the battery to zero
  * forever.
+ *
+ * Dismissing does NOT mean "this glucose value is fine now" - it almost
+ * always still IS critical the moment it's dismissed (that's the whole
+ * point: the person just started treating it). [check] therefore tracks a
+ * separate "acknowledged" bit alongside "active": stop() sets it, so the
+ * very next check cycle - which will see the same still-critical value,
+ * since dismissing a notification doesn't change actual blood sugar - does
+ * NOT read that as a brand-new episode and restart the whole siren. It's
+ * only cleared once a reading actually recovers (CriticalLowMath.hasRecovered),
+ * at which point a later drop is unambiguously a fresh episode again.
+ * Found live: without this, dismissing only silenced the CURRENT loop
+ * instance - the next ~60s render cycle saw "still critical, not active"
+ * and started an entirely new one, so dismissing appeared to do nothing.
  */
 object CriticalLowSiren {
     private const val TAG = "CriticalLowSiren"
     private const val PREFS_NAME = "ahead_critical_low_siren"
     private const val KEY_ACTIVE = "active"
+    private const val KEY_ACKNOWLEDGED = "acknowledged"
     private const val KEY_VALUE = "value"
     private const val KEY_TICK_COUNT = "tick_count"
     private const val KEY_LAST_TICK_AT = "last_tick_at_ms"
@@ -122,11 +136,22 @@ object CriticalLowSiren {
             if (currentlyActive) {
                 Log.i(TAG, "value no longer critical ($value) - stopping siren")
                 stop(appContext)
+            } else if (prefs.getBoolean(KEY_ACKNOWLEDGED, false)) {
+                Log.i(TAG, "value no longer critical ($value) - clearing acknowledged episode")
+                prefs.edit { putBoolean(KEY_ACKNOWLEDGED, false) }
             }
             return
         }
 
         if (!currentlyActive) {
+            if (prefs.getBoolean(KEY_ACKNOWLEDGED, false)) {
+                // Same episode the user already dismissed - still critical
+                // (dismissing a notification doesn't change actual blood
+                // sugar), but they've already seen it. Stay quiet until
+                // either a real recovery clears the flag above, or a fresh
+                // start() call happens some other way.
+                return
+            }
             Log.w(TAG, "critical low ($value <= $floor) - starting emergency siren")
             start(appContext, value)
             return
@@ -149,6 +174,7 @@ object CriticalLowSiren {
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit {
             putBoolean(KEY_ACTIVE, true)
+            putBoolean(KEY_ACKNOWLEDGED, false)
             putInt(KEY_VALUE, value)
             putInt(KEY_TICK_COUNT, 0)
         }
@@ -210,11 +236,16 @@ object CriticalLowSiren {
     }
 
     /** Explicit user acknowledgment from RedAlertActivity, or an internal
-     *  auto-stop (recovery/max-ticks). Safe to call when nothing is active. */
+     *  auto-stop (recovery/max-ticks). Safe to call when nothing is active.
+     *  Always marks the episode acknowledged (see the class doc) - even on
+     *  the recovery path, where it's immediately moot since check() clears
+     *  the flag itself the moment it observes the non-critical reading that
+     *  triggered this call. */
     fun stop(context: Context) {
         val appContext = context.applicationContext
         appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
             putBoolean(KEY_ACTIVE, false)
+            putBoolean(KEY_ACKNOWLEDGED, true)
             remove(KEY_VALUE)
             remove(KEY_TICK_COUNT)
             remove(KEY_LAST_TICK_AT)
