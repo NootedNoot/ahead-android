@@ -63,10 +63,12 @@ object CriticalLowEmergencyScheduler {
      *  runs (acknowledged or auto-resolved). Safe to call when nothing is
      *  pending. */
     fun cancel(context: Context) {
+        Log.d(TAG, "cancel() called")
         val appContext = context.applicationContext
         appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit { remove(KEY_PENDING_MESSAGE) }
         val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
         alarmManager.cancel(pendingIntent(appContext))
+        Log.d(TAG, "cancelled critical-low emergency-contact timer")
     }
 
     /** Null means it was already cancelled between the alarm being queued
