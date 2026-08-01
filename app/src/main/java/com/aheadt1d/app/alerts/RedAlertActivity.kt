@@ -56,6 +56,7 @@ class RedAlertActivity : AppCompatActivity() {
 
     private var currentValue = 0
     private var currentRate: Double? = null
+    private var currentProjected: Int? = null
     private var isSignalLostMode = false
     private var isCriticalEmergency = false
 
@@ -118,6 +119,7 @@ class RedAlertActivity : AppCompatActivity() {
             } ?: GlucoseTrendArrow.FLAT
             currentValue = lastValue
             currentRate = null
+            currentProjected = null
 
             headingView.setText(R.string.red_alert_signal_lost_heading)
             // Deliberately NOT a glucose number here (see the class doc) - a
@@ -137,6 +139,7 @@ class RedAlertActivity : AppCompatActivity() {
         val rate = if (intent.hasExtra(EXTRA_RATE)) intent.getDoubleExtra(EXTRA_RATE, 0.0) else null
         currentValue = value
         currentRate = rate
+        currentProjected = projected
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
 
         findViewById<TextView>(R.id.alertValueText).text = "$value"
@@ -155,10 +158,16 @@ class RedAlertActivity : AppCompatActivity() {
     /** Red fires for both a critically low and a critically high reading -
      *  the same 70 mg/dL split the chart's low/high limit lines use. Signal-
      *  lost mode overrides both: there's no confirmed high/low to report,
-     *  only that the data feed itself stopped. */
+     *  only that the data feed itself stopped. Also checks currentProjected,
+     *  not just currentValue - matching AlertCoordinator/AlertNotifier's own
+     *  fix (see AlertCoordinator's isLowSide doc): a still-high current
+     *  value that's projected to crash into the low band within 15 min must
+     *  still count as LOW here, or a manual "notify my contact" tap from
+     *  this screen would send the wrong message type. */
     private fun alertType(): EmergencyAlertType = when {
         isSignalLostMode -> EmergencyAlertType.NO_DATA
         currentValue <= LOW_HIGH_SPLIT -> EmergencyAlertType.LOW
+        currentProjected != null && currentProjected!! <= LOW_HIGH_SPLIT -> EmergencyAlertType.LOW
         else -> EmergencyAlertType.HIGH
     }
 
@@ -228,7 +237,10 @@ class RedAlertActivity : AppCompatActivity() {
             // No minutesUnacknowledged here - a manual tap is an in-the-moment
             // confirmation, not a measured wait (that framing belongs to the
             // automatic 15-min timeout - see EmergencyAlertScheduler).
-            val message = EmergencyAlertRepository.messageFor(this@RedAlertActivity, type, currentValue, currentRate, minutesUnacknowledged = null)
+            val message = EmergencyAlertRepository.messageFor(
+                this@RedAlertActivity, type, currentValue, currentRate,
+                minutesUnacknowledged = null, projected = currentProjected,
+            )
             val allContacts = EmergencyAlertRepository.contacts(this@RedAlertActivity).first()
             val eligible = EmergencyAlertRepository.eligibleContacts(this@RedAlertActivity, allContacts)
             var sentCount = 0

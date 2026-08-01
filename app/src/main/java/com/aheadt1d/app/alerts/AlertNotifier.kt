@@ -45,9 +45,13 @@ object AlertNotifier {
     private const val REQ_SIGNAL_LOST_FSI = 2107
 
     // Same 70 mg/dL split AlertCoordinator/RedAlertActivity each keep their
-    // own copy of - decides which direction's tone plays.
+    // own copy of - decides which direction's tone plays. Also considers
+    // projected like AlertCoordinator's own copy does (see its doc): a
+    // still-high current value that's projected to crash into the low band
+    // should get the falling/low tone, not the rising/high one.
     private const val LOW_HIGH_SPLIT = 70
-    private fun isLowSide(value: Int): Boolean = value <= LOW_HIGH_SPLIT
+    private fun isLowSide(value: Int, projected: Int?): Boolean =
+        value <= LOW_HIGH_SPLIT || (projected != null && projected <= LOW_HIGH_SPLIT)
 
     /**
      * @param recovering True only for a low-side red that's rising as
@@ -106,10 +110,23 @@ object AlertNotifier {
             nm.cancel(YELLOW_ALERT_NOTIFICATION_ID)
         }
 
-        // recovering is low-side-only (see the doc above) - its calmer
-        // treatment gets the softer warn tone, not the three-chirp urgent
-        // one, matching the visual softening already applied above.
-        AlertTones.play(context, if (recovering) AlertTones.Tone.WARN_LOW else if (isLowSide(value)) AlertTones.Tone.URGENT_LOW else AlertTones.Tone.URGENT_HIGH)
+        // 2026-08-01: red-tier alerts no longer play a tone at all. Sound was
+        // doing the least useful work of the three channels here - across a
+        // run of several lows in one day the repeated alarm-stream tone
+        // became genuinely punishing to live with, while the spoken value is
+        // what actually tells the person what to DO and the vibration is what
+        // reaches them without waking a room. Vibration still fires (the red
+        // channel's own pattern) and voice is now ungated (see
+        // VoiceAlertEngine.UNGATED_CATEGORIES), so "voice and a buzz" is
+        // literally what this tier now is.
+        //
+        // The `recovering` variant never had an urgent tone anyway; it keeps
+        // its softer warn tone, since that path is a deliberately calmer
+        // heads-up rather than an emergency.
+        if (recovering) AlertTones.play(context, AlertTones.Tone.WARN_LOW)
+
+        // CriticalLowSiren is deliberately unaffected by this: its own looping
+        // alarm ringtone is the last-resort tier and stays loud on purpose.
 
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
@@ -142,7 +159,7 @@ object AlertNotifier {
 
         notifyIfAllowed(context) { nm -> nm.notify(YELLOW_ALERT_NOTIFICATION_ID, notification) }
 
-        AlertTones.play(context, if (isLowSide(value)) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH)
+        AlertTones.play(context, if (isLowSide(value, projected)) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH)
 
         VoiceAlertEngine.speak(
             context,

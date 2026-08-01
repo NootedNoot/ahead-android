@@ -76,25 +76,61 @@ object EmergencyAlertRepository {
         value: Int?,
         rate: Double?,
         minutesUnacknowledged: Long?,
+        projected: Int? = null,
     ): String {
         val userName = EmergencyContactsPrefs.userName(context)
         val timeClause = if (minutesUnacknowledged != null) ", no response in ${minutesUnacknowledged} min" else ""
         return when (alertType) {
             EmergencyAlertType.LOW, EmergencyAlertType.HIGH -> {
-                val direction = when {
-                    rate == null -> ""
-                    alertType == EmergencyAlertType.LOW && rate < -0.3 -> ", dropping"
-                    alertType == EmergencyAlertType.HIGH && rate > 0.3 -> ", rising"
-                    else -> ""
-                }
                 val valueText = value?.let { "$it mg/dL" } ?: "an unknown level"
-                "Ahead alert: $userName's glucose is $valueText — ${alertType.label}$direction$timeClause. Please check on them or call now."
+                val movement = movementClause(rate)
+                // The projection is what makes a still-normal-looking number
+                // legible as an emergency. Only included when it actually
+                // says something worse than where they are now - otherwise
+                // it's noise that dilutes the message.
+                val projectionClause = projectionClause(alertType, value, projected)
+                "Ahead alert: $userName's glucose is $valueText$movement$projectionClause — ${alertType.label}$timeClause. Please check on them or call now."
             }
             EmergencyAlertType.NO_DATA -> {
                 val lastKnown = value?.let { " (last reading $it mg/dL)" } ?: ""
                 "Ahead alert: $userName's glucose data has stopped updating$lastKnown$timeClause. Please check on them."
             }
         }
+    }
+
+    /**
+     * Speed-graded direction, with the number. A -1.3 and a -3.2 are very
+     * different emergencies and the person receiving this has no other way to
+     * tell them apart - without a speed cue every alert reads the same, and a
+     * contact who's seen a few mild ones learns to assume "they've got it"
+     * right before the one where they haven't. Thresholds match the app's own
+     * urgency language (AlertNotifier.spokenDirection uses the same 2.0
+     * fast/normal split).
+     */
+    private fun movementClause(rate: Double?): String {
+        if (rate == null || kotlin.math.abs(rate) < 0.3) return ""
+        val speed = when {
+            kotlin.math.abs(rate) >= 3.0 -> " very fast"
+            kotlin.math.abs(rate) >= 2.0 -> " fast"
+            else -> ""
+        }
+        val direction = if (rate < 0) "dropping" else "rising"
+        val formatted = String.format(java.util.Locale.US, "%+.1f", rate)
+        return " and $direction$speed ($formatted mg/dL/min)"
+    }
+
+    /** The 15-minute projection, included only when it's worse than the
+     *  current value in the direction of the alert - a projection heading
+     *  back toward safe would undercut the urgency it's meant to convey. */
+    private fun projectionClause(alertType: EmergencyAlertType, value: Int?, projected: Int?): String {
+        if (projected == null || value == null) return ""
+        val worsening = when (alertType) {
+            EmergencyAlertType.LOW -> projected < value
+            EmergencyAlertType.HIGH -> projected > value
+            EmergencyAlertType.NO_DATA -> false
+        }
+        if (!worsening) return ""
+        return ", heading for $projected mg/dL within 15 min"
     }
 
     /** Sends the pre-built [message] to one contact and logs it locally. */

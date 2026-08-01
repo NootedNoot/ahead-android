@@ -272,7 +272,18 @@ object AlertCoordinator {
         }
     }
 
-    private fun isLowSide(value: Int): Boolean = value <= LOW_HIGH_SPLIT
+    /** Low vs high isn't just "which side of 70 is the CURRENT value on" -
+     *  a reading can still read high (e.g. 79) while already scored "red"
+     *  because it's projected to crash through the low band within 15 min
+     *  (fast negative rate). Classifying that as high-side would route it
+     *  through the never-suppressed high-side heartbeat instead of the
+     *  low-side recovery logic, AND - more importantly - would schedule the
+     *  wrong EmergencyAlertType if it goes unacknowledged, texting an
+     *  emergency contact that the person is HIGH while they're actually
+     *  crashing low. 2026-08-01: found via a real episode that scored red
+     *  at value=79/projected=67 and was misclassified high-side. */
+    private fun isLowSide(value: Int, projected: Int?): Boolean =
+        value <= LOW_HIGH_SPLIT || (projected != null && projected <= LOW_HIGH_SPLIT)
 
     /** Wipes peak-tracking state when a red episode ends, so the next one
      *  (low or high) starts from a clean slate instead of inheriting a stale
@@ -305,7 +316,7 @@ object AlertCoordinator {
                 putInt(KEY_RED_LAST_VALUE, reading.value)
                 // Remember which side this episode is, so the clear-hysteresis
                 // below only ever holds a LOW red (never a high one).
-                putBoolean(KEY_RED_LOW_SIDE, isLowSide(reading.value))
+                putBoolean(KEY_RED_LOW_SIDE, isLowSide(reading.value, reading.projected))
             }
         }
         fireRedIfWarranted(context, prefs, reading, forceFire = newlyRed, newlyRed = newlyRed, now, lastRedFiredAt, suppressAlert)
@@ -354,7 +365,7 @@ object AlertCoordinator {
         val value = reading.value
         val rate = reading.ratePerMinute
 
-        if (isLowSide(value)) {
+        if (isLowSide(value, reading.projected)) {
             val wasRecovering = prefs.getBoolean(KEY_LOW_WAS_RECOVERING, false)
             val recovering = rate != null && rate > 0
             prefs.edit { putBoolean(KEY_LOW_WAS_RECOVERING, recovering) }
@@ -373,7 +384,7 @@ object AlertCoordinator {
             if ((forceFire || recoveryJustStopped || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
                 AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
-                if (newlyRed) scheduleEmergencyAlert(context, EmergencyAlertType.LOW, value, rate)
+                if (newlyRed) scheduleEmergencyAlert(context, EmergencyAlertType.LOW, value, rate, reading.projected)
             }
             return
         }
@@ -387,7 +398,7 @@ object AlertCoordinator {
         if ((forceFire || rearm.exceededPeak || rearm.climbingBack || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
             AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false)
             prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
-            if (newlyRed) scheduleEmergencyAlert(context, EmergencyAlertType.HIGH, value, rate)
+            if (newlyRed) scheduleEmergencyAlert(context, EmergencyAlertType.HIGH, value, rate, reading.projected)
         }
     }
 
@@ -395,13 +406,19 @@ object AlertCoordinator {
      *  episode (or, via the NO_DATA overload in handleStale, a new dark
      *  period). No-ops entirely when the feature is off, so a disabled
      *  feature never even schedules a wakeup for nothing. */
-    private fun scheduleEmergencyAlert(context: Context, type: EmergencyAlertType, value: Int, rate: Double?) {
+    private fun scheduleEmergencyAlert(
+        context: Context,
+        type: EmergencyAlertType,
+        value: Int,
+        rate: Double?,
+        projected: Int? = null,
+    ) {
         if (!EmergencyContactsPrefs.isEnabled(context)) return
         // Read once, reused for both the message text and the actual alarm
         // delay below - see EmergencyAlertScheduler.schedule's doc for why
         // this can't be two independent reads.
         val timeoutMinutes = EmergencyContactsPrefs.alertTimeoutMinutes(context)
-        val message = EmergencyAlertRepository.messageFor(context, type, value, rate, timeoutMinutes)
+        val message = EmergencyAlertRepository.messageFor(context, type, value, rate, timeoutMinutes, projected)
         EmergencyAlertScheduler.schedule(context, type, message, timeoutMinutes)
     }
 

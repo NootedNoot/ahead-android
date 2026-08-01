@@ -2,6 +2,7 @@ package com.aheadt1d.app.alerts
 
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.util.Log
 import androidx.annotation.RawRes
@@ -65,8 +66,16 @@ object AlertTones {
      *  which fire once per alert, not CriticalLowSiren's repeat-until-
      *  acknowledged loop. Self-releases on completion/error. */
     fun play(context: Context, tone: Tone) {
+        val appContext = context.applicationContext
+        // Urgent tones (red/signal-lost) force the alarm stream to max first,
+        // same as CriticalLowSiren - USAGE_ALARM audio attributes alone only
+        // guarantee this isn't BLOCKED by DND, not that it's audible; a
+        // low/zeroed alarm-stream volume would otherwise play this silently
+        // even though every permission and channel setting is correct. See
+        // AlertChannels' class doc for the incident that taught us this.
+        if (tone.urgent) forceAlarmVolume(appContext)
         runCatching {
-            val player = MediaPlayer.create(context.applicationContext, tone.res)
+            val player = MediaPlayer.create(appContext, tone.res)
             if (player == null) {
                 Log.w(TAG, "MediaPlayer.create returned null for $tone")
                 return
@@ -76,5 +85,13 @@ object AlertTones {
             player.setOnErrorListener { mp, _, _ -> runCatching { mp.release() }; true }
             player.start()
         }.onFailure { Log.w(TAG, "couldn't play $tone", it) }
+    }
+
+    private fun forceAlarmVolume(context: Context) {
+        val audioManager = context.getSystemService(AudioManager::class.java) ?: return
+        runCatching {
+            val maxVol = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxVol, 0)
+        }.onFailure { Log.w(TAG, "couldn't force alarm volume", it) }
     }
 }

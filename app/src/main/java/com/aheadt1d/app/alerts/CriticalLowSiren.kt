@@ -64,6 +64,33 @@ import com.aheadt1d.app.voice.VoiceAlertEngine
  * Found live: without this, dismissing only silenced the CURRENT loop
  * instance - the next ~60s render cycle saw "still critical, not active"
  * and started an entirely new one, so dismissing appeared to do nothing.
+ *
+ * Two bands (2026-08-01), added after a direct ask from the person this app
+ * is for: hypoglycemia unawareness means no adrenaline/sweat/shakes warn
+ * them below ~55, so waiting for the hard floor to fire the ONE fully
+ * reliable delivery mechanism in this app leaves a shrinking reaction
+ * window.
+ *
+ *  - BAND_TANKING opens at CriticalLowMath.TANKING_ENTRY (73) or below while
+ *    confirmed falling (see CriticalLowMath.isTanking - a flat or rising
+ *    value in the same range is routine and opens nothing). Once open it
+ *    pings on a descending ladder (73/70/67/63, CriticalLowMath.TANKING_RUNGS)
+ *    - each rung once, downward only - plus a "still not resolved" heartbeat
+ *    every TANKING_REALERT_COOLDOWN_MS, plus an immediate ping whenever
+ *    recovery stalls or reverses. Delivery is identical to the emergency
+ *    band (forced alarm volume, direct vibration, voice that ignores the
+ *    master toggle); what differs is that it does not loop continuously and
+ *    does not force a screen takeover. No AlarmManager repeat chain - it
+ *    rides the same natural check() cadence AlertCoordinator does.
+ *  - BAND_EMERGENCY (value <= DEFAULT_FLOOR, 55): nonstop repeat until
+ *    acknowledged or recovered, full-screen takeover, and its own tighter
+ *    10-min emergency-contact timer.
+ *
+ * An active episode moves between bands mid-flight as the value crosses 55
+ * (escalateToEmergency/deescalateToTanking). Both bands end only at
+ * CriticalLowMath.RECOVERY_THRESHOLD (75) or an explicit acknowledgment -
+ * climbing to 58 is not resolution, so neither the ladder nor the
+ * emergency-contact timer resets on the way up.
  */
 object CriticalLowSiren {
     private const val TAG = "CriticalLowSiren"
@@ -73,6 +100,23 @@ object CriticalLowSiren {
     private const val KEY_VALUE = "value"
     private const val KEY_TICK_COUNT = "tick_count"
     private const val KEY_LAST_TICK_AT = "last_tick_at_ms"
+    private const val KEY_BAND = "band"
+    private const val KEY_TANKING_LAST_FIRED_AT = "tanking_last_fired_at_ms"
+    private const val KEY_TANKING_WAS_RECOVERING = "tanking_was_recovering"
+    // Deepest ladder rung already announced this episode (see
+    // CriticalLowMath.TANKING_RUNGS). Lower = worse. Sentinel
+    // Int.MAX_VALUE means "nothing announced yet".
+    private const val KEY_DEEPEST_RUNG_FIRED = "deepest_rung_fired"
+    // Which band was active when the user acknowledged - see check()'s
+    // acknowledgment handling for why "they dismissed it" is not a single
+    // yes/no but depends on WHAT they dismissed.
+    private const val KEY_ACKNOWLEDGED_BAND = "acknowledged_band"
+    // Whether this episode has already armed its emergency-contact timer.
+    // Survives band changes on purpose - see escalateToEmergency.
+    private const val KEY_CONTACT_TIMER_ARMED = "contact_timer_armed"
+
+    private const val BAND_EMERGENCY = "emergency"
+    private const val BAND_TANKING = "tanking"
 
     const val CHANNEL_ID = "glucose_critical_low_emergency"
     private const val NOTIFICATION_ID = 2005 // distinct from AlertNotifier's 2001-2004
@@ -81,10 +125,20 @@ object CriticalLowSiren {
 
     private const val TICK_INTERVAL_MS = 25_000L
 
+    // Roughly two CGM cycles (readings land about every 5 min). Deliberately
+    // tighter than AlertCoordinator's 15-min red heartbeat: a low that is
+    // NOT resolving is the case where repetition actually earns its keep, and
+    // the person this app is for gets no bodily warning to fall back on. The
+    // ladder in CriticalLowMath.TANKING_RUNGS carries the "it got worse"
+    // pings; this carries the "it still hasn't got better" ones.
+    private const val TANKING_REALERT_COOLDOWN_MS = 10 * 60_000L
+
     // Deliberately its own, tighter constant - NOT
     // EmergencyContactsPrefs.alertTimeoutMinutes() (the general red-alert
     // default, 15 min) - a value under the critical floor is more severe
     // than an ordinary red alert and earns a faster escalation to a human.
+    // Emergency-band only - see the class doc on why tanking-band doesn't
+    // arm its own contact timer.
     const val EMERGENCY_CONTACT_TIMEOUT_MINUTES = 10L
 
     // How long without a real tick before maybeStart treats the loop as dead
@@ -117,28 +171,33 @@ object CriticalLowSiren {
 
     /** Entry point - called every check cycle alongside (never instead of)
      *  AlertCoordinator.evaluate(), from GlucoseStatusService. Reconciles all
-     *  three states in one call rather than only ever starting:
+     *  states in one call rather than only ever starting:
      *   - genuinely recovered (CriticalLowMath.hasRecovered, >= 70) -> the
      *     only condition that stops an active siren or clears an
-     *     acknowledged episode. 2026-08-01 fix: this used to stop as soon as
-     *     the value merely climbed back above the 55 critical floor - e.g.
-     *     58, still a real low - because it checked isCriticalLow's negation
-     *     instead of the actual recovery threshold. Since this runs far more
-     *     often than tick()'s own (correct) recovery check, it almost always
-     *     won that race, so the siren could go quiet well before a genuine
-     *     recovery. Now both checks agree.
-     *   - not recovered, still active -> keep going regardless of whether
-     *     the value is <= floor or sitting in the 56-69 gray zone; only the
-     *     heartbeat check applies.
-     *   - not recovered, not active, value <= floor -> start a fresh loop
-     *     (unless already acknowledged - see below). A gray-zone value with
-     *     nothing currently running starts nothing; isCriticalLow's own hard
-     *     floor still gates what counts as "critical enough to start".
+     *     acknowledged episode, regardless of which band it was in.
+     *     2026-08-01 fix: this used to stop as soon as the value merely
+     *     climbed back above the 55 critical floor - e.g. 58, still a real
+     *     low - because it checked isCriticalLow's negation instead of the
+     *     actual recovery threshold. Since this runs far more often than
+     *     tick()'s own (correct) recovery check, it almost always won that
+     *     race, so the siren could go quiet well before a genuine recovery.
+     *     Now both checks agree.
+     *   - not recovered, already active -> reconcile band (escalate/
+     *     de-escalate if the value crossed 55 since the last check) and run
+     *     that band's own re-fire logic. See escalateToEmergency/
+     *     deescalateToTanking/maybeReAlertTanking and the heartbeat-stall
+     *     resurrection below.
+     *   - not recovered, not active, value <= floor -> start a fresh
+     *     BAND_EMERGENCY loop (unless already acknowledged - see below).
+     *   - not recovered, not active, tanking (CriticalLowMath.isTanking) ->
+     *     start a fresh BAND_TANKING episode: one full-strength alert, no
+     *     repeat loop armed.
+     *   - neither -> nothing to do.
      *   - acknowledged (already dismissed this episode) suppresses a fresh
-     *     start until a genuine recovery clears it - dismissing a
-     *     notification doesn't change actual blood sugar, so a still-low
-     *     value right after dismissing must not read as a new episode. */
-    fun check(context: Context, value: Int, floor: Int = CriticalLowMath.DEFAULT_FLOOR) {
+     *     start in EITHER band until a genuine recovery clears it -
+     *     dismissing a notification doesn't change actual blood sugar, so a
+     *     still-low value right after dismissing must not read as new. */
+    fun check(context: Context, value: Int, rate: Double? = null, floor: Int = CriticalLowMath.DEFAULT_FLOOR) {
         val appContext = context.applicationContext
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val currentlyActive = prefs.getBoolean(KEY_ACTIVE, false)
@@ -154,45 +213,192 @@ object CriticalLowSiren {
             return
         }
 
+        val isEmergency = CriticalLowMath.isCriticalLow(value, floor)
+
         if (currentlyActive) {
-            val lastTickAt = prefs.getLong(KEY_LAST_TICK_AT, 0L)
-            if (System.currentTimeMillis() - lastTickAt > HEARTBEAT_STALL_MS) {
-                Log.w(TAG, "siren marked active but no tick in over ${HEARTBEAT_STALL_MS / 1000}s - resurrecting")
-                stampTick(appContext, prefs)
-                fireTick(appContext, value)
-                scheduleNextTick(appContext)
+            val currentBand = prefs.getString(KEY_BAND, BAND_EMERGENCY)
+            when {
+                isEmergency && currentBand != BAND_EMERGENCY -> escalateToEmergency(appContext, prefs, value, rate)
+                !isEmergency && currentBand == BAND_EMERGENCY -> deescalateToTanking(appContext, prefs, value)
+                currentBand == BAND_EMERGENCY -> {
+                    val lastTickAt = prefs.getLong(KEY_LAST_TICK_AT, 0L)
+                    if (System.currentTimeMillis() - lastTickAt > HEARTBEAT_STALL_MS) {
+                        Log.w(TAG, "siren marked active but no tick in over ${HEARTBEAT_STALL_MS / 1000}s - resurrecting")
+                        stampTick(appContext, prefs)
+                        fireTick(appContext, value, BAND_EMERGENCY)
+                        scheduleNextTick(appContext)
+                    }
+                }
+                else -> maybeReAlertTanking(appContext, prefs, value, rate)
             }
             return
         }
 
-        if (!CriticalLowMath.isCriticalLow(value, floor)) return // gray zone (56-69ish) - nothing running, nothing to start
-
         if (prefs.getBoolean(KEY_ACKNOWLEDGED, false)) {
             // Same episode the user already dismissed - still not recovered,
-            // but they've already seen it. Stay quiet until a real recovery
-            // clears the flag above.
-            return
+            // but they've already seen it. Normally stay quiet until a real
+            // recovery clears the flag above.
+            //
+            // EXCEPT when things have since got materially worse. Dismissing
+            // a TANKING warning means "I know I'm dropping, I'm on it" - it
+            // does NOT mean "and I accept silence if I end up at 45". The
+            // 2026-08-01 audit found that it did exactly that: acknowledging
+            // at 65 suppressed the emergency siren all the way down, because
+            // this gate ran before the isEmergency check below and the flag
+            // only ever cleared at 70. Deteriorating from an acknowledged
+            // tanking episode into a true critical low is new information and
+            // must override the acknowledgment. The reverse is deliberately
+            // NOT true: acknowledging the emergency band suppresses
+            // everything below it, since there is nothing worse to escalate
+            // to and re-nagging someone actively treating a 45 is the alarm
+            // fatigue this tier can least afford.
+            val acknowledgedBand = prefs.getString(KEY_ACKNOWLEDGED_BAND, BAND_EMERGENCY)
+            if (!(isEmergency && acknowledgedBand == BAND_TANKING)) return
+            Log.w(TAG, "acknowledged tanking episode deteriorated to a critical low ($value) - overriding acknowledgment")
         }
-        Log.w(TAG, "critical low ($value <= $floor) - starting emergency siren")
-        start(appContext, value)
+
+        if (isEmergency) {
+            Log.w(TAG, "critical low ($value <= $floor) - starting emergency siren")
+            start(appContext, value, BAND_EMERGENCY, rate)
+        } else if (CriticalLowMath.isTanking(value, rate, floor)) {
+            Log.w(TAG, "tanking below ${CriticalLowMath.TANKING_ENTRY} ($value, rate=$rate) - opening the alert ladder")
+            start(appContext, value, BAND_TANKING, rate)
+        }
     }
 
     fun isActive(context: Context): Boolean =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_ACTIVE, false)
 
-    private fun start(context: Context, value: Int) {
+    private fun start(context: Context, value: Int, band: String, rate: Double?) {
         val appContext = context.applicationContext
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit {
             putBoolean(KEY_ACTIVE, true)
             putBoolean(KEY_ACKNOWLEDGED, false)
+            putString(KEY_BAND, band)
             putInt(KEY_VALUE, value)
             putInt(KEY_TICK_COUNT, 0)
         }
         stampTick(appContext, prefs)
-        fireTick(appContext, value)
-        scheduleNextTick(appContext)
-        scheduleEmergencyContactAlert(appContext, value)
+        fireTick(appContext, value, band) // always one full-strength alert, either band
+        if (band == BAND_EMERGENCY) {
+            scheduleNextTick(appContext)
+            scheduleEmergencyContactAlert(appContext, value, rate)
+        } else {
+            prefs.edit {
+                putLong(KEY_TANKING_LAST_FIRED_AT, System.currentTimeMillis())
+                // Seed the ladder's low-water mark at whatever rung this
+                // opening value already sits below, so entering partway down
+                // (e.g. straight in at 64) doesn't then replay the rungs
+                // above it that were never actually announced.
+                CriticalLowMath.deepestRungCrossed(value)?.let { putInt(KEY_DEEPEST_RUNG_FIRED, it) }
+            }
+        }
+    }
+
+    /** Mid-episode crossing from tanking into a true critical low - arms
+     *  the aggressive repeat chain and the tighter contact timer that a
+     *  fresh emergency-band start would have gotten. */
+    private fun escalateToEmergency(context: Context, prefs: android.content.SharedPreferences, value: Int, rate: Double?) {
+        Log.w(TAG, "tanking episode crossed into true emergency ($value) - escalating")
+        prefs.edit {
+            putString(KEY_BAND, BAND_EMERGENCY)
+            putInt(KEY_VALUE, value)
+            putInt(KEY_TICK_COUNT, 0)
+        }
+        stampTick(context, prefs)
+        fireTick(context, value, BAND_EMERGENCY)
+        scheduleNextTick(context)
+        // Deliberately NOT unconditional. A low fighting its way around the
+        // floor (52 -> 57 -> 53 -> 58) crosses this boundary repeatedly, and
+        // re-arming a fresh 10 minutes on every crossing would push the
+        // emergency-contact text out indefinitely - nobody would ever be
+        // called, precisely during the longest episodes. AlertCoordinator
+        // documents this same hazard for its own timer; the 2026-08-01 audit
+        // found the band logic had reintroduced it here.
+        scheduleEmergencyContactAlert(context, value, rate)
+    }
+
+    /** Mid-episode climb back above the hard floor while still under the
+     *  recovery threshold - drops the nonstop repeat chain and the tighter
+     *  contact timer back down to tanking's calmer heartbeat. Explicitly
+     *  stops the currently-looping ringtone/vibration rather than letting
+     *  them run until their next natural re-assert, since "de-escalate"
+     *  should be heard/felt immediately, not just decided internally. */
+    private fun deescalateToTanking(context: Context, prefs: android.content.SharedPreferences, value: Int) {
+        Log.i(TAG, "climbed above the emergency floor ($value) but not recovered - de-escalating to the ladder")
+        prefs.edit {
+            putString(KEY_BAND, BAND_TANKING)
+            putInt(KEY_VALUE, value)
+            putLong(KEY_TANKING_LAST_FIRED_AT, System.currentTimeMillis())
+            // Seed the ladder at where the value actually IS now, so climbing
+            // back up through rungs stays quiet (only downward moves ping).
+            CriticalLowMath.deepestRungCrossed(value)?.let { rung ->
+                putInt(KEY_DEEPEST_RUNG_FIRED, minOf(rung, prefs.getInt(KEY_DEEPEST_RUNG_FIRED, Int.MAX_VALUE)))
+            }
+        }
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+        alarmManager?.cancel(operationPendingIntent(context))
+        // NOTE: deliberately does NOT cancel CriticalLowEmergencyScheduler.
+        // Climbing from 52 to 58 is not resolution - the person is still
+        // under the recovery threshold and still hasn't acknowledged
+        // anything. Cancelling here (as this did before the 2026-08-01 audit)
+        // meant an episode that oscillated across the floor could tear down
+        // and re-arm the contact timer forever without it ever firing. Only
+        // stop() - an explicit acknowledgment or a real recovery - ends it.
+        ringtone?.let { runCatching { if (it.isPlaying) it.stop() } }
+        ringtone = null
+        runCatching { vibrator(context)?.cancel() }
+    }
+
+    /**
+     * Tanking-band re-fire while still active. Three independent reasons to
+     * ping, in priority order:
+     *
+     *  1. A NEW LADDER RUNG was crossed downward (73 -> 70 -> 67 -> 63).
+     *     Fires regardless of this reading's rate: once an episode is open,
+     *     reaching a worse rung is itself the news. Rate only ever gated
+     *     OPENING the episode. Climbing back up through rungs never fires -
+     *     that's recovery, and [CriticalLowMath.deepestRungCrossed] only
+     *     moves the recorded low-water mark downward.
+     *  2. RECOVERY STALLED OR REVERSED since the last check - new
+     *     information, same urgency as a fresh drop (mirrors
+     *     AlertCoordinator.fireRedIfWarranted's low-side logic).
+     *  3. STILL NOT RESOLVED after [TANKING_REALERT_COOLDOWN_MS] - the
+     *     "you're still down here" heartbeat.
+     *
+     * Suppressed entirely while genuinely recovering (rate > 0), so climbing
+     * out stays quiet right up until [CriticalLowMath.hasRecovered] stops the
+     * episode outright.
+     */
+    private fun maybeReAlertTanking(context: Context, prefs: android.content.SharedPreferences, value: Int, rate: Double?) {
+        val previousDeepest = prefs.getInt(KEY_DEEPEST_RUNG_FIRED, Int.MAX_VALUE)
+        val currentDeepest = CriticalLowMath.deepestRungCrossed(value)
+        val crossedNewRung = currentDeepest != null && currentDeepest < previousDeepest
+
+        val wasRecovering = prefs.getBoolean(KEY_TANKING_WAS_RECOVERING, false)
+        val recovering = rate != null && rate > 0
+        prefs.edit { putBoolean(KEY_TANKING_WAS_RECOVERING, recovering) }
+
+        // A new rung outranks the recovery hush: a reading can show a
+        // positive rate (CGM noise, or a genuine bounce that didn't hold)
+        // while still having reached a materially worse number than anything
+        // announced so far. That number is worth saying out loud.
+        if (recovering && !crossedNewRung) return
+
+        val recoveryJustStopped = wasRecovering && !recovering
+        val lastFiredAt = prefs.getLong(KEY_TANKING_LAST_FIRED_AT, 0L)
+        val now = System.currentTimeMillis()
+        if (!crossedNewRung && !recoveryJustStopped && now - lastFiredAt < TANKING_REALERT_COOLDOWN_MS) return
+
+        if (crossedNewRung) Log.w(TAG, "crossed ladder rung $currentDeepest ($value) - re-alerting")
+        stampTick(context, prefs)
+        fireTick(context, value, BAND_TANKING)
+        prefs.edit {
+            putInt(KEY_VALUE, value)
+            putLong(KEY_TANKING_LAST_FIRED_AT, now)
+            if (currentDeepest != null) putInt(KEY_DEEPEST_RUNG_FIRED, minOf(currentDeepest, previousDeepest))
+        }
     }
 
     private fun stampTick(context: Context, prefs: android.content.SharedPreferences) {
@@ -204,13 +410,22 @@ object CriticalLowSiren {
      *  out forever and defeat the point of a fixed unacknowledged-duration
      *  timeout). No-ops if the feature is off, same gate AlertCoordinator's
      *  own scheduleEmergencyAlert uses. */
-    private fun scheduleEmergencyContactAlert(context: Context, value: Int) {
+    private fun scheduleEmergencyContactAlert(context: Context, value: Int, rate: Double?) {
         if (!EmergencyContactsPrefs.isEnabled(context)) return
+        // One arm per episode, not per band crossing - see escalateToEmergency.
+        // Cleared only by stop(), i.e. an explicit acknowledgment or a genuine
+        // recovery, both of which mean the episode is actually over.
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_CONTACT_TIMER_ARMED, false)) {
+            Log.d(TAG, "emergency-contact timer already armed for this episode - not restarting the clock")
+            return
+        }
+        prefs.edit { putBoolean(KEY_CONTACT_TIMER_ARMED, true) }
         val message = EmergencyAlertRepository.messageFor(
             context,
             EmergencyAlertType.LOW,
             value,
-            rate = null,
+            rate = rate,
             minutesUnacknowledged = EMERGENCY_CONTACT_TIMEOUT_MINUTES,
         )
         CriticalLowEmergencyScheduler.schedule(context, message, EMERGENCY_CONTACT_TIMEOUT_MINUTES)
@@ -238,11 +453,19 @@ object CriticalLowSiren {
             stop(appContext)
             return
         }
+        // De-escalation gate: don't wait on the next check() cycle to notice
+        // a climb back above the hard floor - this loop only exists while
+        // in the emergency band, so catch the transition as early as the
+        // next tick, not whenever GlucoseStatusService next renders.
+        if (raw != null && !CriticalLowMath.isCriticalLow(raw.value)) {
+            deescalateToTanking(appContext, prefs, raw.value)
+            return
+        }
         val currentValue = raw?.value ?: prefs.getInt(KEY_VALUE, 0)
 
         prefs.edit { putInt(KEY_TICK_COUNT, tickCount) }
         stampTick(appContext, prefs)
-        fireTick(appContext, currentValue)
+        fireTick(appContext, currentValue, BAND_EMERGENCY) // only ever scheduled while in the emergency band
         scheduleNextTick(appContext)
     }
 
@@ -254,12 +477,22 @@ object CriticalLowSiren {
      *  triggered this call. */
     fun stop(context: Context) {
         val appContext = context.applicationContext
-        appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        // Captured BEFORE the band is cleared - check() needs to know which
+        // tier was acknowledged, because dismissing a tanking warning must
+        // not suppress a later true emergency (see check()).
+        val bandAtStop = prefs.getString(KEY_BAND, BAND_EMERGENCY) ?: BAND_EMERGENCY
+        prefs.edit {
             putBoolean(KEY_ACTIVE, false)
             putBoolean(KEY_ACKNOWLEDGED, true)
+            putString(KEY_ACKNOWLEDGED_BAND, bandAtStop)
             remove(KEY_VALUE)
             remove(KEY_TICK_COUNT)
             remove(KEY_LAST_TICK_AT)
+            remove(KEY_BAND)
+            remove(KEY_TANKING_LAST_FIRED_AT)
+            remove(KEY_TANKING_WAS_RECOVERING)
+            remove(KEY_CONTACT_TIMER_ARMED)
         }
         ringtone?.let { runCatching { if (it.isPlaying) it.stop() } }
         ringtone = null
@@ -270,16 +503,21 @@ object CriticalLowSiren {
         CriticalLowEmergencyScheduler.cancel(appContext)
     }
 
-    private fun fireTick(context: Context, value: Int) {
+    /** [band] drives wording only - every delivery mechanism (forced volume,
+     *  direct vibration, voice bypassing the master toggle) is identical
+     *  either way. That's the whole point of BAND_TANKING: the same
+     *  can't-miss delivery, earlier, before things get worse. */
+    private fun fireTick(context: Context, value: Int, band: String) {
         ensureChannel(context)
-        postNotification(context, value)
-        forceAlarmVolumeAndPlaySound(context)
-        vibrate(context)
-        VoiceAlertEngine.speak(
-            context,
-            VoiceAlertCategory.EMERGENCY,
+        postNotification(context, value, band)
+        forceAlarmVolumeAndPlaySound(context, band)
+        vibrate(context, band)
+        val spokenText = if (band == BAND_EMERGENCY) {
             "Emergency. Glucose is $value. This is a critical low. Treat now."
-        )
+        } else {
+            "Glucose is $value and dropping. Treat now, before this becomes a critical low."
+        }
+        VoiceAlertEngine.speak(context, VoiceAlertCategory.EMERGENCY, spokenText)
     }
 
     private fun ensureChannel(context: Context) {
@@ -290,7 +528,8 @@ object CriticalLowSiren {
             "Critical low emergency",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "Fires below ${CriticalLowMath.DEFAULT_FLOOR} mg/dL - independent of the normal red alert"
+            description = "Fires at or below ${CriticalLowMath.DEFAULT_FLOOR} mg/dL, or earlier while falling fast " +
+                "through ${CriticalLowMath.RECOVERY_THRESHOLD} - independent of the normal red alert"
             setBypassDnd(true)
             enableVibration(true)
             vibrationPattern = VIBRATION_PATTERN
@@ -309,14 +548,24 @@ object CriticalLowSiren {
         nm.createNotificationChannel(channel)
     }
 
-    private fun postNotification(context: Context, value: Int) {
+    /** Emergency band gets the full-screen takeover, same as before. Tanking
+     *  band deliberately does NOT force a screen takeover - "one strong
+     *  alert" means unmistakable sound/vibration/voice/notification, not a
+     *  forced lockout for something that isn't (yet) the true emergency; it
+     *  opens the ordinary red-alert screen on tap instead, which is what a
+     *  tanking episode actually is - a low-side red, delivered reliably. */
+    private fun postNotification(context: Context, value: Int, band: String) {
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             return
         }
-        val fullScreenIntent = PendingIntent.getActivity(
+        val tapIntent = PendingIntent.getActivity(
             context,
             REQUEST_CODE,
-            RedAlertActivity.createCriticalEmergencyIntent(context, value),
+            if (band == BAND_EMERGENCY) {
+                RedAlertActivity.createCriticalEmergencyIntent(context, value)
+            } else {
+                RedAlertActivity.createIntent(context, value, projected = null, rate = null)
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         // Swiping this away means the same thing as tapping "I'm treating
@@ -333,24 +582,34 @@ object CriticalLowSiren {
             Intent(context, CriticalLowDismissReceiver::class.java).setAction(CriticalLowDismissReceiver.ACTION_DISMISSED),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
+        val (title, text) = if (band == BAND_EMERGENCY) {
+            "🚨 CRITICAL LOW: $value mg/dL" to "Treat now — swipe away once you're on it"
+        } else {
+            "🔴 Tanking: $value mg/dL, falling" to "Treat now before this becomes critical — swipe away once you're on it"
+        }
         val builder = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
-            .setContentTitle("🚨 CRITICAL LOW: $value mg/dL")
-            .setContentText("Treat now — swipe away once you're on it")
+            .setContentTitle(title)
+            .setContentText(text)
             .setCategory(Notification.CATEGORY_ALARM)
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setContentIntent(fullScreenIntent)
+            .setContentIntent(tapIntent)
             .setDeleteIntent(deleteIntent)
         // Debug-only: lets testing skip the forced lock-screen takeover while
         // keeping sound/vibration/voice/notification exactly as they'd
-        // normally fire - see DebugAlertPrefs.
-        if (!(BuildConfig.DEBUG && DebugAlertPrefs.isFullScreenDisabled(context))) {
-            builder.setFullScreenIntent(fullScreenIntent, true)
+        // normally fire - see DebugAlertPrefs. Emergency band only - tanking
+        // never sets a full-screen intent in the first place.
+        if (band == BAND_EMERGENCY && !(BuildConfig.DEBUG && DebugAlertPrefs.isFullScreenDisabled(context))) {
+            builder.setFullScreenIntent(tapIntent, true)
         }
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, builder.build())
     }
 
-    private fun forceAlarmVolumeAndPlaySound(context: Context) {
+    /** Emergency band loops continuously, re-asserted every tick (see the
+     *  class doc). Tanking band is deliberately ONE playthrough per re-alert -
+     *  "one strong alert", not a loop - so it plays once and stops on its
+     *  own; there's no repeat-tick chain armed to re-assert it anyway. */
+    private fun forceAlarmVolumeAndPlaySound(context: Context, band: String) {
         val audioManager = context.getSystemService(AudioManager::class.java)
         if (audioManager != null) {
             runCatching {
@@ -370,7 +629,7 @@ object CriticalLowSiren {
                 .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
-            newRingtone.isLooping = true
+            newRingtone.isLooping = band == BAND_EMERGENCY
             newRingtone.play()
             ringtone = newRingtone
         }.onFailure { Log.w(TAG, "couldn't play alarm sound", it) }
@@ -384,12 +643,15 @@ object CriticalLowSiren {
             context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         }
 
-    private fun vibrate(context: Context) {
+    private fun vibrate(context: Context, band: String) {
         val v = vibrator(context) ?: return
         runCatching {
             if (!v.hasVibrator()) return
-            // repeat index 0 -> loops the whole pattern indefinitely until cancel().
-            v.vibrate(VibrationEffect.createWaveform(VIBRATION_PATTERN, 0))
+            // Emergency: repeat index 0 loops the whole pattern indefinitely
+            // until cancel(). Tanking: -1 plays the pattern once and stops -
+            // matches the ringtone's isLooping choice above, same reasoning.
+            val repeat = if (band == BAND_EMERGENCY) 0 else -1
+            v.vibrate(VibrationEffect.createWaveform(VIBRATION_PATTERN, repeat))
         }.onFailure { Log.w(TAG, "couldn't vibrate", it) }
     }
 

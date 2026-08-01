@@ -3,6 +3,8 @@ package com.aheadt1d.app.alerts
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.RingtoneManager
 import android.util.Log
 import androidx.core.content.edit
 
@@ -16,10 +18,15 @@ import androidx.core.content.edit
  *  - Red: high-importance, setBypassDnd(true) so the notification itself
  *    (heads-up, vibration) pierces Do Not Disturb.
  *
- * Both channels are deliberately silent (setSound(null, null)) - actual
- * alert sound plays via AlertTones' direct MediaPlayer playback instead (see
- * its class doc), not the channel's own sound attribute. Playing both would
- * double up.
+ * Both channels ALSO carry a real default sound (2026-08-01), not just
+ * AlertTones' direct MediaPlayer playback - deliberately redundant. A real
+ * incident showed the app posting a correct, DND-bypassing red notification
+ * with nobody hearing or feeling it; AlertTones' custom playback has no
+ * fallback if MediaPlayer.create() fails, the alarm stream happens to be
+ * low, or anything else in that one code path goes wrong. The channel's own
+ * OS-managed sound is a second, independent path to the same outcome - yes,
+ * this means both may audibly play together, which is a deliberately
+ * accepted redundant-noise cost against the alternative (silence).
  *
  * BOTH channel ids are versioned (glucose_alerts_active_vN /
  * glucose_alerts_yellow_vN), because Android channels are immutable to the
@@ -63,7 +70,21 @@ object AlertChannels {
     // anti-abuse quirk - resurrected the old sound instead of clearing it,
     // while still marking the migration complete. v3 uses a versioned id
     // for yellow too (see ensure()) and re-runs for anyone who landed on v2.
-    private const val SOUND_SCHEME_VERSION = 3
+    // v3->v4 (2026-08-01): restored a real channel-level sound as a
+    // redundant fallback under AlertTones (see the class doc) - the
+    // opposite direction of the v2->v3 migration, so this also drops the
+    // old "only migrate if channel.sound != null" guard in ensure() below
+    // in favor of a plain version check, since that guard was written
+    // assuming migration only ever meant "clear the sound."
+    // v4->v5 (2026-08-01): yellow now carries an explicit vibration
+    // pattern - enableVibration(true) alone fell back to the OS default,
+    // a single short pulse easy to miss compared to red's distinct
+    // three-pulse pattern.
+    // v5->v6 (2026-08-01): red goes silent again at the owner's request -
+    // that tier is now vibration + ungated voice, no tone (see
+    // buildRedChannel). Yellow keeps its sound; only red changed, but the
+    // version gate is shared so both channels re-migrate.
+    private const val SOUND_SCHEME_VERSION = 6
 
     fun currentRedChannelId(context: Context): String =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -93,14 +114,11 @@ object AlertChannels {
         val yellowId = currentYellowChannelId(context)
         if (nm.getNotificationChannel(yellowId) == null) {
             nm.createNotificationChannel(buildYellowChannel(yellowId))
-        } else {
-            val yellowChannel = nm.getNotificationChannel(yellowId)
-            if (needsSoundMigration && yellowChannel?.sound != null) {
-                val newId = nextVersionedId(yellowId, DEFAULT_YELLOW_CHANNEL_ID)
-                nm.createNotificationChannel(buildYellowChannel(newId))
-                nm.deleteNotificationChannel(yellowId)
-                prefs.edit { putString(KEY_YELLOW_CHANNEL_ID, newId) }
-            }
+        } else if (needsSoundMigration) {
+            val newId = nextVersionedId(yellowId, DEFAULT_YELLOW_CHANNEL_ID)
+            nm.createNotificationChannel(buildYellowChannel(newId))
+            nm.deleteNotificationChannel(yellowId)
+            prefs.edit { putString(KEY_YELLOW_CHANNEL_ID, newId) }
         }
 
         val redId = currentRedChannelId(context)
@@ -110,8 +128,7 @@ object AlertChannels {
 
         val redChannel = nm.getNotificationChannel(redId) ?: return
         val redNeedsDndMigration = !redChannel.canBypassDnd() && nm.isNotificationPolicyAccessGranted
-        val redNeedsSoundMigration = needsSoundMigration && redChannel.sound != null
-        if (redNeedsDndMigration || redNeedsSoundMigration) {
+        if (redNeedsDndMigration || needsSoundMigration) {
             val newId = nextVersionedId(redId, DEFAULT_RED_CHANNEL_ID)
             nm.createNotificationChannel(buildRedChannel(newId))
             nm.deleteNotificationChannel(redId)
@@ -130,7 +147,22 @@ object AlertChannels {
         NotificationChannel(id, "Glucose warnings", NotificationManager.IMPORTANCE_HIGH).apply {
             description = "Early warnings when glucose is trending out of range"
             enableVibration(true)
-            setSound(null, null)
+            // 2026-08-01: explicit pattern, not just enableVibration(true) -
+            // that alone left the OS default (a single short, easy-to-miss
+            // buzz on this device). Two clear pulses, distinct from red's
+            // three-pulse pattern below, so severity is tellable by feel
+            // alone without looking at the phone.
+            vibrationPattern = longArrayOf(0, 300, 150, 300)
+            // Respects DND (no ALARM usage here, matching the channel not
+            // bypassing DND) - a real fallback sound, not silent, but yellow
+            // deliberately stays a quieter tier than red.
+            setSound(
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
         }
 
     private fun buildRedChannel(id: String): NotificationChannel =
@@ -139,6 +171,17 @@ object AlertChannels {
             setBypassDnd(true)
             enableVibration(true)
             vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)
+            // Silent by design as of 2026-08-01 - red alerts are vibration +
+            // (ungated) voice, no tone. See AlertNotifier.showRedAlert for
+            // the reasoning. Note this channel still sets bypassDnd and a
+            // vibration pattern: "no sound" is not "no interruption", and the
+            // buzz still has to pierce Do Not Disturb.
+            //
+            // Deliberately NOT restoring the fallback alarm sound that was
+            // added here earlier the same day - that existed to guarantee red
+            // was never silent, which is no longer the goal for this tier.
+            // CriticalLowSiren keeps its own always-loud alarm for the
+            // genuinely critical case.
             setSound(null, null)
         }
 

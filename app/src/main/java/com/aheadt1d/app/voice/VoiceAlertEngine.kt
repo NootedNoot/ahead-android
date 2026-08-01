@@ -25,6 +25,28 @@ import java.util.Locale
 object VoiceAlertEngine {
     private const val TAG = "VoiceAlertEngine"
 
+    /**
+     * Categories that ignore BOTH the master and per-category voice toggles.
+     *
+     * EMERGENCY: a critical-low siren must not be silenceable by a general
+     * preference - that tier exists precisely for the case where every other
+     * channel has failed.
+     *
+     * RED (2026-08-01): promoted here when the red-tier alert tone was
+     * removed at the owner's request. Before that, sound carried red alerts
+     * and voice was a bonus layer; now voice IS the audible half of "voice
+     * and a buzz", so leaving it behind a toggle that was in fact switched
+     * OFF at the time would have quietly reduced red alerts to vibration
+     * only. A red alert is a dangerously low or high glucose reading, which
+     * is not something a general "I don't want the app talking" preference
+     * should be able to mute.
+     *
+     * Everything below red (yellow, plateau, correction, signal-lost) still
+     * respects both toggles - those are informational tiers where the user's
+     * stated preference should win.
+     */
+    private val UNGATED_CATEGORIES = setOf(VoiceAlertCategory.EMERGENCY, VoiceAlertCategory.RED)
+
     private var tts: TextToSpeech? = null
     @Volatile private var ready = false
     private var audioManager: AudioManager? = null
@@ -64,12 +86,10 @@ object VoiceAlertEngine {
      * work when the master toggle or the category toggle is off - the gate is
      * evaluated before anything else touches the audio system.
      *
-     * EMERGENCY is the one exception: it skips both gates entirely (see
-     * VoiceAlertCategory's doc) - a critical-low siren must not be silenced
-     * by the user's general voice-alert preference.
+     * EMERGENCY and RED skip both gates entirely (see [UNGATED_CATEGORIES]).
      */
     fun speak(context: Context, category: VoiceAlertCategory, text: String) {
-        if (category != VoiceAlertCategory.EMERGENCY) {
+        if (category !in UNGATED_CATEGORIES) {
             if (!VoiceAlertPrefs.isMasterEnabled(context)) {
                 Log.d(TAG, "Skipped $category: master voice toggle off")
                 return

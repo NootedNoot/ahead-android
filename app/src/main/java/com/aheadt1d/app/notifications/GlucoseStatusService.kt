@@ -218,7 +218,7 @@ class GlucoseStatusService : Service() {
             // by the signature dedup below: the siren tracks its own
             // active/tick state independently.
             if (state is GlucoseDisplayState.Reading) {
-                CriticalLowSiren.check(this, state.value)
+                CriticalLowSiren.check(this, state.value, state.ratePerMinute)
             }
 
             val signature = state.signature()
@@ -426,7 +426,7 @@ class GlucoseStatusService : Service() {
 
             AlertCoordinator.evaluate(context, state, trend)
             if (state is GlucoseDisplayState.Reading) {
-                CriticalLowSiren.check(context, state.value)
+                CriticalLowSiren.check(context, state.value, state.ratePerMinute)
             }
 
             if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
