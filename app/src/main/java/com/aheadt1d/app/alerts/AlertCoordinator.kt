@@ -59,6 +59,17 @@ object AlertCoordinator {
     private const val KEY_YELLOW_LAST_ALERTED_PROJECTED = "yellow_last_alerted_projected"
 
     private const val RED_REALERT_COOLDOWN_MS = 15 * 60_000L
+    // Floor under the low-side "recovery just stopped" instant re-fire below.
+    // 2026-08-01: that rule had no minimum gap at all, so a low wobbling
+    // right around a flat rate (e.g. -0.1/+0.1 noise, or a real but shallow
+    // bounce) could flip the recovering flag every single cycle and re-post
+    // the full-screen red takeover every cycle with it - reported as "too
+    // many alarms" for a low that was just sticky, not worsening. A brand-new
+    // episode (forceFire) is NOT gated by this - only the instant re-fire on
+    // a sign flip is. Below this floor, a sign flip still updates the
+    // recovering/state tracking, it just doesn't independently interrupt
+    // again - the plain RED_REALERT_COOLDOWN_MS heartbeat still applies.
+    private const val MIN_REALERT_GAP_MS = 5 * 60_000L
     // Same cadence as the red re-alert heartbeat - an ongoing blackout is at
     // least as urgent as an ongoing red glucose reading, and there's no
     // reason for it to go quiet just because the first alert already fired.
@@ -379,8 +390,11 @@ object AlertCoordinator {
             }
             // Recovery just stalled/reversed is new information worth an
             // immediate alert, same urgency as a fresh low - otherwise fall
-            // back to the plain re-alert cooldown.
-            val recoveryJustStopped = wasRecovering && !recovering
+            // back to the plain re-alert cooldown. Gated by MIN_REALERT_GAP_MS
+            // (see its doc) so a wobbling rate can't retrigger this every
+            // cycle - it only counts as "new information" if it's been at
+            // least that long since the last actual alert.
+            val recoveryJustStopped = wasRecovering && !recovering && now - lastRedFiredAt >= MIN_REALERT_GAP_MS
             if ((forceFire || recoveryJustStopped || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
                 AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }

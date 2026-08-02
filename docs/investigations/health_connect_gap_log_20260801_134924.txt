@@ -1,0 +1,40 @@
+=== Health Connect gap monitor ===
+Start time: 2026-08-01T13:49:24
+Polling: https://web-production-5e0b.up.railway.app/api/v1/entries.json every 3 min for 45 min (until ~14:34:24)
+
+[13:49:24] POLL #1: NEW entry @ 13:48:36 | source=08003064337 | value=[REDACTED] mg/dL
+[13:52:24] POLL #2: NO NEW DATA since 13:48:36 (source=08003064337, last value=[REDACTED] mg/dL)
+[13:55:25] POLL #3: NEW entry @ 13:53:37 | source=08003064337 | value=[REDACTED] mg/dL
+[13:58:25] POLL #4: NO NEW DATA since 13:53:37 (source=08003064337, last value=[REDACTED] mg/dL)
+[14:01:25] POLL #5: NEW entry @ 13:58:36 | source=08003064337 | value=[REDACTED] mg/dL
+[14:04:25] POLL #6: NEW entry @ 14:03:36 | source=08003064337 | value=[REDACTED] mg/dL
+[14:07:25] POLL #7: NO NEW DATA since 14:03:36 (source=08003064337, last value=[REDACTED] mg/dL)
+[14:10:25] POLL #8: NEW entry @ 14:08:37 | source=08003064337 | value=[REDACTED] mg/dL
+[14:13:25] POLL #9: NO NEW DATA since 14:08:37 (source=08003064337, last value=[REDACTED] mg/dL)
+[14:16:25] POLL #10: NEW entry @ 14:13:37 | source=08003064337 | value=[REDACTED] mg/dL
+[14:19:25] POLL #11: NEW entry @ 14:18:37 | source=08003064337 | value=[REDACTED] mg/dL
+[14:22:25] POLL #12: NO NEW DATA since 14:18:37 (source=08003064337, last value=[REDACTED] mg/dL)
+[14:25:26] POLL #13: NEW entry @ 14:23:37 | source=08003064337 | value=[REDACTED] mg/dL
+[14:28:26] POLL #14: NO NEW DATA since 14:23:37 (source=08003064337, last value=[REDACTED] mg/dL)
+[14:31:26] POLL #15: NEW entry @ 14:28:37 | source=08003064337 | value=[REDACTED] mg/dL
+[14:34:26] POLL #16: NEW entry @ 14:33:37 | source=08003064337 | value=[REDACTED] mg/dL
+
+=== SUMMARY ===
+Monitoring window: 13:49:24 - 14:34:26 (45.0 min)
+Total new entries received: 10
+Expected count at 5-min Dexcom cadence: ~9
+Gaps found (>6.5 min of silence): 0
+Pattern: no gaps detected
+
+--- Notes (added post-run) ---
+Glucose values redacted before commit - this run's actual readings ranged
+174->205->190 mg/dL over the window, i.e. no lows involved, high-normal/
+mildly-high range throughout. Timing/gap data (the actual signal this
+script hunts for) is untouched above.
+
+Result: no Health Connect write gap reproduced in this 45-min window while
+walking with phone in pocket. This is the third of three monitoring runs
+looking for the intermittent gap - see the other two run logs (tracked
+elsewhere) before concluding the issue doesn't reproduce reliably; a clean
+run here doesn't rule out an intermittent BLE/background issue that simply
+didn't trigger in this window.

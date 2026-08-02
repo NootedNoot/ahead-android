@@ -114,7 +114,7 @@ class AlertCoordinatorTest {
     }
 
     @Test
-    fun `low red re-fires immediately when recovery stalls, even mid-cooldown`() {
+    fun `low red does not re-fire on a recovery stall within MIN_REALERT_GAP_MS`() {
         AlertCoordinator.evaluate(context, reading(value = 55, severity = "red"), trend(1L, 55, "red"))
         // Recovering - suppressed, but marks wasRecovering=true.
         AlertCoordinator.evaluate(
@@ -122,16 +122,48 @@ class AlertCoordinatorTest {
             reading(value = 58, severity = "red", ratePerMinute = 1.5),
             trend(1L, 55, "red"),
         )
-        // Recovery just stopped (flat now) - must fire immediately despite
-        // being well inside RED_REALERT_COOLDOWN_MS, since this is new
-        // information (recoveryJustStopped), not a plain heartbeat.
+        // Recovery just stopped (flat now), but the last alert fired only
+        // moments ago (well inside MIN_REALERT_GAP_MS) - 2026-08-01: this
+        // used to re-fire unconditionally on any stall/reversal, which meant
+        // a rate hovering right around zero could retrigger the full-screen
+        // takeover every single cycle. Must stay quiet here.
         AlertCoordinator.evaluate(
             context,
             reading(value = 57, severity = "red", ratePerMinute = 0.0),
             trend(1L, 55, "red"),
         )
 
-        assertTrue("expected an immediate re-fire reflecting the stalled value", redTitle()?.contains("57") == true)
+        assertTrue(
+            "must not re-fire on a stall inside MIN_REALERT_GAP_MS",
+            redTitle()?.contains("57") != true,
+        )
+    }
+
+    @Test
+    fun `low red re-fires on a recovery stall once MIN_REALERT_GAP_MS has passed`() {
+        AlertCoordinator.evaluate(context, reading(value = 55, severity = "red"), trend(1L, 55, "red"))
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 58, severity = "red", ratePerMinute = 1.5),
+            trend(1L, 55, "red"),
+        )
+        // Backdate the last-fired timestamp past MIN_REALERT_GAP_MS (5 min) -
+        // same technique the signal-lost cooldown test below uses, since the
+        // code reads plain System.currentTimeMillis().
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit()
+            .putLong("last_red_fired_at_ms", System.currentTimeMillis() - 6 * 60_000L)
+            .commit()
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 57, severity = "red", ratePerMinute = 0.0),
+            trend(1L, 55, "red"),
+        )
+
+        assertTrue(
+            "expected a re-fire reflecting the stalled value once past the floor",
+            redTitle()?.contains("57") == true,
+        )
     }
 
     @Test

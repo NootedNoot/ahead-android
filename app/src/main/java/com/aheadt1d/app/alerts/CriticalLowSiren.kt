@@ -76,11 +76,17 @@ import com.aheadt1d.app.voice.VoiceAlertEngine
  *    value in the same range is routine and opens nothing). Once open it
  *    pings on a descending ladder (73/70/67/63, CriticalLowMath.TANKING_RUNGS)
  *    - each rung once, downward only - plus a "still not resolved" heartbeat
- *    every TANKING_REALERT_COOLDOWN_MS, plus an immediate ping whenever
- *    recovery stalls or reverses. Delivery is identical to the emergency
- *    band (forced alarm volume, direct vibration, voice that ignores the
- *    master toggle); what differs is that it does not loop continuously and
- *    does not force a screen takeover. No AlarmManager repeat chain - it
+ *    every TANKING_REALERT_COOLDOWN_MS (15 min), plus an immediate ping
+ *    whenever recovery stalls or reverses (itself floored by
+ *    MIN_REALERT_GAP_MS so a wobbling rate can't retrigger every cycle - see
+ *    that constant's doc). 2026-08-01: delivery downgraded from "identical to
+ *    the emergency band" - direct owner feedback after a sticky, slowly-
+ *    resolving low produced far more forced-alarm-volume sirens than the
+ *    situation warranted ("more focused on shutting up my phone than trying
+ *    to wait and see if my low goes up"). Tanking is now voice (ungated) +
+ *    direct vibration + notification only - see forceAlarmVolumeAndPlaySound,
+ *    which now skips entirely for this band. It does not loop continuously
+ *    and does not force a screen takeover. No AlarmManager repeat chain - it
  *    rides the same natural check() cadence AlertCoordinator does.
  *  - BAND_EMERGENCY (value <= DEFAULT_FLOOR, 55): nonstop repeat until
  *    acknowledged or recovered, full-screen takeover, and its own tighter
@@ -125,13 +131,22 @@ object CriticalLowSiren {
 
     private const val TICK_INTERVAL_MS = 25_000L
 
-    // Roughly two CGM cycles (readings land about every 5 min). Deliberately
-    // tighter than AlertCoordinator's 15-min red heartbeat: a low that is
-    // NOT resolving is the case where repetition actually earns its keep, and
-    // the person this app is for gets no bodily warning to fall back on. The
-    // ladder in CriticalLowMath.TANKING_RUNGS carries the "it got worse"
-    // pings; this carries the "it still hasn't got better" ones.
-    private const val TANKING_REALERT_COOLDOWN_MS = 10 * 60_000L
+    // Roughly three CGM cycles (readings land about every 5 min). 2026-08-01:
+    // widened from 10 to 15 min at the owner's explicit request, matching
+    // AlertCoordinator's own RED_REALERT_COOLDOWN_MS now that tanking-band
+    // delivery is voice+vibration rather than a forced siren - the ladder in
+    // CriticalLowMath.TANKING_RUNGS still carries the "it got worse" pings
+    // uncapped; this only carries the "it still hasn't got better" heartbeat.
+    private const val TANKING_REALERT_COOLDOWN_MS = 15 * 60_000L
+
+    // Floor under the "recovery just stalled/reversed" instant re-fire in
+    // maybeReAlertTanking, mirroring AlertCoordinator.MIN_REALERT_GAP_MS for
+    // the same reason: without it, a rate hovering right around zero could
+    // flip the recovering flag every cycle and re-alert every cycle with it.
+    // Ladder rung crossings are NOT gated by this - they're monotonic
+    // low-water-mark events that can't spuriously repeat, so there's nothing
+    // to fatigue-limit there.
+    private const val MIN_REALERT_GAP_MS = 5 * 60_000L
 
     // Deliberately its own, tighter constant - NOT
     // EmergencyContactsPrefs.alertTimeoutMinutes() (the general red-alert
@@ -386,9 +401,10 @@ object CriticalLowSiren {
         // announced so far. That number is worth saying out loud.
         if (recovering && !crossedNewRung) return
 
-        val recoveryJustStopped = wasRecovering && !recovering
         val lastFiredAt = prefs.getLong(KEY_TANKING_LAST_FIRED_AT, 0L)
         val now = System.currentTimeMillis()
+        // Floored by MIN_REALERT_GAP_MS - see its doc.
+        val recoveryJustStopped = wasRecovering && !recovering && now - lastFiredAt >= MIN_REALERT_GAP_MS
         if (!crossedNewRung && !recoveryJustStopped && now - lastFiredAt < TANKING_REALERT_COOLDOWN_MS) return
 
         if (crossedNewRung) Log.w(TAG, "crossed ladder rung $currentDeepest ($value) - re-alerting")
@@ -605,11 +621,15 @@ object CriticalLowSiren {
         NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, builder.build())
     }
 
-    /** Emergency band loops continuously, re-asserted every tick (see the
-     *  class doc). Tanking band is deliberately ONE playthrough per re-alert -
-     *  "one strong alert", not a loop - so it plays once and stops on its
-     *  own; there's no repeat-tick chain armed to re-assert it anyway. */
+    /** Emergency band only. 2026-08-01: tanking band no longer forces alarm
+     *  volume or plays the siren sound at all - owner feedback after a
+     *  sticky low produced repeated forced-volume alarms for a situation that
+     *  was resolving, just slowly. Tanking still gets voice (ungated,
+     *  VoiceAlertEngine.UNGATED_CATEGORIES) and direct vibration from
+     *  fireTick/vibrate - this function is the ONLY thing that changed;
+     *  nothing else about "can't-miss delivery" for tanking was removed. */
     private fun forceAlarmVolumeAndPlaySound(context: Context, band: String) {
+        if (band != BAND_EMERGENCY) return
         val audioManager = context.getSystemService(AudioManager::class.java)
         if (audioManager != null) {
             runCatching {

@@ -110,20 +110,18 @@ object AlertNotifier {
             nm.cancel(YELLOW_ALERT_NOTIFICATION_ID)
         }
 
-        // 2026-08-01: red-tier alerts no longer play a tone at all. Sound was
-        // doing the least useful work of the three channels here - across a
-        // run of several lows in one day the repeated alarm-stream tone
-        // became genuinely punishing to live with, while the spoken value is
-        // what actually tells the person what to DO and the vibration is what
-        // reaches them without waking a room. Vibration still fires (the red
-        // channel's own pattern) and voice is now ungated (see
-        // VoiceAlertEngine.UNGATED_CATEGORIES), so "voice and a buzz" is
-        // literally what this tier now is.
-        //
-        // The `recovering` variant never had an urgent tone anyway; it keeps
-        // its softer warn tone, since that path is a deliberately calmer
-        // heads-up rather than an emergency.
-        if (recovering) AlertTones.play(context, AlertTones.Tone.WARN_LOW)
+        // 2026-08-01: red-tier alerts play NO tone at all, in either branch.
+        // First cut only silenced the takeover (non-recovering) path and left
+        // `recovering`'s WARN_LOW tone in place - but a sticky, slowly-
+        // resolving low spends most of its time in exactly that recovering
+        // state, wobbling above/below zero rate, so that leftover tone was
+        // still firing constantly and was reported as "the little alarm that
+        // fires on a screen takeover" even though this branch never takes the
+        // screen over. Red is voice + vibration + notification only, full
+        // stop - the spoken value says what to DO, the vibration reaches
+        // someone without waking a room, and neither requires the takeover
+        // screen or a tone to work. Voice is ungated (see
+        // VoiceAlertEngine.UNGATED_CATEGORIES) so it's never the silent link.
 
         // CriticalLowSiren is deliberately unaffected by this: its own looping
         // alarm ringtone is the last-resort tier and stays loud on purpose.

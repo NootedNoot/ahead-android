@@ -123,15 +123,40 @@ class CriticalLowSirenTest {
     }
 
     @Test
-    fun `tanking episode re-fires immediately once recovery stalls`() {
+    fun `tanking episode does not re-fire on a recovery stall within MIN_REALERT_GAP_MS`() {
         CriticalLowSiren.check(context, 66, rate = -1.5) // starts, fires with value=66
         CriticalLowSiren.check(context, 66, rate = 0.8) // recovering, same rung - suppressed
         assertEquals("recovering call must not have re-fired", 66, sirenPrefs().getInt("value", -1))
 
-        // Recovery stalled. Same rung as the opening value (67), so this is
-        // the stall rule firing, not the ladder.
+        // Recovery stalled, same rung as the opening value (67) so this isn't
+        // the ladder firing - but the last alert fired only moments ago, well
+        // inside MIN_REALERT_GAP_MS. 2026-08-01: this used to re-fire
+        // unconditionally on any stall/reversal, which let a rate hovering
+        // around zero retrigger every cycle. Must stay quiet here.
         CriticalLowSiren.check(context, 65, rate = -0.3)
-        assertEquals("must re-fire immediately once recovery stalls, not wait for the cooldown", 65, sirenPrefs().getInt("value", -1))
+        assertEquals(
+            "must not re-fire on a stall inside MIN_REALERT_GAP_MS",
+            66,
+            sirenPrefs().getInt("value", -1),
+        )
+    }
+
+    @Test
+    fun `tanking episode re-fires on a recovery stall once MIN_REALERT_GAP_MS has passed`() {
+        CriticalLowSiren.check(context, 66, rate = -1.5) // starts, fires with value=66
+        CriticalLowSiren.check(context, 66, rate = 0.8) // recovering, same rung - suppressed
+
+        // Backdate the last-fired timestamp past MIN_REALERT_GAP_MS (5 min).
+        sirenPrefs().edit()
+            .putLong("tanking_last_fired_at_ms", System.currentTimeMillis() - 6 * 60_000L)
+            .commit()
+
+        CriticalLowSiren.check(context, 65, rate = -0.3)
+        assertEquals(
+            "expected a re-fire reflecting the stalled value once past the floor",
+            65,
+            sirenPrefs().getInt("value", -1),
+        )
     }
 
     // ===================== Descending alert ladder =====================
