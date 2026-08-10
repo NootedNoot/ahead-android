@@ -1,14 +1,42 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="DebugSectionHeader">
+    <!-- ============================ Cards ============================ -->
+    <style name="DebugCard">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">24dp</item>
+        <item name="android:layout_marginTop">14dp</item>
+        <item name="android:background">@drawable/debug_card_background</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:padding">16dp</item>
+    </style>
+    <style name="DebugCard.Danger">
+        <item name="android:background">@drawable/debug_card_danger</item>
+    </style>
+
+    <style name="DebugCardTitle">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
         <item name="android:textColor">@color/accent2</item>
         <item name="android:textSize">13sp</item>
         <item name="android:textStyle">bold</item>
         <item name="android:letterSpacing">0.06</item>
     </style>
+    <style name="DebugCardTitle.Danger">
+        <item name="android:textColor">@color/low</item>
+    </style>
+
+    <!-- Groups a related run of controls inside a card without a full new
+         card shell - a lighter-weight subsection break than DebugCardTitle. -->
+    <style name="DebugSubheading">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">16dp</item>
+        <item name="android:textColor">@color/muted</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.1</item>
+    </style>
+
     <style name="DebugLabel">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
@@ -16,19 +44,106 @@
         <item name="android:textColor">@color/muted</item>
         <item name="android:textSize">12sp</item>
     </style>
+
+    <!-- ============================ Buttons ============================ -->
     <style name="DebugButton">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:background">@drawable/button_background</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:elevation">0dp</item>
+        <item name="android:stateListAnimator">@null</item>
+    </style>
+    <style name="DebugButton.Danger">
+        <item name="android:background">@drawable/emergency_button_background</item>
+    </style>
+    <!-- Secondary/low-emphasis actions (Stop, Close, Clear) - outline only,
+         doesn't compete visually with a card's primary gradient action. -->
+    <style name="DebugButton.Ghost">
+        <item name="android:background">@drawable/debug_button_ghost</item>
+        <item name="android:textColor">@color/accent2</item>
+    </style>
+
+    <!-- ============================ Inputs ============================ -->
+    <style name="DebugInput" parent="TuningInput">
+        <item name="android:layout_marginTop">6dp</item>
+        <item name="android:background">@drawable/debug_input_background</item>
+        <item name="android:paddingHorizontal">12dp</item>
+        <item name="android:paddingVertical">10dp</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+    <style name="DebugInput.Signed">
+        <item name="android:inputType">numberDecimal|numberSigned</item>
+    </style>
+    <style name="DebugInput.Text">
+        <item name="android:inputType">text</item>
+    </style>
+
+    <!-- Wraps a Spinner so it matches the same rounded/bordered field look
+         as the EditTexts around it instead of the OS-default flat dropdown. -->
+    <style name="DebugSpinnerFrame">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">6dp</item>
-        <item name="android:background">@drawable/button_background</item>
-        <item name="android:textColor">#FFFFFF</item>
-        <item name="android:textAllCaps">false</item>
+        <item name="android:background">@drawable/debug_input_background</item>
+        <item name="android:paddingHorizontal">8dp</item>
     </style>
+
+    <!-- Toggle row (label + Switch) - same field-height rhythm as the inputs
+         above so the NOTIFICATION TESTING card reads as one consistent list,
+         not label/input pairs followed by loose unbordered rows. -->
+    <style name="DebugToggleRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:background">@drawable/debug_input_background</item>
+        <item name="android:orientation">horizontal</item>
+        <item name="android:gravity">center_vertical</item>
+        <item name="android:paddingHorizontal">14dp</item>
+        <item name="android:paddingVertical">10dp</item>
+    </style>
+    <style name="DebugToggleLabel">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+
+    <!-- ============================ Status text ============================ -->
     <style name="DebugStatusText">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">4dp</item>
         <item name="android:textColor">@color/text_primary</item>
         <item name="android:textSize">13sp</item>
+        <item name="android:lineSpacingExtra">2dp</item>
+    </style>
+
+    <!-- SYSTEM STATE card: label/value row so status reads at a glance
+         instead of one long sentence per line. -->
+    <style name="DebugStatusRow">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">8dp</item>
+        <item name="android:orientation">horizontal</item>
+    </style>
+    <style name="DebugStatusRowLabel">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:textColor">@color/muted</item>
+        <item name="android:textSize">13sp</item>
+    </style>
+    <style name="DebugStatusRowValue">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/text_primary</item>
+        <item name="android:textSize">13sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:gravity">end</item>
     </style>
 </resources>

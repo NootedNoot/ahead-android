@@ -426,24 +426,45 @@ class DebugMenuActivity : AppCompatActivity() {
         refreshSystemState()
     }
 
+    /** Colors a status readout green/red by whether the underlying state is
+     *  the healthy one - lets the SYSTEM STATE card be scanned at a glance
+     *  instead of read line by line. Amber marks "injected", which isn't
+     *  bad, just worth noticing (it means the chart isn't showing real data). */
+    private fun setStatus(view: TextView, text: String, colorRes: Int) {
+        view.text = text
+        view.setTextColor(getColor(colorRes))
+    }
+
     private fun refreshSystemState() {
         val pm = getSystemService(PowerManager::class.java)
         val batteryOk = pm.isIgnoringBatteryOptimizations(packageName)
-        batteryStatusText.text = "Battery optimization: ${if (batteryOk) "whitelisted (unrestricted)" else "NOT whitelisted"}"
+        setStatus(
+            batteryStatusText,
+            if (batteryOk) "Unrestricted" else "Restricted",
+            if (batteryOk) R.color.ok else R.color.low
+        )
 
         val nm = getSystemService(NotificationManager::class.java)
-        dndStatusText.text = "DND policy access: ${if (nm.isNotificationPolicyAccessGranted) "granted" else "NOT granted"}"
+        val dndOk = nm.isNotificationPolicyAccessGranted
+        setStatus(dndStatusText, if (dndOk) "Granted" else "Not granted", if (dndOk) R.color.ok else R.color.low)
 
-        injectionStatusText.text = "Chart data source: ${
-            if (DebugGlucoseOverride.isActive) "INJECTED (debug override active)" else "real Health Connect"
-        }"
+        val injected = DebugGlucoseOverride.isActive
+        setStatus(
+            injectionStatusText,
+            if (injected) "Injected (test data)" else "Real Health Connect",
+            if (injected) R.color.high else R.color.ok
+        )
 
         lifecycleScope.launch {
             val granted = runCatching {
                 HealthConnectClient.getOrCreate(this@DebugMenuActivity).permissionController.getGrantedPermissions()
             }.getOrDefault(emptySet())
             val ok = granted.containsAll(HealthConnectManager.ALL_PERMISSIONS)
-            hcPermsStatusText.text = "Health Connect permissions: ${if (ok) "all granted" else "MISSING (${HealthConnectManager.ALL_PERMISSIONS - granted})"}"
+            setStatus(
+                hcPermsStatusText,
+                if (ok) "All granted" else "Missing (${HealthConnectManager.ALL_PERMISSIONS - granted})",
+                if (ok) R.color.ok else R.color.low
+            )
         }
     }
 }

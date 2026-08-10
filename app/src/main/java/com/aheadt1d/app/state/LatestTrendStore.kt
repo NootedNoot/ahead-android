@@ -35,11 +35,24 @@ import org.json.JSONObject
 // A true outage is still declared well inside the runner's 45-min read window.
 const val STALE_THRESHOLD_DEXCOM_MINUTES = 15L
 const val STALE_THRESHOLD_DEFAULT_MINUTES = 22L
+// AheadBLE (2026-08-03): our own direct-BLE G7 reader, replacing Juggluco as
+// the primary source going forward. Its latency budget has no Dexcom-app
+// batching term (ConnectionService writes each reading to Health Connect the
+// instant GattModule delivers it) and no Juggluco-style multi-reading gaps -
+// just the G7's own ~5-min reading cadence + up to one 5-min runner cycle
+// before it's read = 2 missed cycles, tighter than Dexcom's budgeted 3. This
+// deliberately trades away some false-flicker margin for faster detection,
+// at the owner's explicit request: a silent extended gap here means the
+// background connection itself has failed (not yet hardened with boot-start
+// or a battery-optimization exemption - see ConnectionService), which is
+// exactly the "needs user intervention" case this threshold exists to catch.
+const val STALE_THRESHOLD_AHEADBLE_MINUTES = 10L
 
 /** The staleness cutoff for the currently configured CGM source. */
 fun staleThresholdMinutes(context: Context): Long =
     when (SetupPrefs.cgmPath(context)) {
         SetupPrefs.PATH_DEXCOM -> STALE_THRESHOLD_DEXCOM_MINUTES
+        SetupPrefs.PATH_AHEADBLE -> STALE_THRESHOLD_AHEADBLE_MINUTES
         else -> STALE_THRESHOLD_DEFAULT_MINUTES
     }
 

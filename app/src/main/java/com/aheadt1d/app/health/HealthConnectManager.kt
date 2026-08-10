@@ -7,10 +7,15 @@ import com.aheadt1d.app.state.DebugGlucoseOverride
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.permission.HealthPermission
 import androidx.health.connect.client.records.BloodGlucoseRecord
+import androidx.health.connect.client.records.ExerciseSessionRecord
+import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
+import org.aheadt1d.ratemath.RateMath
+import org.aheadt1d.ratemath.RatePoint
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
@@ -28,6 +33,19 @@ object HealthConnectManager {
     // read access since WorkManager's execution context doesn't count as foreground
     // even when triggered from a visible Activity (e.g. the "Check now" button).
     val ALL_PERMISSIONS: Set<String> = setOf(READ_GLUCOSE_PERMISSION, READ_BACKGROUND_PERMISSION)
+
+    // Read-only, display-purpose activity data for the Health tab (2026-08-03)
+    // - deliberately a SEPARATE permission set from ALL_PERMISSIONS above, not
+    // folded in: the glucose-read gate (readPoints/canReadGlucose) must never
+    // start failing just because someone declined an exercise/sleep prompt.
+    // Not currently fed into any alert/severity/guess logic - purely
+    // informational. Steps are NOT here - see StepTracker, which reads the
+    // phone's own step-counter sensor directly instead of going through
+    // Health Connect (Samsung Health turned out not to be syncing steps into
+    // HC at all, so that read was silently always empty).
+    val READ_EXERCISE_PERMISSION: String = HealthPermission.getReadPermission(ExerciseSessionRecord::class)
+    val READ_SLEEP_PERMISSION: String = HealthPermission.getReadPermission(SleepSessionRecord::class)
+    val ACTIVITY_PERMISSIONS: Set<String> = setOf(READ_EXERCISE_PERMISSION, READ_SLEEP_PERMISSION)
 
     fun isAvailable(context: Context): Boolean =
         HealthConnectClient.getSdkStatus(context) == HealthConnectClient.SDK_AVAILABLE
@@ -106,6 +124,17 @@ object HealthConnectManager {
         } while (!pageToken.isNullOrEmpty())
 
         Log.d(TAG, "records returned: ${records.size}")
+        // 2026-08-03: added while tracking down a duplicate-writer problem
+        // (see collapseDuplicateWrites' doc) - Health Connect never exposed
+        // WHICH app wrote a given record anywhere else in this codebase, so
+        // there was no way to confirm/rule out a second writer besides
+        // guessing from record counts. Debug-only: real per-record metadata,
+        // not glucose values, but still not something a release build's
+        // logcat should carry.
+        if (BuildConfig.DEBUG && records.isNotEmpty()) {
+            val byWriter = records.groupingBy { it.metadata.dataOrigin.packageName }.eachCount()
+            Log.d(TAG, "record writers in this window: $byWriter")
+        }
 
         val points = records
             .sortedBy { it.time }
@@ -138,29 +167,75 @@ object HealthConnectManager {
         }
     }
 
+    /** Converts this app's own point type down to the shared module's
+     *  framework-free one - see ahead-rate-math/CLAUDE.md. */
+    private fun GlucosePoint.toRatePoint() = RatePoint(time.toEpochMilli(), sgv)
+
     /**
-     * Rate of change in mg/dL per minute from the two most recent points in
-     * [points] (assumed already sorted ascending by time). Returns null when
-     * fewer than two points are available — callers should treat null as
-     * "insufficient data to compute a trend", not zero/flat.
+     * Rate of change in mg/dL per minute from the two most recent DISTINCT
+     * points in [points]. Returns null when fewer than two distinct points
+     * are available — callers should treat null as "insufficient data to
+     * compute a trend", not zero/flat.
      *
-     * Uses seconds-level precision for the interval so a 4m50s vs 5m10s gap
-     * doesn't add unnecessary rounding error.
+     * Delegates to ahead-rate-math (shared with ahead-lite-android) - see
+     * that module's RateMath.kt for the actual dedup/slope logic and the
+     * 2026-08-03 incident (two writer apps flooding Health Connect with
+     * near-duplicate records) that made the dedup step necessary in the
+     * first place.
      */
-    fun calculateRatePerMinute(points: List<GlucosePoint>): Double? {
-        if (points.size < 2) return null
-        val prev   = points[points.size - 2]
-        val latest = points[points.size - 1]
-        val secondsBetween = Duration.between(prev.time, latest.time).seconds
-        if (secondsBetween <= 0) return null
-        return (latest.sgv - prev.sgv) / (secondsBetween / 60.0)
+    fun calculateRatePerMinute(points: List<GlucosePoint>): Double? =
+        RateMath.ratePerMinute(points.map { it.toRatePoint() })
+
+    /** mg/dL change from the second-most-recent DISTINCT point to the most
+     *  recent. Returns null when fewer than two distinct points are available. */
+    fun calculateDelta(points: List<GlucosePoint>): Int? =
+        RateMath.delta(points.map { it.toRatePoint() })
+
+    /** Which of [ACTIVITY_PERMISSIONS] are currently granted - the Health tab
+     *  shows each stat independently (a user might grant steps but not
+     *  sleep), so callers check membership per-permission, not as a group. */
+    suspend fun grantedActivityPermissions(context: Context): Set<String> {
+        val client = getClientOrNull(context) ?: return emptySet()
+        return client.permissionController.getGrantedPermissions().intersect(ACTIVITY_PERMISSIONS)
     }
 
-    /** mg/dL change from the second-most-recent point to the most recent.
-     *  Returns null when fewer than two points are available. */
-    fun calculateDelta(points: List<GlucosePoint>): Int? {
-        if (points.size < 2) return null
-        return points[points.size - 1].sgv - points[points.size - 2].sgv
+    /** Every ExerciseSessionRecord starting today, newest first - just enough
+     *  fields for a simple list (type/title/start/end), not the full route/
+     *  lap detail Health Connect can carry. Null (not empty) when the
+     *  permission isn't granted. */
+    suspend fun readTodayExerciseSessions(context: Context): List<ExerciseSessionRecord>? {
+        val client = getClientOrNull(context) ?: return null
+        if (READ_EXERCISE_PERMISSION !in client.permissionController.getGrantedPermissions()) return null
+
+        val zone = ZoneId.systemDefault()
+        val startOfDay = LocalDate.now(zone).atStartOfDay(zone).toInstant()
+        val response = client.readRecords(
+            ReadRecordsRequest(
+                recordType = ExerciseSessionRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(startOfDay, Instant.now()),
+            )
+        )
+        return response.records.sortedByDescending { it.startTime }
+    }
+
+    /** The most recent SleepSessionRecord that ended within the last 24h -
+     *  "last night's sleep" without hardcoding a specific bedtime window,
+     *  since that varies person to person and this is display-only context,
+     *  not something safety-critical logic depends on. Null (not a missing
+     *  session) also means "permission not granted" - same distinction as
+     *  the steps/exercise readers above. */
+    suspend fun readMostRecentSleepSession(context: Context): SleepSessionRecord? {
+        val client = getClientOrNull(context) ?: return null
+        if (READ_SLEEP_PERMISSION !in client.permissionController.getGrantedPermissions()) return null
+
+        val now = Instant.now()
+        val response = client.readRecords(
+            ReadRecordsRequest(
+                recordType = SleepSessionRecord::class,
+                timeRangeFilter = TimeRangeFilter.between(now.minus(Duration.ofHours(24)), now),
+            )
+        )
+        return response.records.maxByOrNull { it.endTime }
     }
 
     private const val TAG = "HealthConnectManager"

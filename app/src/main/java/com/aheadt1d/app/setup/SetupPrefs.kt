@@ -20,6 +20,12 @@ object SetupPrefs {
     const val PATH_DEXCOM = "dexcom"
     const val PATH_JUGGLUCO = "juggluco"
     const val PATH_UNSURE = "unsure"
+    // AheadBLE reads the G7 transmitter directly over BLE and writes each
+    // reading to Health Connect immediately, no app-level batching - a
+    // different (tighter) latency profile than either of the above, so it
+    // gets its own path/threshold rather than overloading "dexcom" (implies
+    // the stock Dexcom app) or "unsure"/"juggluco" (looser gap tolerance).
+    const val PATH_AHEADBLE = "aheadble"
 
     private const val PREFS_NAME = "ahead_setup"
     private const val KEY_COMPLETE = "setup_complete"

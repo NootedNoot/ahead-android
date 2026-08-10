@@ -13,15 +13,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.aheadt1d.app.R
 import com.aheadt1d.app.emergency.EmergencyAlertRepository
 import com.aheadt1d.app.emergency.EmergencyAlertType
 import com.aheadt1d.app.emergency.EmergencyContact
 import com.aheadt1d.app.emergency.EmergencyContactsPrefs
+import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.aheadt1d.ratemath.RateMath
 
 /**
  * The red-severity takeover screen, launched only via the full-screen intent
@@ -51,6 +56,26 @@ import kotlinx.coroutines.launch
  * via onNewIntent), and one dismiss action should reliably silence
  * everything currently active rather than requiring the user to figure out
  * which alert is which.
+ *
+ * TICKET-009 (2026-08-07): the value/rate/projection this screen shows used
+ * to come ONLY from the Intent extras captured at the moment the alert
+ * fired, with no update for as long as the screen stayed open. The backend
+ * check loop that decides severity runs on a ~5-min cadence (see
+ * GlucoseStatusService), so a real rate reversal - most commonly right after
+ * a treated low starts climbing - could land well before the next
+ * AlertCoordinator re-fire, leaving this takeover screen visibly
+ * contradicting the person's own current reading ("projected 53 in 15 min"
+ * while the actual trend had already flipped positive). [startLiveRefresh]
+ * now re-reads Health Connect directly on a short interval while this screen
+ * is visible and updates the displayed value/rate/projection in place -
+ * deliberately display-only: it does NOT touch severity, does NOT
+ * re-evaluate whether the alert should have fired, and does NOT auto-dismiss
+ * the screen even if the value climbs back to safe (that's still on the
+ * person, same as every other recovery path in this codebase). Skipped in
+ * signal-lost mode (there's no live number to refresh - see the class doc)
+ * and critical-emergency mode (CriticalLowSiren already re-fires this screen
+ * every ~25-60s with a fresh cached value, so a second independent refresh
+ * loop here would be redundant).
  */
 class RedAlertActivity : AppCompatActivity() {
 
@@ -87,6 +112,12 @@ class RedAlertActivity : AppCompatActivity() {
             // Unconditional - see the class doc for why this always runs
             // regardless of which mode this screen was opened in.
             CriticalLowSiren.stop(this)
+            // Starts AlertCoordinator's own dismiss cooldown so the ordinary
+            // red full-screen takeover (not deep enough to trip
+            // CriticalLowSiren's own acknowledgment latch) doesn't pop back
+            // up minutes later for the same still-sticky low - see
+            // AlertCoordinator.DISMISS_COOLDOWN_MS.
+            AlertCoordinator.recordDismissal(this)
             finish()
         }
 
@@ -94,6 +125,7 @@ class RedAlertActivity : AppCompatActivity() {
 
         bind(intent)
         refreshEmergencyButtonVisibility()
+        startLiveRefresh()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -134,12 +166,19 @@ class RedAlertActivity : AppCompatActivity() {
         }
 
         headingView.setText(if (isCriticalEmergency) R.string.red_alert_critical_emergency_heading else R.string.red_alert_heading)
-        val value = intent.getIntExtra(EXTRA_VALUE, 0)
-        val projected = if (intent.hasExtra(EXTRA_PROJECTED)) intent.getIntExtra(EXTRA_PROJECTED, 0) else null
-        val rate = if (intent.hasExtra(EXTRA_RATE)) intent.getDoubleExtra(EXTRA_RATE, 0.0) else null
-        currentValue = value
-        currentRate = rate
-        currentProjected = projected
+        currentValue = intent.getIntExtra(EXTRA_VALUE, 0)
+        currentProjected = if (intent.hasExtra(EXTRA_PROJECTED)) intent.getIntExtra(EXTRA_PROJECTED, 0) else null
+        currentRate = if (intent.hasExtra(EXTRA_RATE)) intent.getDoubleExtra(EXTRA_RATE, 0.0) else null
+        renderReading()
+    }
+
+    /** Renders currentValue/currentRate/currentProjected - shared by the
+     *  initial Intent-driven [bind] and [refreshLiveReading]'s periodic
+     *  on-device update, so both paths draw the exact same way. */
+    private fun renderReading() {
+        val value = currentValue
+        val rate = currentRate
+        val projected = currentProjected
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
 
         findViewById<TextView>(R.id.alertValueText).text = "$value"
@@ -153,6 +192,33 @@ class RedAlertActivity : AppCompatActivity() {
             projected != null -> getString(R.string.red_alert_projected, projected)
             else -> getString(R.string.red_alert_no_projection)
         }
+    }
+
+    /** See the class doc's TICKET-009 note. Re-reads Health Connect directly
+     *  on a short interval while this screen is visible, so a rate reversal
+     *  that lands after the alert fired (most commonly right after a treated
+     *  low starts climbing) shows up here instead of leaving this takeover
+     *  screen stuck on the stale value/projection that triggered it.
+     *  Display-only - never touches severity or auto-dismisses. */
+    private fun startLiveRefresh() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    delay(LIVE_REFRESH_INTERVAL_MS)
+                    refreshLiveReading()
+                }
+            }
+        }
+    }
+
+    private suspend fun refreshLiveReading() {
+        if (isSignalLostMode || isCriticalEmergency) return
+        val points = HealthConnectManager.readGlucosePoints(this, LIVE_REFRESH_WINDOW_MINUTES)
+        val latest = points.lastOrNull() ?: return
+        currentValue = latest.sgv
+        currentRate = HealthConnectManager.calculateRatePerMinute(points)
+        currentProjected = currentRate?.let { RateMath.project(latest.sgv, it, PROJECTION_MINUTES) }
+        renderReading()
     }
 
     /** Red fires for both a critically low and a critically high reading -
@@ -267,6 +333,16 @@ class RedAlertActivity : AppCompatActivity() {
         private const val EXTRA_ARROW = "arrow"
         private const val EXTRA_CRITICAL_EMERGENCY = "critical_emergency"
         private const val LOW_HIGH_SPLIT = 70
+        // See startLiveRefresh's doc (TICKET-009) - short enough that a real
+        // reversal shows up well within one CGM cadence of it happening.
+        private const val LIVE_REFRESH_INTERVAL_MS = 30_000L
+        private const val LIVE_REFRESH_WINDOW_MINUTES = 45L
+        // Matches trend-detector.js's PROJECTION_MINUTES (the backend's own
+        // flat 15-min horizon). Deliberately RateMath.project (a flat
+        // extrapolation), not the backend's decay-adjusted redProjected -
+        // this is a live display refresh, not a severity re-evaluation, see
+        // the class doc's TICKET-009 note.
+        private const val PROJECTION_MINUTES = 15
 
         fun createIntent(context: Context, value: Int, projected: Int?, rate: Double?): Intent =
             Intent(context, RedAlertActivity::class.java)

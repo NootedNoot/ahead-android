@@ -7,6 +7,19 @@
          when triggered from a visible Activity - without this, GlucoseCheckWorker's
          reads throw RemoteException("must be in foreground to read ..."). -->
     <uses-permission android:name="android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND" />
+    <!-- Health tab (2026-08-03) - display-only steps/exercise/sleep context,
+         read foreground-only (no background permission requested for these,
+         unlike glucose above - nothing outside HealthActivity itself needs
+         them). See HealthConnectManager.ACTIVITY_PERMISSIONS. -->
+    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
+    <uses-permission android:name="android.permission.health.READ_SLEEP" />
+    <!-- Steps are tracked on-device now (StepTracker, reads the phone's own
+         TYPE_STEP_COUNTER sensor directly) instead of through Health Connect
+         - Samsung Health wasn't actually syncing steps into HC at all on the
+         device this was built against, so that read was silently always
+         empty. Required on API 29+ to receive step-counter/detector sensor
+         events; harmless no-op permission on older versions. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- CriticalLowSiren vibrates directly via the Vibrator service, not
          through a notification channel (see its class doc) - that direct
@@ -51,6 +64,8 @@
     <application
         android:name=".AheadApplication"
         android:label="Ahead"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
         android:supportsRtl="true"
         android:theme="@style/Theme.Ahead"
@@ -116,6 +131,14 @@
             android:name=".report.ReportExportActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".health.HealthActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".upload.UploadSettingsActivity"
+            android:exported="false" />
+
         <service
             android:name=".notifications.GlucoseStatusService"
             android:exported="false"
@@ -150,6 +173,14 @@
              only our own PendingIntent ever triggers it. -->
         <receiver
             android:name=".emergency.EmergencyAlertReceiver"
+            android:exported="false" />
+
+        <!-- The "Send now" action on the confirm notification
+             EmergencyAlertRepository.postConfirmNotification posts - the ONLY
+             thing that actually sends an SMS for a background-timer-fired
+             alert. exported=false: only our own PendingIntent triggers it. -->
+        <receiver
+            android:name=".emergency.EmergencyAlertConfirmReceiver"
             android:exported="false" />
 
         <!-- Repeating tick for the critical-low emergency siren (see

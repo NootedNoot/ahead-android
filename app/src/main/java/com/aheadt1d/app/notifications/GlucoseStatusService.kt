@@ -15,6 +15,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.aheadt1d.app.alerts.AlertCoordinator
 import com.aheadt1d.app.alerts.CriticalLowSiren
+import com.aheadt1d.app.health.StepTracker
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
@@ -84,6 +85,13 @@ class GlucoseStatusService : Service() {
     override fun onCreate() {
         super.onCreate()
         GlucoseNotifier.createChannel(this)
+        // On-device step tracking (see StepTracker's doc) - registered here
+        // rather than owning its own service, since a step-counter listener
+        // only accumulates while something's actively registered, and this
+        // is the one component in the app guaranteed to keep running. No-op
+        // if ACTIVITY_RECOGNITION isn't granted yet or the device has no
+        // step sensor.
+        StepTracker.start(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -268,6 +276,7 @@ class GlucoseStatusService : Service() {
     override fun onDestroy() {
         scope?.cancel()
         scope = null
+        StepTracker.stop()
         super.onDestroy()
     }
 
@@ -286,7 +295,14 @@ class GlucoseStatusService : Service() {
         // Mirrors trend-detector.js's YELLOW_PROJECTED_LOW/HIGH defaults - used
         // only for the local yellow-only fallback in toDisplayState, never as a
         // replacement for the backend's own (tunable) classification.
-        private const val LOCAL_YELLOW_PROJECTED_LOW = 90
+        // 2026-08-09: lowered 90->80 to match trend-detector.js - it was firing
+        // this local fallback (not just the backend) on a flat, comfortably-normal
+        // ~90-94, since this fallback runs every 5-min poll whenever the backend's
+        // ~15-min classification hasn't caught up yet, which per the doc above is
+        // often, not rare. Forgetting this hand-synced copy the first time around
+        // is exactly the trap the "duplicated on purpose" section of this repo's
+        // CLAUDE.md warns about.
+        private const val LOCAL_YELLOW_PROJECTED_LOW = 80
         private const val LOCAL_YELLOW_PROJECTED_HIGH = 200
 
         // Mirrors trend-detector.js's YELLOW_RATE_FALLING/RISING defaults - same
@@ -362,7 +378,7 @@ class GlucoseStatusService : Service() {
                 // worse failure than a several-minute-late yellow. The raw.value<=60
                 // hard floor above already covers the one local-only RED case that
                 // matters most (a genuinely severe low), independent of the backend.
-                localFallbackYellowSeverity(localProjected, rate)
+                localFallbackYellowSeverity(raw.value, localProjected, rate)
             }
 
             return GlucoseDisplayState.Reading(
@@ -387,8 +403,18 @@ class GlucoseStatusService : Service() {
          *  trend-detector.js's classifySeverity ordering (rate escalation before
          *  the projection check), so a fast-moving crossing isn't missed here just
          *  because it hasn't been caught by the (possibly local, less precise)
-         *  15-min projection yet. */
-        private fun localFallbackYellowSeverity(projected: Int?, rate: Double?): String? {
+         *  15-min projection yet.
+         *
+         *  2026-08-09: added the currentValue<=70 check, mirroring the same fix in
+         *  trend-detector.js's classifySeverity. Without it, lowering
+         *  LOCAL_YELLOW_PROJECTED_LOW to 80 would have silently dropped this local
+         *  fallback's coverage of a real recovering low (e.g. 65 rising, locally
+         *  projected 85) to nothing - raw.value<=60 above is already RED, but 61-70
+         *  is still a real low right now, rising or not, and deserves at least this
+         *  fallback's yellow rather than waiting up to ~15 min for the backend to
+         *  catch up and say so. */
+        private fun localFallbackYellowSeverity(currentValue: Int, projected: Int?, rate: Double?): String? {
+            if (currentValue <= 70) return "yellow"
             if (rate != null && (rate <= LOCAL_YELLOW_RATE_FALLING || rate >= LOCAL_YELLOW_RATE_RISING)) return "yellow"
             if (projected == null) return null
             return if (projected <= LOCAL_YELLOW_PROJECTED_LOW || projected >= LOCAL_YELLOW_PROJECTED_HIGH) "yellow" else null

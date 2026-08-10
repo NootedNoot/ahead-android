@@ -1,29 +1,36 @@
 package com.aheadt1d.app
 
+import android.animation.ObjectAnimator
 import android.Manifest
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.View
-import android.widget.Button
+import android.view.animation.DecelerateInterpolator
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.GravityCompat
+import androidx.drawerlayout.widget.DrawerLayout
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.aheadt1d.app.alerts.AlertChannels
+import org.aheadt1d.ratemath.RateMath
+import org.aheadt1d.ratemath.RatePoint
+import org.aheadt1d.ratemath.TrajectoryKind
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
-import com.aheadt1d.app.health.NightscoutFallbackClient
-import com.aheadt1d.app.events.EventLogDialogs
 import com.aheadt1d.app.notifications.GlucoseStatusService
 import com.aheadt1d.app.setup.SetupPrefs
 import com.aheadt1d.app.setup.SetupWizardActivity
@@ -44,6 +51,7 @@ import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.formatter.ValueFormatter
+import com.github.mikephil.charting.interfaces.datasets.ILineDataSet
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -57,24 +65,12 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private lateinit var chart: LineChart
-    private lateinit var window1hButton: Button
-    private lateinit var window3hButton: Button
-    private lateinit var window6hButton: Button
-
-    private lateinit var rangeTightButton: Button
-    private lateinit var rangeFullButton: Button
-    private lateinit var rangeAutoButton: Button
+    private lateinit var drawerLayout: DrawerLayout
+    private lateinit var liveDotCore: View
+    private lateinit var liveDotRing: View
+    private var liveDotAnimators: List<ObjectAnimator> = emptyList()
 
     private var cachedPoints: List<GlucosePoint> = emptyList()
-    private var selectedWindowMinutes = WINDOW_1H
-
-    /** Y-axis display range. Explicit user control rather than intuitive-only
-     *  auto-scaling: a clipped chart during a high reading hides exactly the
-     *  trend the user most needs to see, so the ceiling must never silently
-     *  cut off real data (CGMs report up to ~400 mg/dL). */
-    private enum class RangeMode { TIGHT, FULL, AUTO }
-
-    private var rangeMode = RangeMode.FULL
 
     private val requestHealthConnectPermissions = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -103,33 +99,14 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         chart = findViewById(R.id.glucoseChart)
-        window1hButton = findViewById(R.id.window1hButton)
-        window3hButton = findViewById(R.id.window3hButton)
-        window6hButton = findViewById(R.id.window6hButton)
-        rangeTightButton = findViewById(R.id.rangeTightButton)
-        rangeFullButton = findViewById(R.id.rangeFullButton)
-        rangeAutoButton = findViewById(R.id.rangeAutoButton)
-        loadRangePrefs()
+        drawerLayout = findViewById(R.id.drawerLayout)
+        liveDotCore = findViewById(R.id.liveDotCore)
+        liveDotRing = findViewById(R.id.liveDotRing)
         setupChart()
-        window1hButton.setOnClickListener { selectWindow(WINDOW_1H) }
-        window3hButton.setOnClickListener { selectWindow(WINDOW_3H) }
-        window6hButton.setOnClickListener { selectWindow(WINDOW_6H) }
-        rangeTightButton.setOnClickListener { setRangeMode(RangeMode.TIGHT) }
-        rangeFullButton.setOnClickListener { setRangeMode(RangeMode.FULL) }
-        rangeAutoButton.setOnClickListener { setRangeMode(RangeMode.AUTO) }
-        updateWindowButtonStyles()
-        updateRangeButtonStyles()
+        setupDrawer()
 
         findViewById<View>(R.id.glucoseTrendCard).setOnClickListener {
             startActivity(GraphActivity.createIntent(this))
-        }
-
-        findViewById<View>(R.id.logEventFab).apply {
-            setOnClickListener { EventLogDialogs.showPresetPicker(this@MainActivity, lifecycleScope) }
-            setOnLongClickListener {
-                EventLogDialogs.showCustomNoteDialog(this@MainActivity, lifecycleScope)
-                true
-            }
         }
 
         // Jumps straight to the DND-access settings screen - same destination
@@ -179,51 +156,99 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Shows the build/version string at the bottom of the dashboard. In DEBUG
-     * builds only, long-pressing it offers to re-run the setup wizard (clearing
-     * just the wizard-completion state), so the flow can be tested repeatedly
-     * without a full uninstall / `pm clear`. The listener is never attached in
-     * release builds, so the gesture does nothing for real users.
+     * Wires the hamburger button + every drawer destination, and shows the
+     * three debug-only items only in a debug build (mirrors the old hidden
+     * long-press "Debug tools" dialog, which this replaces entirely - see
+     * git history for that prior mechanism). One consolidated place instead
+     * of a scattered footer row + hidden long-press.
      */
-    private fun setupVersionText() {
-        findViewById<TextView>(R.id.voiceAlertsEntry).setOnClickListener {
-            startActivity(VoiceAlertsActivity.createIntent(this))
-        }
-        findViewById<TextView>(R.id.emergencyContactsEntry).setOnClickListener {
-            startActivity(com.aheadt1d.app.emergency.EmergencyContactsActivity.createIntent(this))
-        }
-        findViewById<TextView>(R.id.cgmPathEntry).setOnClickListener {
-            showCgmPathDialog()
+    private fun setupDrawer() {
+        findViewById<View>(R.id.hamburgerButton).setOnClickListener {
+            drawerLayout.openDrawer(GravityCompat.START)
         }
 
+        findViewById<View>(R.id.drawerDashboardItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+        }
+        findViewById<View>(R.id.drawerGraphItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(GraphActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.drawerNotesItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(com.aheadt1d.app.events.EventHistoryActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.drawerReportItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(com.aheadt1d.app.report.ReportExportActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.drawerHealthItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(com.aheadt1d.app.health.HealthActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.drawerVoiceItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(VoiceAlertsActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.drawerEmergencyItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(com.aheadt1d.app.emergency.EmergencyContactsActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.drawerCgmSyncItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            showCgmPathDialog()
+        }
+        findViewById<View>(R.id.drawerUploadItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(com.aheadt1d.app.upload.UploadSettingsActivity.createIntent(this))
+        }
+
+        if (BuildConfig.DEBUG) {
+            findViewById<View>(R.id.drawerDebugSectionLabel).visibility = View.VISIBLE
+            findViewById<View>(R.id.drawerDebugMenuItem).visibility = View.VISIBLE
+            findViewById<View>(R.id.drawerTuningItem).visibility = View.VISIBLE
+            findViewById<View>(R.id.drawerResetWizardItem).visibility = View.VISIBLE
+
+            // Debug source-set classes: reference by name so release
+            // compilation never requires them, and these paths are
+            // unreachable outside BuildConfig.DEBUG anyway.
+            findViewById<View>(R.id.drawerDebugMenuItem).setOnClickListener {
+                drawerLayout.closeDrawer(GravityCompat.START)
+                startActivity(Intent().setClassName(packageName, "$packageName.debug.DebugMenuActivity"))
+            }
+            findViewById<View>(R.id.drawerTuningItem).setOnClickListener {
+                drawerLayout.closeDrawer(GravityCompat.START)
+                startActivity(Intent().setClassName(packageName, "$packageName.debug.TuningActivity"))
+            }
+            findViewById<View>(R.id.drawerResetWizardItem).setOnClickListener {
+                drawerLayout.closeDrawer(GravityCompat.START)
+                SetupPrefs.resetWizardState(this)
+                startActivity(Intent(this, MainActivity::class.java))
+                finish()
+            }
+        }
+
+        // Predictive-back-friendly: close the drawer first if it's open,
+        // only fall through to the normal back behavior once it's closed.
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+                    drawerLayout.closeDrawer(GravityCompat.START)
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+    }
+
+    /**
+     * Shows the build/version string at the bottom of the dashboard.
+     */
+    private fun setupVersionText() {
         val versionText = findViewById<TextView>(R.id.versionText)
         val suffix = if (BuildConfig.DEBUG) " (debug)" else ""
         versionText.text = "v${BuildConfig.VERSION_NAME}$suffix"
-
-        if (!BuildConfig.DEBUG) return
-
-        val debugLabel = findViewById<TextView>(R.id.debugLabel)
-        debugLabel.visibility = View.VISIBLE
-        debugLabel.setOnLongClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Debug tools")
-                .setItems(arrayOf("Tuning parameters", "Debug Menu", "Reset setup wizard")) { _, which ->
-                    // Debug source-set classes: reference by name so release
-                    // compilation never requires them, and these paths are
-                    // unreachable outside BuildConfig.DEBUG.
-                    when (which) {
-                        0 -> startActivity(Intent().setClassName(packageName, "$packageName.debug.TuningActivity"))
-                        1 -> startActivity(Intent().setClassName(packageName, "$packageName.debug.DebugMenuActivity"))
-                        else -> {
-                            SetupPrefs.resetWizardState(this)
-                            startActivity(Intent(this, MainActivity::class.java))
-                            finish()
-                        }
-                    }
-                }
-                .show()
-            true
-        }
     }
 
     /**
@@ -232,15 +257,21 @@ class MainActivity : AppCompatActivity() {
      * choice was permanent short of a full "Reset setup wizard," so a wrong
      * pick (or the wizard silently re-running and re-picking a default)
      * quietly widened the staleness-alert threshold with no way to notice.
+     *
+     * setTitle() carries both the question and the explanatory copy (rather
+     * than a separate setMessage()) - real bug, found 2026-08-03 while
+     * actually using this dialog for the first time on-device: AlertDialog
+     * silently drops setSingleChoiceItems()'s list entirely when setMessage()
+     * is also set, so this dialog had never been selectable, for any path,
+     * since it was written - it just showed the message and a Cancel button.
      */
     private fun showCgmPathDialog() {
-        val paths = arrayOf(SetupPrefs.PATH_DEXCOM, SetupPrefs.PATH_JUGGLUCO, SetupPrefs.PATH_UNSURE)
-        val labels = arrayOf("Dexcom", "Juggluco", "Not sure")
+        val paths = arrayOf(SetupPrefs.PATH_DEXCOM, SetupPrefs.PATH_JUGGLUCO, SetupPrefs.PATH_AHEADBLE, SetupPrefs.PATH_UNSURE)
+        val labels = arrayOf("Dexcom", "Juggluco", "AheadBLE (direct BLE)", "Not sure")
         val current = paths.indexOf(SetupPrefs.cgmPath(this)).coerceAtLeast(0)
 
         AlertDialog.Builder(this)
-            .setTitle(getString(R.string.cgm_path_dialog_title))
-            .setMessage(getString(R.string.cgm_path_dialog_message))
+            .setTitle("${getString(R.string.cgm_path_dialog_title)}\n\n${getString(R.string.cgm_path_dialog_message)}")
             .setSingleChoiceItems(labels, current) { dialog, which ->
                 SetupPrefs.setCgmPath(this, paths[which])
                 dialog.dismiss()
@@ -325,21 +356,21 @@ class MainActivity : AppCompatActivity() {
         updateDebugOverrideBanner()
         lifecycleScope.launch {
             val canReadHealthConnect = HealthConnectManager.canReadGlucose(applicationContext)
+            // 2026-08-01: no longer falls back to NightscoutFallbackClient
+            // when Health Connect can't be read - that fallback read from the
+            // same web endpoint ahead-dashboard's viewer reads from, with no
+            // staleness check before it fed straight into
+            // syncRawReadingToRepository() below (which this screen shares
+            // with GlucoseCheckRunner's own alert-driving repository write,
+            // unconditionally, before the isFresh() gate that only governs
+            // what THIS screen renders). A stale substitute here could have
+            // silently reached the same severity classification a live
+            // reading would. Empty here now correctly means "nothing to
+            // show" and lets the existing signal-lost/stale state surface.
             cachedPoints = if (canReadHealthConnect) {
                 HealthConnectManager.readGlucosePoints(applicationContext, WINDOW_6H)
             } else {
                 emptyList()
-            }
-
-            if (cachedPoints.isEmpty() && !canReadHealthConnect) {
-                // Health Connect itself can't be read right now (not
-                // installed, or this app's permission was revoked) - same
-                // fallback GlucoseCheckRunner uses for the notification/
-                // backend pipeline, so this screen's own chart/number don't
-                // sit blank while the notification elsewhere on the phone is
-                // already showing real data from the same underlying CGM.
-                cachedPoints = NightscoutFallbackClient.readGlucosePoints(WINDOW_6H)
-                Log.i(TAG, "refreshChart: Health Connect unavailable - using Nightscout fallback (${cachedPoints.size} point(s))")
             }
 
             Log.d(TAG, "refreshChart: read ${cachedPoints.size} point(s), latest=${cachedPoints.lastOrNull()}")
@@ -400,8 +431,11 @@ class MainActivity : AppCompatActivity() {
         val valueView = findViewById<TextView>(R.id.latestValueText)
         val statusView = findViewById<TextView>(R.id.statusText)
         val latest = cachedPoints.lastOrNull()
+        val fresh = latest != null && isFresh(latest.time)
 
-        if (latest == null || !isFresh(latest.time)) {
+        updateLiveIndicator(fresh, latest?.sgv)
+
+        if (!fresh) {
             valueView.text = getString(R.string.no_reading_yet)
             valueView.setTextColor(ContextCompat.getColor(this, R.color.muted))
             statusView.text = if (latest == null) {
@@ -415,9 +449,43 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        valueView.text = "${latest.sgv}"
+        valueView.text = "${latest!!.sgv}"
         applySeverityToNumber(valueView, latest.sgv)
         statusView.setText(R.string.status_running)
+    }
+
+    /**
+     * Colors + (de)animates the live dot next to the "Ahead" wordmark - green/
+     * amber/red to match whatever severity bucket the current reading is in
+     * (same ladder the big number uses), with a slow pulse while that reading
+     * is fresh. Greys out flat, no pulse, the moment the connection goes
+     * stale - a live-looking indicator next to a dead connection would be
+     * actively misleading, not just cosmetic. Pulse cadence is deliberately
+     * gentle/slow (2.4s) - an earlier, faster version read as an alarm rather
+     * than a calm "yes, this is live" signal.
+     */
+    private fun updateLiveIndicator(fresh: Boolean, sgv: Int?) {
+        val colorRes = if (fresh && sgv != null) GlucoseSeverity.bucketFor(sgv).colorRes else R.color.muted
+        val color = ContextCompat.getColor(this, colorRes)
+        liveDotCore.backgroundTintList = ColorStateList.valueOf(color)
+        liveDotRing.backgroundTintList = ColorStateList.valueOf(color)
+
+        liveDotAnimators.forEach { it.cancel() }
+        if (!fresh) {
+            liveDotRing.alpha = 0f
+            liveDotAnimators = emptyList()
+            return
+        }
+
+        val scaleX = ObjectAnimator.ofFloat(liveDotRing, View.SCALE_X, 0.6f, 1.7f)
+        val scaleY = ObjectAnimator.ofFloat(liveDotRing, View.SCALE_Y, 0.6f, 1.7f)
+        val alphaAnim = ObjectAnimator.ofFloat(liveDotRing, View.ALPHA, 0.7f, 0f)
+        liveDotAnimators = listOf(scaleX, scaleY, alphaAnim).onEach {
+            it.duration = LIVE_PULSE_DURATION_MS
+            it.repeatCount = ObjectAnimator.INFINITE
+            it.interpolator = DecelerateInterpolator()
+            it.start()
+        }
     }
 
     /**
@@ -470,80 +538,15 @@ class MainActivity : AppCompatActivity() {
         return if (remainder == 0L) "${hours}h" else "${hours}h ${remainder}m"
     }
 
-    private fun selectWindow(minutes: Long) {
-        selectedWindowMinutes = minutes
-        updateWindowButtonStyles()
-        // Re-fetches rather than just re-filtering cachedPoints, so switching
-        // tabs always reflects the freshest Health Connect data instead of
-        // whatever happened to be cached from the last refresh.
-        refreshChart()
-    }
-
-    private fun updateWindowButtonStyles() {
-        setButtonActive(window1hButton, selectedWindowMinutes == WINDOW_1H)
-        setButtonActive(window3hButton, selectedWindowMinutes == WINDOW_3H)
-        setButtonActive(window6hButton, selectedWindowMinutes == WINDOW_6H)
-    }
-
-    private fun setButtonActive(button: Button, active: Boolean) {
-        button.setBackgroundResource(if (active) R.drawable.time_btn_active else R.drawable.time_btn_inactive)
-        button.setTextColor(ContextCompat.getColor(this, if (active) R.color.accent2 else R.color.muted))
-    }
-
-    private fun setRangeMode(mode: RangeMode) {
-        rangeMode = mode
-        saveRangePrefs()
-        updateRangeButtonStyles()
-        // Range is display-only - re-render from cache, no Health Connect
-        // re-fetch needed.
-        renderChart()
-    }
-
-    private fun updateRangeButtonStyles() {
-        setButtonActive(rangeTightButton, rangeMode == RangeMode.TIGHT)
-        setButtonActive(rangeFullButton, rangeMode == RangeMode.FULL)
-        setButtonActive(rangeAutoButton, rangeMode == RangeMode.AUTO)
-    }
-
-    private fun applyYAxisRange(windowed: List<GlucosePoint>) {
-        val (minY, maxY) = when (rangeMode) {
-            RangeMode.TIGHT -> 70f to 180f
-            RangeMode.FULL -> 40f to 400f
-            RangeMode.AUTO -> {
-                // Fit to the visible window's actual data with breathing room.
-                // Padded max is NOT capped - if a sensor ever reports above
-                // 400, auto-fit must still show it rather than clip.
-                val lo = windowed.minOf { it.sgv }.toFloat()
-                val hi = windowed.maxOf { it.sgv }.toFloat()
-                (lo - AUTO_RANGE_PADDING).coerceAtLeast(0f) to hi + AUTO_RANGE_PADDING
-            }
-        }
-        chart.axisLeft.axisMinimum = minY
-        chart.axisLeft.axisMaximum = maxY
-    }
-
-    private fun loadRangePrefs() {
-        val prefs = getSharedPreferences(RANGE_PREFS_NAME, MODE_PRIVATE)
-        // runCatching also covers a persisted mode that no longer exists
-        // (e.g. "CUSTOM" from a build that had it) - falls back to FULL.
-        rangeMode = runCatching { RangeMode.valueOf(prefs.getString(KEY_RANGE_MODE, null) ?: "") }
-            .getOrDefault(RangeMode.FULL)
-    }
-
-    private fun saveRangePrefs() {
-        getSharedPreferences(RANGE_PREFS_NAME, MODE_PRIVATE).edit()
-            .putString(KEY_RANGE_MODE, rangeMode.name)
-            .apply()
-    }
-
     private fun setupChart() {
         chart.description.isEnabled = false
         chart.legend.isEnabled = false
         chart.setBackgroundColor(Color.TRANSPARENT)
         chart.setDrawGridBackground(false)
         // Time-axis zoom/pan uses MPAndroidChart's built-in gestures - pinch
-        // to zoom, drag to pan. Y stays fixed to the selected range mode so
-        // zooming can never hide the 70/180 limit lines' meaning.
+        // to zoom, drag to pan. Y stays fixed (full 40-400 range, matching
+        // the old default "Full" mode - see activity_main.xml's doc on why
+        // this card no longer has its own range/window controls).
         chart.setPinchZoom(true)
         chart.isDoubleTapToZoomEnabled = false
         chart.isDragEnabled = true
@@ -564,15 +567,12 @@ class MainActivity : AppCompatActivity() {
             textSize = 10f
             setDrawAxisLine(false)
             // granularity/axisMinimum/axisMaximum/valueFormatter are all set
-            // per-render in renderChart() - they depend on the selected window
-            // and the current time.
+            // per-render in renderChart() - they depend on the current time.
         }
 
         chart.axisLeft.apply {
-            // axisMinimum/axisMaximum are applied per-render by
-            // applyYAxisRange() from the user's selected range mode - no
-            // hardcoded ceiling here (the old fixed 300f max clipped high
-            // readings; CGMs report up to ~400).
+            axisMinimum = 40f
+            axisMaximum = 400f
             setDrawGridLines(true)
             gridColor = borderColor
             textColor = mutedColor
@@ -593,16 +593,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderChart() {
         val now = Instant.now()
-        val cutoff = now.minus(Duration.ofMinutes(selectedWindowMinutes))
+        val cutoff = now.minus(Duration.ofMinutes(WINDOW_1H))
         val windowed = cachedPoints.filter { it.time.isAfter(cutoff) }
 
         if (windowed.isEmpty()) {
-            chart.setNoDataText(getString(R.string.chart_no_data, windowLabel(selectedWindowMinutes)))
+            chart.setNoDataText(getString(R.string.chart_no_data, "hour"))
             chart.clear()
             return
         }
-
-        applyYAxisRange(windowed)
 
         // x-axis values are minutes elapsed since `anchor`, not a sequential
         // point index - anchor is pinned to a whole hour so that MPAndroidChart's
@@ -626,35 +624,98 @@ class MainActivity : AppCompatActivity() {
             highLightColor = ContextCompat.getColor(this@MainActivity, R.color.accent2)
         }
 
+        val ghostEntries = buildGhostLineEntries(windowed, anchor)
+        val dataSets = mutableListOf<ILineDataSet>(dataSet)
+        var axisMax = minutesFromAnchor(anchor, now)
+        // removeAllLimitLines first - renderChart re-runs on every 5-min auto
+        // refresh, and this is the "live" marker's only home (the 70/180
+        // limit lines live on axisLeft, set once in setupChart, untouched
+        // here) - without clearing, each refresh would stack another line.
+        chart.xAxis.removeAllLimitLines()
+        if (ghostEntries.isNotEmpty()) {
+            dataSets.add(ghostLineDataSet(ghostEntries))
+            axisMax = ghostEntries.last().x
+            // Marks exactly where real data ends and the dashed projection
+            // begins (2026-08-04, reported live: without this the ghost line
+            // just trails off past the last real point and reads as "the
+            // chart lost data" rather than "this part is a projection").
+            chart.xAxis.addLimitLine(liveMarkerLine(ghostEntries.first().x))
+        }
+
         chart.marker = GlucoseMarkerView(this, anchor, zone)
         chart.xAxis.apply {
             axisMinimum = minutesFromAnchor(anchor, cutoff)
-            axisMaximum = minutesFromAnchor(anchor, now)
-            granularity = axisGranularityMinutes(selectedWindowMinutes)
+            axisMaximum = axisMax
+            granularity = 20f
             isGranularityEnabled = true
             valueFormatter = HourAxisFormatter(anchor, zone)
         }
-        chart.data = LineData(dataSet)
+        chart.data = LineData(dataSets)
         chart.notifyDataSetChanged()
         chart.invalidate()
     }
 
+    /**
+     * The "ghost line" (Gemini design suggestion, built 2026-08-03): a faded
+     * dashed extension past the last real point showing where RateMath (see
+     * ahead-rate-math, shared with ahead-lite-android) - a Kotlin mirror of
+     * trend-detector.js's own decay-aware projection - thinks glucose is
+     * actually headed, easing the rate toward zero once the recent trend
+     * confirms it's decelerating rather than assuming the current rate holds
+     * flat forever. The point isn't just visual flair: it's showing the user
+     * the SAME reasoning the backend's RED-gating already uses internally,
+     * so a fast-but-slowing rise visibly bends over instead of just looking
+     * like an ordinary flat projection would - answering "why isn't this
+     * alarming yet" at a glance.
+     */
+    private fun buildGhostLineEntries(windowed: List<GlucosePoint>, anchor: Instant): List<Entry> {
+        val last = windowed.lastOrNull() ?: return emptyList()
+        val ratePoints = windowed.map { RatePoint(it.time.toEpochMilli(), it.sgv) }
+        val rates = RateMath.recentRates(ratePoints, GHOST_RATE_SAMPLES)
+        val currentRate = rates.lastOrNull() ?: return emptyList()
+        val trajectory = RateMath.assessRateTrajectory(rates)
+        val decayPerStep = if (trajectory.kind == TrajectoryKind.DECELERATING) {
+            trajectory.avgDeltaPerStep
+        } else {
+            0.0
+        }
+        val decayed = RateMath.projectWithDecay(last.sgv, currentRate, decayPerStep, GHOST_PROJECTION_MINUTES)
+
+        val entries = mutableListOf(Entry(minutesFromAnchor(anchor, last.time), last.sgv.toFloat()))
+        decayed.forEach { point ->
+            val t = last.time.plusSeconds(point.minutesAhead * 60L)
+            entries.add(Entry(minutesFromAnchor(anchor, t), point.value.toFloat()))
+        }
+        return entries
+    }
+
+    private fun ghostLineDataSet(entries: List<Entry>): LineDataSet = LineDataSet(entries, "Projected").apply {
+        // Same accent as the app's own emphasis color, but faded (40% alpha)
+        // and dashed - reads as "not real data" at a glance without needing
+        // a legend.
+        color = ColorUtils.setAlphaComponent(ContextCompat.getColor(this@MainActivity, R.color.accent2), 110)
+        lineWidth = 2f
+        enableDashedLine(12f, 8f, 0f)
+        setDrawCircles(false)
+        setDrawValues(false)
+        mode = LineDataSet.Mode.LINEAR
+    }
+
+    /** Vertical marker at the last real data point - see renderChart's doc
+     *  on why it exists. Muted/dotted so it reads as a boundary annotation,
+     *  not another data series; label sits at the top so it doesn't collide
+     *  with the glucose line itself. */
+    private fun liveMarkerLine(xValue: Float): LimitLine = LimitLine(xValue, "Live").apply {
+        lineColor = ContextCompat.getColor(this@MainActivity, R.color.muted)
+        lineWidth = 1f
+        enableDashedLine(4f, 4f, 0f)
+        textColor = ContextCompat.getColor(this@MainActivity, R.color.muted)
+        textSize = 10f
+        labelPosition = LimitLine.LimitLabelPosition.RIGHT_TOP
+    }
+
     private fun minutesFromAnchor(anchor: Instant, instant: Instant): Float =
         Duration.between(anchor, instant).toMillis() / 60_000f
-
-    // 1hr is too short for hourly ticks to mean much (often only 1-2 would fit),
-    // so it gets a finer 20-min step; 3hr/6hr use a full hour so labels read as
-    // clean "1 PM / 2 PM / 3 PM" marks.
-    private fun axisGranularityMinutes(windowMinutes: Long): Float = when (windowMinutes) {
-        WINDOW_1H -> 20f
-        else -> 60f
-    }
-
-    private fun windowLabel(windowMinutes: Long): String = when (windowMinutes) {
-        WINDOW_1H -> "hour"
-        WINDOW_3H -> "3 hours"
-        else -> "6 hours"
-    }
 
     /** Formats an x-axis tick (minutes since `anchor`) as a clean clock time -
      *  just the hour when the tick lands exactly on one (the common case,
@@ -750,12 +811,28 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val WINDOW_1H = 60L
-        private const val WINDOW_3H = 180L
         private const val WINDOW_6H = 360L
-        private const val CHART_AUTO_REFRESH_MS = 5 * 60 * 1000L
-        private const val AUTO_RANGE_PADDING = 20f
-        private const val RANGE_PREFS_NAME = "ahead_chart_range"
-        private const val KEY_RANGE_MODE = "range_mode"
+        // 2026-08-04: was 5 min, the same cadence as the CGM's own HC sync
+        // interval - with no alignment between the two, opening the app
+        // could sit on an already-stale reading for up to a full 5 min
+        // before this timer ever re-read Health Connect, which is exactly
+        // what reads as "stale/not caught up" when actually watching a live
+        // BG move. Only runs while the screen is open (repeatOnLifecycle
+        // STARTED pauses it in the background) and Health Connect reads are
+        // a cheap local DB query, so there's no real cost to polling much
+        // more often here - this is purely about feeling live while looking
+        // at it, not about the actual alert pipeline's cadence.
+        private const val CHART_AUTO_REFRESH_MS = 20 * 1000L
+        // Ghost decay line (see buildGhostLineEntries) - 3 rate samples is
+        // the minimum assessRateTrajectory needs to confirm 'decelerating'
+        // rather than defaulting to a flat projection; 20 min matches the
+        // backend's own extended-projection horizon.
+        private const val GHOST_RATE_SAMPLES = 3
+        private const val GHOST_PROJECTION_MINUTES = 20
+        // Slow, calm cadence for the live-dot pulse - see updateLiveIndicator's
+        // doc for why this was tuned down from an earlier, more urgent-feeling
+        // version.
+        private const val LIVE_PULSE_DURATION_MS = 2400L
         // Below this, movement is noise, not a real trend - matches the rate
         // magnitude "Stable" is supposed to communicate.
         private const val STABLE_RATE_THRESHOLD = 0.5

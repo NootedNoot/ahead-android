@@ -16,3 +16,10 @@ dependencyResolutionManagement {
 
 rootProject.name = "ahead-android"
 include(":app")
+
+// Shared rate/dedup/trend-trajectory math with ahead-lite-android - see
+// ../ahead-rate-math/CLAUDE.md. Included by relative path rather than a
+// published artifact; only works because all Ahead repos live as sibling
+// folders under one workspace (see the workspace CLAUDE.md).
+include(":ratemath")
+project(":ratemath").projectDir = File(rootDir, "../ahead-rate-math")

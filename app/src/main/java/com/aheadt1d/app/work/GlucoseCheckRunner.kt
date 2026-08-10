@@ -7,7 +7,6 @@ import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.alerts.PlateauCoordinator
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
-import com.aheadt1d.app.health.NightscoutFallbackClient
 import com.aheadt1d.app.network.BackendClient
 import com.aheadt1d.app.notifications.GlucoseStatusService
 import com.aheadt1d.app.state.Guess
@@ -17,6 +16,7 @@ import com.aheadt1d.app.state.RawReading
 import com.aheadt1d.app.state.ReadBlockedReason
 import com.aheadt1d.app.tuning.PlateauTuningPrefs
 import com.aheadt1d.app.tuning.TuningPrefs
+import com.aheadt1d.app.upload.UploadCoordinator
 import java.io.IOException
 import org.json.JSONArray
 import org.json.JSONObject
@@ -102,6 +102,11 @@ object GlucoseCheckRunner {
             )
         }
 
+        // Best-effort, fully isolated from everything below (see
+        // UploadCoordinator's class doc) - piggybacks on this same read
+        // rather than polling Health Connect a second time on its own timer.
+        UploadCoordinator.maybeUpload(context, points)
+
         // Best-effort: keep the foreground service alive. When the service's own
         // loop is what called run(), this is a harmless no-op (it's already up);
         // when the Worker watchdog called it, this is the resurrection path.
@@ -161,21 +166,24 @@ object GlucoseCheckRunner {
     }
 
     /**
-     * Health Connect is the primary, on-device source; this only steps in
-     * when HC itself can't be read at all (not installed/unsupported, the
-     * permission was revoked, or a transient RemoteException) - not when HC
-     * is reached fine but legitimately has nothing new to report (that's a
-     * real upstream gap, not an HC failure, and Nightscout would show the
-     * same gap anyway). Each of the three branches below already recorded
-     * the specific failure reason via ReadBlockedReason before existing;
-     * now each first tries the fallback and only keeps that reason if the
-     * fallback also comes back empty. Returns null when both sources failed.
+     * Health Connect is the ONLY source (2026-08-01: the Nightscout fallback
+     * that used to step in here was removed - it read from the same web
+     * endpoint ahead-dashboard's viewer reads from, with no staleness check
+     * before that data was fed straight into the raw-reading repository and
+     * on to the backend's RED/YELLOW classification. That endpoint had
+     * already shown a 30+-minute-old reading while Health Connect correctly
+     * had live data - a stale substitute silently scored as current could
+     * either suppress a real alert or fire a false one with no indication to
+     * the user that the number wasn't fresh. When Health Connect can't be
+     * read at all (not installed/unsupported, permission revoked, or a
+     * transient RemoteException), this now returns null unconditionally, so
+     * the app surfaces its existing signal-lost/stale state instead of
+     * silently substituting a possibly-stale number.
      */
     private suspend fun readPoints(context: Context): List<GlucosePoint>? {
         val healthConnectClient = HealthConnectManager.getClientOrNull(context)
         if (healthConnectClient == null) {
             Log.w(TAG, "Health Connect client unavailable (not installed, or SDK unsupported on this device)")
-            tryNightscoutFallback()?.let { return it }
             LatestTrendRepository.updateReadBlocked(ReadBlockedReason.HC_UNAVAILABLE)
             return null
         }
@@ -186,7 +194,6 @@ object GlucoseCheckRunner {
             // a background execution context doesn't count as foreground to
             // Health Connect, even when kicked off via the "Check now" button.
             Log.w(TAG, "Missing a Health Connect permission (have $granted, need ${HealthConnectManager.ALL_PERMISSIONS})")
-            tryNightscoutFallback()?.let { return it }
             LatestTrendRepository.updateReadBlocked(ReadBlockedReason.PERMISSION_MISSING)
             return null
         }
@@ -196,25 +203,11 @@ object GlucoseCheckRunner {
         } catch (e: RemoteException) {
             // Transient read error with permissions verified granted this run.
             Log.w(TAG, "Health Connect read failed despite granted permissions", e)
-            tryNightscoutFallback()?.let { return it }
             LatestTrendRepository.updateReadBlocked(null)
             return null
         }
 
         Log.d(TAG, "Read ${points.size} Health Connect point(s) in the last $WINDOW_MINUTES min")
-        return points
-    }
-
-    /** Null (not empty list) means the fallback itself came back with
-     *  nothing usable, so the caller should fall through to its normal
-     *  ReadBlockedReason handling instead of pretending this succeeded. */
-    private suspend fun tryNightscoutFallback(): List<GlucosePoint>? {
-        val points = NightscoutFallbackClient.readGlucosePoints(WINDOW_MINUTES)
-        if (points.isEmpty()) {
-            Log.w(TAG, "Nightscout fallback returned no usable points either")
-            return null
-        }
-        Log.i(TAG, "Health Connect unavailable this cycle - using Nightscout fallback (${points.size} point(s))")
         return points
     }
 

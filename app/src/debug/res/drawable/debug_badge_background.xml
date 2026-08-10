@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Small pill for the "DEBUG BUILD" badge at the top of the screen. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#268B5CF6" />
+    <corners android:radius="20dp" />
+</shape>

@@ -52,8 +52,14 @@ android {
 }
 
 dependencies {
+    // Canonical rate/dedup/trend-trajectory math, shared with ahead-lite-android.
+    implementation(project(":ratemath"))
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    // Dashboard's side nav drawer (2026-08-03) - Material likely brings this
+    // in transitively already, but declared explicitly rather than relying
+    // on that.
+    implementation("androidx.drawerlayout:drawerlayout:1.2.0")
     // BottomSheetDialog for the event-tag edit/delete sheet on the trend chart.
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.activity:activity-ktx:1.9.3")
@@ -64,6 +70,10 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Uploader (Nightscout/webhook) credentials - EncryptedSharedPreferences,
+    // not plain prefs, since these are secrets that grant write access to
+    // someone's medical data (see upload/UploadPrefs.kt).
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
 
     // Notes history screen's list.

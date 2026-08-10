@@ -2,7 +2,8 @@
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/bg"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -10,251 +11,284 @@
         android:orientation="vertical"
         android:padding="16dp">
 
+        <!-- ===================== Header ===================== -->
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@drawable/debug_badge_background"
+            android:paddingHorizontal="10dp"
+            android:paddingVertical="4dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="DEBUG BUILD"
+                android:textColor="@color/accent2"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.1" />
+        </LinearLayout>
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
             android:text="Debug Menu"
             android:textColor="@color/text_primary"
-            android:textSize="20sp"
+            android:textSize="26sp"
             android:textStyle="bold" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="Manual test controls - never ships in a release build."
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
 
         <!-- ===================== Reset everything ===================== -->
 
-        <TextView style="@style/DebugSectionHeader" android:text="RESET" />
-        <TextView
-            style="@style/DebugLabel"
-            android:text="Clears ALL test state - injected data, forced alerts, alert/plateau cooldown history - then runs one real Health Connect check so the display repopulates from live data immediately." />
-        <Button android:id="@+id/resetAllTestStateButton" style="@style/DebugButton" android:text="Reset everything to normal" android:backgroundTint="@color/low" />
+        <LinearLayout style="@style/DebugCard.Danger">
+            <TextView style="@style/DebugCardTitle.Danger" android:text="RESET" />
+            <TextView
+                style="@style/DebugLabel"
+                android:text="Clears ALL test state - injected data, forced alerts, alert/plateau cooldown history - then runs one real Health Connect check so the display repopulates from live data immediately." />
+            <Button android:id="@+id/resetAllTestStateButton" style="@style/DebugButton.Danger" android:text="Reset everything to normal" />
+        </LinearLayout>
 
         <!-- ===================== Glucose injection ===================== -->
 
-        <TextView style="@style/DebugSectionHeader" android:text="GLUCOSE INJECTION — MANUAL OVERRIDE" />
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="GLUCOSE INJECTION" />
 
-        <TextView style="@style/DebugLabel" android:text="Value (mg/dL)" />
-        <EditText
-            android:id="@+id/manualValueInput"
-            style="@style/TuningInput"
-            android:hint="e.g. 120"
-            android:inputType="number" />
+            <TextView style="@style/DebugSubheading" android:text="MANUAL OVERRIDE" />
+            <TextView style="@style/DebugLabel" android:text="Value (mg/dL)" />
+            <EditText
+                android:id="@+id/manualValueInput"
+                style="@style/DebugInput"
+                android:hint="e.g. 120"
+                android:inputType="number" />
 
-        <TextView style="@style/DebugLabel" android:text="Rate of change (mg/dL/min, signed)" />
-        <EditText
-            android:id="@+id/manualRateInput"
-            style="@style/TuningInput"
-            android:hint="e.g. -1.5"
-            android:inputType="numberDecimal|numberSigned" />
+            <TextView style="@style/DebugLabel" android:text="Rate of change (mg/dL/min, signed)" />
+            <EditText
+                android:id="@+id/manualRateInput"
+                style="@style/DebugInput.Signed"
+                android:hint="e.g. -1.5" />
 
-        <TextView style="@style/DebugLabel" android:text="Age override (min) — 0 = fresh, large = force stale" />
-        <EditText
-            android:id="@+id/manualAgeInput"
-            style="@style/TuningInput"
-            android:hint="0"
-            android:inputType="number" />
+            <TextView style="@style/DebugLabel" android:text="Age override (min) - 0 = fresh, large = force stale" />
+            <EditText
+                android:id="@+id/manualAgeInput"
+                style="@style/DebugInput"
+                android:hint="0"
+                android:inputType="number" />
 
-        <Button android:id="@+id/injectManualButton" style="@style/DebugButton" android:text="Inject now" />
-        <Button android:id="@+id/forceStaleButton" style="@style/DebugButton" android:text="Force stale now (uses value above)" />
-
-        <TextView style="@style/DebugSectionHeader" android:text="GLUCOSE INJECTION — PRESET SCENARIOS" />
-
-        <TextView style="@style/DebugLabel" android:text="Scenario" />
-        <Spinner
-            android:id="@+id/scenarioSpinner"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp" />
-
-        <TextView style="@style/DebugLabel" android:text="Playback speed" />
-        <RadioGroup
-            android:id="@+id/speedGroup"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="4dp">
-
-            <RadioButton
-                android:id="@+id/speed1x"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="1x (real time)"
-                android:textColor="@color/text_primary"
-                android:checked="true" />
+                android:orientation="horizontal">
+                <Button android:id="@+id/injectManualButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="8dp" android:text="Inject now" />
+                <Button android:id="@+id/forceStaleButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:text="Force stale" />
+            </LinearLayout>
 
-            <RadioButton
-                android:id="@+id/speed10x"
-                android:layout_width="wrap_content"
+            <TextView style="@style/DebugSubheading" android:text="PRESET SCENARIOS" />
+            <TextView style="@style/DebugLabel" android:text="Scenario" />
+            <FrameLayout style="@style/DebugSpinnerFrame">
+                <Spinner
+                    android:id="@+id/scenarioSpinner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </FrameLayout>
+
+            <TextView style="@style/DebugLabel" android:text="Playback speed" />
+            <RadioGroup
+                android:id="@+id/speedGroup"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="16dp"
-                android:text="10x"
-                android:textColor="@color/text_primary" />
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
 
-        </RadioGroup>
+                <RadioButton
+                    android:id="@+id/speed1x"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="1x (real time)"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent2"
+                    android:checked="true" />
 
-        <Button android:id="@+id/playScenarioButton" style="@style/DebugButton" android:text="Play scenario" />
-        <Button android:id="@+id/stopScenarioButton" style="@style/DebugButton" android:text="Stop playback" />
+                <RadioButton
+                    android:id="@+id/speed10x"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="20dp"
+                    android:text="10x"
+                    android:textColor="@color/text_primary"
+                    android:buttonTint="@color/accent2" />
 
-        <TextView
-            android:id="@+id/scenarioProgressText"
-            style="@style/DebugStatusText"
-            android:text="" />
+            </RadioGroup>
 
-        <TextView style="@style/DebugSectionHeader" android:text="GLUCOSE INJECTION — STRESS TEST" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <Button android:id="@+id/playScenarioButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="8dp" android:text="Play scenario" />
+                <Button android:id="@+id/stopScenarioButton" style="@style/DebugButton.Ghost" android:layout_width="0dp" android:layout_weight="1" android:text="Stop" />
+            </LinearLayout>
 
-        <TextView style="@style/DebugLabel" android:text="Number of random points (spread over 6 hours)" />
-        <EditText
-            android:id="@+id/randomCountInput"
-            style="@style/TuningInput"
-            android:hint="e.g. 150"
-            android:inputType="number" />
+            <TextView
+                android:id="@+id/scenarioProgressText"
+                style="@style/DebugStatusText"
+                android:text="" />
 
-        <Button android:id="@+id/injectRandomButton" style="@style/DebugButton" android:text="Inject N random points" />
-        <Button android:id="@+id/clearInjectionButton" style="@style/DebugButton" android:text="Clear injected data (use real Health Connect)" />
+            <TextView style="@style/DebugSubheading" android:text="STRESS TEST" />
+            <TextView style="@style/DebugLabel" android:text="Number of random points (spread over 6 hours)" />
+            <EditText
+                android:id="@+id/randomCountInput"
+                style="@style/DebugInput"
+                android:hint="e.g. 150"
+                android:inputType="number" />
+
+            <Button android:id="@+id/injectRandomButton" style="@style/DebugButton" android:text="Inject N random points" />
+            <Button android:id="@+id/clearInjectionButton" style="@style/DebugButton.Ghost" android:text="Clear injected data (use real Health Connect)" />
+        </LinearLayout>
 
         <!-- ===================== Report export stress test ===================== -->
 
-        <TextView style="@style/DebugSectionHeader" android:text="DOCTOR REPORT — STRESS TEST" />
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="DOCTOR REPORT - STRESS TEST" />
+            <TextView
+                style="@style/DebugStatusText"
+                android:text="Injects a synthetic 14-day series ending now, with a deliberate 6-day gap in the middle (no readings at all) and values that sweep every severity zone - exercises full-range pagination, gap rendering, and color coding without depending on real device data." />
 
-        <TextView
-            style="@style/DebugStatusText"
-            android:text="Injects a synthetic 14-day series ending now, with a deliberate 6-day gap in the middle (no readings at all) and values that sweep every severity zone - exercises full-range pagination, gap rendering, and color coding without depending on real device data." />
-
-        <Button android:id="@+id/injectReportTestDataButton" style="@style/DebugButton" android:text="Inject 14-day range w/ gap (report test)" />
-        <Button android:id="@+id/openDoctorReportButton" style="@style/DebugButton" android:text="Open Doctor Report" />
+            <Button android:id="@+id/injectReportTestDataButton" style="@style/DebugButton" android:text="Inject 14-day range w/ gap" />
+            <Button android:id="@+id/openDoctorReportButton" style="@style/DebugButton.Ghost" android:text="Open Doctor Report" />
+        </LinearLayout>
 
         <!-- ===================== Notes history stress test ===================== -->
 
-        <TextView style="@style/DebugSectionHeader" android:text="NOTES — BACKDATED EVENT TEST" />
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="NOTES - BACKDATED EVENT TEST" />
+            <TextView
+                style="@style/DebugStatusText"
+                android:text="Logs a real UserEvent with a timestamp set N hours in the past - for testing that the notes history screen's edit/delete works on entries GraphActivity's own 6h chart window would never surface." />
 
-        <TextView
-            style="@style/DebugStatusText"
-            android:text="Logs a real UserEvent with a timestamp set N hours in the past - for testing that the notes history screen's edit/delete works on entries GraphActivity's own 6h chart window would never surface." />
+            <TextView style="@style/DebugLabel" android:text="Tag" />
+            <FrameLayout style="@style/DebugSpinnerFrame">
+                <Spinner
+                    android:id="@+id/debugEventTagSpinner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+            </FrameLayout>
 
-        <TextView style="@style/DebugLabel" android:text="Tag" />
-        <Spinner
-            android:id="@+id/debugEventTagSpinner"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp" />
+            <TextView style="@style/DebugLabel" android:text="Note" />
+            <EditText
+                android:id="@+id/debugEventNoteInput"
+                style="@style/DebugInput.Text"
+                android:hint="e.g. Backdated test note" />
 
-        <TextView style="@style/DebugLabel" android:text="Note" />
-        <EditText
-            android:id="@+id/debugEventNoteInput"
-            style="@style/TuningInput"
-            android:hint="e.g. Backdated test note" />
+            <TextView style="@style/DebugLabel" android:text="Hours ago" />
+            <EditText
+                android:id="@+id/debugEventHoursAgoInput"
+                style="@style/DebugInput"
+                android:hint="e.g. 10"
+                android:inputType="number" />
 
-        <TextView style="@style/DebugLabel" android:text="Hours ago" />
-        <EditText
-            android:id="@+id/debugEventHoursAgoInput"
-            style="@style/TuningInput"
-            android:hint="e.g. 10"
-            android:inputType="number" />
-
-        <Button android:id="@+id/injectBackdatedEventButton" style="@style/DebugButton" android:text="Inject backdated event" />
-        <Button android:id="@+id/openNotesHistoryButton" style="@style/DebugButton" android:text="Open Notes History" />
+            <Button android:id="@+id/injectBackdatedEventButton" style="@style/DebugButton" android:text="Inject backdated event" />
+            <Button android:id="@+id/openNotesHistoryButton" style="@style/DebugButton.Ghost" android:text="Open Notes History" />
+        </LinearLayout>
 
         <!-- ===================== Plateau stress test ===================== -->
 
-        <TextView style="@style/DebugSectionHeader" android:text="PLATEAU — STRESS TEST" />
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="PLATEAU - STRESS TEST" />
+            <TextView
+                style="@style/DebugStatusText"
+                android:text="Seeds a flat ~320 mg/dL series covering the full plateau lookback window, then queues a real GlucoseCheckWorker cycle - collapses the 90-minute default wait into one tap. Lower PLATEAU_COOLDOWN/HIGH_DURATION in Tuning Parameters first to see escalation/re-fire quickly." />
 
-        <TextView
-            style="@style/DebugStatusText"
-            android:text="Seeds a flat ~320 mg/dL series covering the full plateau lookback window, then queues a real GlucoseCheckWorker cycle - collapses the 90-minute default wait into one tap. Lower PLATEAU_COOLDOWN/HIGH_DURATION in Tuning Parameters first to see escalation/re-fire quickly." />
+            <Button android:id="@+id/injectPlateauScenarioButton" style="@style/DebugButton" android:text="Inject sustained-high plateau + Check now" />
 
-        <Button android:id="@+id/injectPlateauScenarioButton" style="@style/DebugButton" android:text="Inject sustained-high plateau + Check now" />
+            <TextView
+                style="@style/DebugStatusText"
+                android:text="Simulates tapping the real 'Correction' preset tag (same PlateauCoordinator.onCorrectionLogged hook), without going through the tag-picker dialog. Auto-detects high vs low from the current injected glucose value (use Manual Value above to set a low reading first, e.g. 55, to test the low-side path). Tap twice quickly to also test the repeat-correction-logged notification." />
 
-        <TextView
-            style="@style/DebugStatusText"
-            android:text="Simulates tapping the real 'Correction' preset tag (same PlateauCoordinator.onCorrectionLogged hook), without going through the tag-picker dialog. Auto-detects high vs low from the current injected glucose value (use Manual Value above to set a low reading first, e.g. 55, to test the low-side path). Tap twice quickly to also test the repeat-correction-logged notification." />
-
-        <Button android:id="@+id/simulateLogCorrectionButton" style="@style/DebugButton" android:text="Simulate: log correction now" />
+            <Button android:id="@+id/simulateLogCorrectionButton" style="@style/DebugButton" android:text="Simulate: log correction now" />
+        </LinearLayout>
 
         <!-- ===================== Notification testing ===================== -->
 
-        <TextView style="@style/DebugSectionHeader" android:text="NOTIFICATION TESTING" />
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="NOTIFICATION TESTING" />
 
-        <Button android:id="@+id/forceYellowButton" style="@style/DebugButton" android:text="Force-trigger YELLOW alert" />
-        <Button android:id="@+id/forceRedButton" style="@style/DebugButton" android:text="Force-trigger RED (critical) alert" />
-        <Button android:id="@+id/forceSignalLostButton" style="@style/DebugButton" android:text="Force-trigger signal-lost alert" />
-        <Button android:id="@+id/cancelAlertsButton" style="@style/DebugButton" android:text="Cancel all alerts" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="12dp"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="0dp"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Voice alerts (master)"
-                android:textColor="@color/text_primary"
-                android:textSize="13sp" />
+                android:orientation="horizontal"
+                android:layout_marginTop="10dp">
+                <Button android:id="@+id/forceYellowButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="8dp" android:text="Force YELLOW" android:background="@drawable/number_fill_bg" android:textColor="@color/amber" />
+                <Button android:id="@+id/forceRedButton" style="@style/DebugButton.Danger" android:layout_width="0dp" android:layout_weight="1" android:text="Force RED" />
+            </LinearLayout>
+            <Button android:id="@+id/forceSignalLostButton" style="@style/DebugButton" android:text="Force signal-lost alert" />
+            <Button android:id="@+id/cancelAlertsButton" style="@style/DebugButton.Ghost" android:text="Cancel all alerts" />
 
-            <Switch android:id="@+id/voiceMasterSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
+            <LinearLayout style="@style/DebugToggleRow">
+                <TextView style="@style/DebugToggleLabel" android:text="Voice alerts (master)" />
+                <Switch android:id="@+id/voiceMasterSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="@color/accent2" android:trackTint="@color/border" />
+            </LinearLayout>
 
-        </LinearLayout>
+            <LinearLayout style="@style/DebugToggleRow">
+                <TextView style="@style/DebugToggleLabel" android:text="Send app to background after forcing an alert" />
+                <Switch android:id="@+id/autoBackgroundSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="@color/accent2" android:trackTint="@color/border" />
+            </LinearLayout>
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Send app to background after forcing an alert"
-                android:textColor="@color/text_primary"
-                android:textSize="13sp" />
-
-            <Switch android:id="@+id/autoBackgroundSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-
-        </LinearLayout>
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="8dp"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Disable full-screen lockout (sound/vibration/voice/notification still fire normally)"
-                android:textColor="@color/text_primary"
-                android:textSize="13sp" />
-
-            <Switch android:id="@+id/disableFullScreenSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" />
-
+            <LinearLayout style="@style/DebugToggleRow">
+                <TextView style="@style/DebugToggleLabel" android:text="Disable full-screen lockout (sound/vibration/voice/notification still fire normally)" />
+                <Switch android:id="@+id/disableFullScreenSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="@color/accent2" android:trackTint="@color/border" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- ===================== Chart / UI testing ===================== -->
 
-        <TextView style="@style/DebugSectionHeader" android:text="CHART / UI TESTING" />
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="CHART / UI TESTING" />
+            <TextView
+                style="@style/DebugStatusText"
+                android:text="Injected data (manual/preset/random above) feeds the real chart data source, so the Graph screen's own 1hr/3hr/6hr and Tight/Full/Auto toggles already exercise every combination against it - open it below and cycle through them for a screenshot pass." />
 
-        <TextView
-            style="@style/DebugStatusText"
-            android:text="Injected data (manual/preset/random above) feeds the real chart data source, so the Graph screen's own 1hr/3hr/6hr and Tight/Full/Auto toggles already exercise every combination against it - open it below and cycle through them for a screenshot pass." />
-
-        <Button android:id="@+id/openGraphButton" style="@style/DebugButton" android:text="Open glucose graph" />
+            <Button android:id="@+id/openGraphButton" style="@style/DebugButton" android:text="Open glucose graph" />
+        </LinearLayout>
 
         <!-- ===================== System state ===================== -->
 
-        <TextView style="@style/DebugSectionHeader" android:text="SYSTEM STATE" />
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="SYSTEM STATE" />
 
-        <TextView android:id="@+id/batteryStatusText" style="@style/DebugStatusText" android:text="Battery optimization: —" />
-        <TextView android:id="@+id/hcPermsStatusText" style="@style/DebugStatusText" android:text="Health Connect permissions: —" />
-        <TextView android:id="@+id/dndStatusText" style="@style/DebugStatusText" android:text="DND policy access: —" />
-        <TextView android:id="@+id/injectionStatusText" style="@style/DebugStatusText" android:text="Chart data source: —" />
+            <LinearLayout style="@style/DebugStatusRow">
+                <TextView style="@style/DebugStatusRowLabel" android:text="Battery optimization" />
+                <TextView android:id="@+id/batteryStatusText" style="@style/DebugStatusRowValue" android:text="-" />
+            </LinearLayout>
+            <LinearLayout style="@style/DebugStatusRow">
+                <TextView style="@style/DebugStatusRowLabel" android:text="Health Connect permissions" />
+                <TextView android:id="@+id/hcPermsStatusText" style="@style/DebugStatusRowValue" android:text="-" />
+            </LinearLayout>
+            <LinearLayout style="@style/DebugStatusRow">
+                <TextView style="@style/DebugStatusRowLabel" android:text="DND policy access" />
+                <TextView android:id="@+id/dndStatusText" style="@style/DebugStatusRowValue" android:text="-" />
+            </LinearLayout>
+            <LinearLayout style="@style/DebugStatusRow">
+                <TextView style="@style/DebugStatusRowLabel" android:text="Chart data source" />
+                <TextView android:id="@+id/injectionStatusText" style="@style/DebugStatusRowValue" android:text="-" />
+            </LinearLayout>
 
-        <Button android:id="@+id/refreshStatusButton" style="@style/DebugButton" android:text="Refresh status" />
+            <Button android:id="@+id/refreshStatusButton" style="@style/DebugButton.Ghost" android:text="Refresh status" />
+        </LinearLayout>
 
-        <Button android:id="@+id/closeButton" style="@style/DebugButton" android:text="Close" android:layout_marginBottom="24dp" />
+        <Button
+            android:id="@+id/closeButton"
+            style="@style/DebugButton.Ghost"
+            android:layout_marginTop="20dp"
+            android:layout_marginBottom="24dp"
+            android:text="Close" />
 
     </LinearLayout>
 

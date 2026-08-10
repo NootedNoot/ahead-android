@@ -1,411 +1,395 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Plain LinearLayout, not a ScrollView: this screen is meant to read as a
-     single native view, not a page you scroll through. The current-glucose
-     card and Check now button size to their natural (wrap_content) height;
-     the trend card below takes whatever vertical space is left via
-     layout_weight, so the whole thing always fits one screen regardless of
-     device height instead of overflowing or leaving dead space. -->
-<!-- FrameLayout wrapper so the quick-log event button can float over the
-     trend card's bottom-right corner without adding to the vertical layout
-     flow - the single-screen-fit constraint on the inner LinearLayout below
-     is otherwise unaffected. -->
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- DrawerLayout root (2026-08-03): consolidates every screen this app has
+     - Graph, Notes History, Doctor Report, Voice Alerts, Emergency Contacts,
+     CGM Sync, plus the debug-only tools - into one side menu instead of a
+     scattered footer row + hidden long-press. See workspace design notes;
+     this replaces the old FrameLayout-is-root structure, which is now the
+     drawer's "main content" child. -->
+<androidx.drawerlayout.widget.DrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/drawerLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <!-- Debug-only: visible for as long as the Debug Menu's glucose
-         injection/scenario override is active, so it's never silently
-         mistaken for a real (or dead) live feed. Gone in release builds and
-         whenever no override is set. -->
-    <TextView
-        android:id="@+id/debugOverrideBanner"
+    <!-- Plain LinearLayout, not a ScrollView: this screen is meant to read as a
+         single native view, not a page you scroll through. The current-glucose
+         card sizes to its natural (wrap_content) height; the trend card below
+         takes whatever vertical space is left via layout_weight, so the whole
+         thing always fits one screen regardless of device height instead of
+         overflowing or leaving dead space. -->
+    <!-- FrameLayout wrapper so the two banners can float over everything else
+         without adding to the vertical layout flow. -->
+    <FrameLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:background="@color/low"
-        android:padding="6dp"
-        android:text="⚠ DEBUG: showing injected data, not live Health Connect"
-        android:textAlignment="center"
-        android:textColor="#FFFFFF"
-        android:textSize="11sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
+        android:layout_height="match_parent">
 
-    <!-- Shown only when Do Not Disturb access was previously granted and has
-         since been revoked (see AlertChannels.dndAccessRegressed) - a red
-         alert could otherwise arrive silenced with no warning. Never shown
-         for a user who simply never granted it (that's an intentional
-         choice, not a regression). GONE by default costs nothing in the
-         layout; released builds show this too, unlike the debug banner
-         above. Tapping it jumps straight to the DND-access settings screen. -->
-    <TextView
-        android:id="@+id/dndRegressionBanner"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top"
-        android:background="@color/high"
-        android:clickable="true"
-        android:focusable="true"
-        android:padding="8dp"
-        android:text="⚠️ Do Not Disturb access was lost — red alerts may go silent. Tap to fix."
-        android:textAlignment="center"
-        android:textColor="#000000"
-        android:textSize="11sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
-
-<LinearLayout
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@color/bg"
-    android:orientation="vertical"
-    android:gravity="center_horizontal"
-    android:paddingStart="16dp"
-    android:paddingEnd="16dp"
-    android:paddingTop="16dp"
-    android:paddingBottom="12dp">
-
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center"
-        android:background="@drawable/card_background"
-        android:padding="18dp">
-
+        <!-- Debug-only: visible for as long as the Debug Menu's glucose
+             injection/scenario override is active, so it's never silently
+             mistaken for a real (or dead) live feed. Gone in release builds and
+             whenever no override is set. -->
         <TextView
-            android:layout_width="wrap_content"
+            android:id="@+id/debugOverrideBanner"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/current_glucose_label"
-            android:textColor="@color/muted"
+            android:layout_gravity="top"
+            android:background="@color/low"
+            android:padding="6dp"
+            android:text="⚠ DEBUG: showing injected data, not live Health Connect"
+            android:textAlignment="center"
+            android:textColor="#FFFFFF"
             android:textSize="11sp"
-            android:letterSpacing="0.15" />
-
-        <TextView
-            android:id="@+id/latestValueText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:fontFamily="monospace"
-            android:textColor="@color/ok"
-            android:textSize="46sp"
             android:textStyle="bold"
-            android:text="@string/no_reading_yet" />
+            android:visibility="gone" />
 
+        <!-- Shown only when Do Not Disturb access was previously granted and has
+             since been revoked (see AlertChannels.dndAccessRegressed) - a red
+             alert could otherwise arrive silenced with no warning. Never shown
+             for a user who simply never granted it (that's an intentional
+             choice, not a regression). GONE by default costs nothing in the
+             layout; released builds show this too, unlike the debug banner
+             above. Tapping it jumps straight to the DND-access settings screen. -->
         <TextView
-            android:id="@+id/latestSeverityText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:fontFamily="monospace"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-
-        <!-- 15- and 30-minute projections, a straight-line extrapolation from
-             the same effective rate shown in the line above. Hidden when there
-             is no fresh reading or no computable rate. -->
-        <LinearLayout
-            android:id="@+id/projectionContainer"
+            android:id="@+id/dndRegressionBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:gravity="center"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/projected_label"
-                android:textColor="@color/muted"
-                android:textSize="10sp"
-                android:letterSpacing="0.1" />
-
-            <TextView
-                android:id="@+id/projectionText"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:gravity="center"
-                android:fontFamily="monospace"
-                android:textColor="@color/text_primary"
-                android:textSize="14sp" />
-
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/statusText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="@string/status_running"
-            android:textColor="@color/muted"
+            android:layout_gravity="top"
+            android:background="@color/high"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="8dp"
+            android:text="⚠️ Do Not Disturb access was lost — red alerts may go silent. Tap to fix."
+            android:textAlignment="center"
+            android:textColor="#000000"
             android:textSize="11sp"
-            android:textAlignment="center" />
+            android:textStyle="bold"
+            android:visibility="gone" />
 
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/glucoseTrendCard"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:layout_marginTop="12dp"
-        android:background="@drawable/card_background"
-        android:foreground="?attr/selectableItemBackground"
-        android:clickable="true"
-        android:focusable="true"
-        android:padding="14dp">
-
-        <!-- Two mirrored control rows: small-caps label left (weighted, so it
-             pushes the chips to the card's right edge), chip group right.
-             Identical structure top and bottom is what makes the range row
-             read as part of the card rather than bolted on. -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center">
+            android:layout_height="match_parent"
+            android:background="@color/bg"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="12dp">
+
+            <!-- App bar: hamburger + wordmark + live indicator. Replaces the
+                 old hidden long-press debugLabel entry point and the bottom
+                 footer row entirely - every destination now lives in the
+                 drawer this opens. -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingBottom="6dp">
+
+                <ImageButton
+                    android:id="@+id/hamburgerButton"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="Open menu"
+                    android:padding="8dp"
+                    android:src="@drawable/ic_menu"
+                    app:tint="@color/text_primary" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="2dp"
+                    android:text="Ahead"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <!-- Live status indicator - color matches current severity,
+                     ripples while data is fresh, greys out flat when stale.
+                     See MainActivity.updateLiveIndicator. -->
+                <FrameLayout
+                    android:layout_width="26dp"
+                    android:layout_height="26dp"
+                    android:layout_marginStart="2dp">
+
+                    <View
+                        android:id="@+id/liveDotRing"
+                        android:layout_width="15dp"
+                        android:layout_height="15dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/live_dot_ring" />
+
+                    <View
+                        android:id="@+id/liveDotCore"
+                        android:layout_width="7dp"
+                        android:layout_height="7dp"
+                        android:layout_gravity="center"
+                        android:background="@drawable/live_dot_core" />
+
+                </FrameLayout>
+
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/card_background"
+                android:padding="18dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/current_glucose_label"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.15" />
+
+                <TextView
+                    android:id="@+id/latestValueText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/ok"
+                    android:textSize="46sp"
+                    android:textStyle="bold"
+                    android:text="@string/no_reading_yet" />
+
+                <TextView
+                    android:id="@+id/latestSeverityText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/text_primary"
+                    android:textSize="14sp" />
+
+                <!-- 15- and 30-minute projections, a straight-line extrapolation from
+                     the same effective rate shown in the line above. Hidden when there
+                     is no fresh reading or no computable rate. -->
+                <LinearLayout
+                    android:id="@+id/projectionContainer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/projected_label"
+                        android:textColor="@color/muted"
+                        android:textSize="10sp"
+                        android:letterSpacing="0.1" />
+
+                    <TextView
+                        android:id="@+id/projectionText"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:gravity="center"
+                        android:fontFamily="monospace"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/statusText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/status_running"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp"
+                    android:textAlignment="center" />
+
+            </LinearLayout>
+
+            <!-- Trend preview - fixed to the last hour, no inline controls.
+                 The full pan/zoom + 1h/3h/6h + Tight/Full/Auto experience now
+                 lives only in GraphActivity, reached by tapping this card (or
+                 "Glucose Graph" in the drawer) - having the same controls in
+                 two places was redundant, and this card doubling as a nav
+                 target reads better as a simple "tap for more" preview than
+                 a data-entry surface of its own. -->
+            <LinearLayout
+                android:id="@+id/glucoseTrendCard"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/card_background"
+                android:foreground="?attr/selectableItemBackground"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/glucose_trend_label"
+                        android:textColor="@color/muted"
+                        android:textSize="11sp"
+                        android:letterSpacing="0.06" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Open full graph ›"
+                        android:textColor="@color/accent2"
+                        android:textSize="11sp" />
+
+                </LinearLayout>
+
+                <com.github.mikephil.charting.charts.LineChart
+                    android:id="@+id/glucoseChart"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:layout_marginTop="10dp" />
+
+            </LinearLayout>
 
             <TextView
-                android:layout_width="wrap_content"
+                android:id="@+id/versionText"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:text="@string/glucose_trend_label"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
                 android:textColor="@color/muted"
-                android:textSize="11sp"
-                android:letterSpacing="0.06" />
-
-            <Button
-                android:id="@+id/window1hButton"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:background="@drawable/time_btn_inactive"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="5dp"
-                android:maxLines="1"
-                android:text="@string/window_1h"
-                android:textAllCaps="false"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/window3hButton"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:background="@drawable/time_btn_inactive"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="5dp"
-                android:maxLines="1"
-                android:text="@string/window_3h"
-                android:textAllCaps="false"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
-
-            <Button
-                android:id="@+id/window6hButton"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:background="@drawable/time_btn_inactive"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="5dp"
-                android:maxLines="1"
-                android:text="@string/window_6h"
-                android:textAllCaps="false"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
+                android:textSize="10sp" />
 
         </LinearLayout>
 
-        <!-- Y-axis range presets. Explicit controls, not auto-scale-only: a
-             chart that silently clips a high reading hides the exact trend
-             the user needs, so the range is always user-visible state. -->
+    </FrameLayout>
+
+    <!-- ===================== Drawer ===================== -->
+    <ScrollView
+        android:layout_width="264dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@color/surface"
+        android:fitsSystemWindows="true">
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="10dp"
-            android:gravity="center">
+            android:orientation="vertical"
+            android:paddingTop="20dp"
+            android:paddingBottom="14dp">
 
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingHorizontal="18dp"
+                android:paddingBottom="14dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Ahead"
+                    android:textColor="@color/text_primary"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Ryan"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp" />
+
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/border" />
+
+            <!-- Dashboard (active) -->
+            <LinearLayout
+                android:id="@+id/drawerDashboardItem"
+                style="@style/DrawerItem"
+                android:background="@drawable/drawer_item_active">
+                <TextView style="@style/DrawerItemLabel" android:text="Dashboard" android:textColor="@color/text_primary" android:textStyle="bold" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerGraphItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Glucose Graph" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerNotesItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Notes History" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerReportItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Doctor Report" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerHealthItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Health Data" />
+            </LinearLayout>
+
+            <TextView style="@style/DrawerSectionLabel" android:text="SAFETY" />
+
+            <LinearLayout android:id="@+id/drawerVoiceItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Voice Alerts" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerEmergencyItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Emergency Contacts" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerCgmSyncItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="CGM Sync" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerUploadItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Data Upload" />
+            </LinearLayout>
+
+            <!-- Debug-only - each gone by default, shown only when
+                 BuildConfig.DEBUG (see MainActivity.setupDrawer). -->
             <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:text="@string/glucose_range_label"
-                android:textColor="@color/muted"
-                android:textSize="11sp"
-                android:letterSpacing="0.06" />
+                android:id="@+id/drawerDebugSectionLabel"
+                style="@style/DrawerSectionLabel"
+                android:text="DEBUG BUILD"
+                android:visibility="gone" />
 
-            <Button
-                android:id="@+id/rangeTightButton"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:background="@drawable/time_btn_inactive"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="5dp"
-                android:maxLines="1"
-                android:text="@string/range_tight"
-                android:textAllCaps="false"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
+            <LinearLayout android:id="@+id/drawerDebugMenuItem" style="@style/DrawerItem" android:visibility="gone">
+                <TextView style="@style/DrawerItemLabel" android:text="Debug Menu" />
+                <TextView style="@style/DrawerBadge" android:text="DEBUG" />
+            </LinearLayout>
 
-            <Button
-                android:id="@+id/rangeFullButton"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:background="@drawable/time_btn_inactive"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="5dp"
-                android:maxLines="1"
-                android:text="@string/range_full"
-                android:textAllCaps="false"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
+            <LinearLayout android:id="@+id/drawerTuningItem" style="@style/DrawerItem" android:visibility="gone">
+                <TextView style="@style/DrawerItemLabel" android:text="Tuning Parameters" />
+                <TextView style="@style/DrawerBadge" android:text="DEBUG" />
+            </LinearLayout>
 
-            <Button
-                android:id="@+id/rangeAutoButton"
-                style="?android:attr/borderlessButtonStyle"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="6dp"
-                android:minWidth="0dp"
-                android:minHeight="0dp"
-                android:background="@drawable/time_btn_inactive"
-                android:paddingHorizontal="10dp"
-                android:paddingVertical="5dp"
-                android:maxLines="1"
-                android:text="@string/range_auto"
-                android:textAllCaps="false"
-                android:textColor="@color/muted"
-                android:textSize="12sp" />
+            <LinearLayout android:id="@+id/drawerResetWizardItem" style="@style/DrawerItem" android:visibility="gone">
+                <TextView style="@style/DrawerItemLabel" android:text="Reset Setup Wizard" />
+                <TextView style="@style/DrawerBadge" android:text="DEBUG" />
+            </LinearLayout>
 
         </LinearLayout>
 
-        <com.github.mikephil.charting.charts.LineChart
-            android:id="@+id/glucoseChart"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:layout_marginTop="10dp" />
+    </ScrollView>
 
-    </LinearLayout>
-
-    <!-- Bottom row: Voice-alerts settings entry (start) + build/version string
-         (end). In debug builds the version string doubles as a hidden reset:
-         long-press it to re-run the setup wizard (see MainActivity). -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical">
-
-        <TextView
-            android:id="@+id/voiceAlertsEntry"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingHorizontal="8dp"
-            android:paddingVertical="8dp"
-            android:text="@string/voice_alerts_entry"
-            android:textColor="@color/accent2"
-            android:textSize="12sp" />
-
-        <TextView
-            android:id="@+id/emergencyContactsEntry"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingHorizontal="8dp"
-            android:paddingVertical="8dp"
-            android:text="@string/emergency_contacts_entry"
-            android:textColor="@color/accent2"
-            android:textSize="12sp" />
-
-        <TextView
-            android:id="@+id/cgmPathEntry"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingHorizontal="8dp"
-            android:paddingVertical="8dp"
-            android:text="@string/cgm_path_entry"
-            android:textColor="@color/accent2"
-            android:textSize="12sp" />
-
-        <!-- Spacer: keeps voiceAlertsEntry, debugLabel, and versionText each
-             sized to their own text (wrap_content) instead of one of them
-             stretching to fill the row and stealing taps meant for empty
-             space next to it. -->
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <TextView
-            android:id="@+id/versionText"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingHorizontal="16dp"
-            android:paddingVertical="8dp"
-            android:gravity="end"
-            android:textColor="@color/muted"
-            android:textSize="10sp" />
-
-    </LinearLayout>
-
-</LinearLayout>
-
-    <!-- Debug-only long-press entry point for the Debug Menu. Floats in the
-         top-right corner (its own FrameLayout child) rather than living in
-         the bottom row, which sits right under the quick-log FAB and made it
-         nearly impossible to tap on its own - top corner has no other
-         touch targets nearby. Gone in release builds (and hidden until
-         MainActivity confirms BuildConfig.DEBUG). -->
-    <TextView
-        android:id="@+id/debugLabel"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="top|end"
-        android:layout_margin="8dp"
-        android:paddingHorizontal="10dp"
-        android:paddingVertical="8dp"
-        android:text="Debug"
-        android:textColor="@color/accent2"
-        android:textSize="12sp"
-        android:visibility="gone" />
-
-    <!-- Quick-log event FAB: tap opens the preset-tag picker, long-press jumps
-         straight to the custom-note dialog. Floats over the trend card's
-         corner rather than taking its own row. -->
-    <ImageButton
-        android:id="@+id/logEventFab"
-        android:layout_width="56dp"
-        android:layout_height="56dp"
-        android:layout_gravity="bottom|end"
-        android:layout_margin="24dp"
-        android:background="@drawable/fab_background"
-        android:contentDescription="@string/log_event_fab_description"
-        android:elevation="6dp"
-        android:padding="14dp"
-        android:src="@drawable/ic_add_event"
-        app:tint="#FFFFFF" />
-
-</FrameLayout>
+</androidx.drawerlayout.widget.DrawerLayout>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- "Blazing A" - bold white A-stroke on the full-bleed purple background,
+     plus one green accent dot where the crossbar gap sits. Chosen from a
+     38-option icon exploration; matches option #25 exactly. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M54,18 L26,86 M54,18 L82,86 M35,64 L46,64 M62,64 L73,64"
+        android:strokeColor="#F4EEFF"
+        android:strokeWidth="11"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="#00000000" />
+    <path
+        android:fillColor="#3DDC97"
+        android:pathData="M54,64m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
+</vector>

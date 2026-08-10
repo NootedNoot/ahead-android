@@ -1,9 +1,21 @@
 package com.aheadt1d.app.emergency
 
+import android.Manifest
+import android.app.Notification
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.telephony.SmsManager
 import android.util.Log
+import androidx.core.app.ActivityCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.aheadt1d.app.MainActivity
+import com.aheadt1d.app.R
+import com.aheadt1d.app.alerts.AlertChannels
 import com.aheadt1d.app.events.AppDatabase
+import com.aheadt1d.app.notifications.NotificationIconFactory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 
@@ -25,14 +37,30 @@ enum class EmergencyAlertType(val storageValue: String, val label: String) {
  * log write. Two send paths funnel through [sendMessage]/[sendToAllEligible]:
  * RedAlertActivity's manual "Send Emergency Alert" button (which owns its own
  * confirmation dialog and SEND_SMS permission check/request), and
- * EmergencyAlertReceiver's automatic 15-minute-unacknowledged timeout (which
- * checks SEND_SMS itself before calling in, since there's no UI to prompt
- * from a background receiver). Either way, this object assumes permission is
- * already granted by the time it's called - SmsManager throws
- * SecurityException otherwise, left to propagate so the caller surfaces it.
+ * [postConfirmNotification] below, used by both background timeout receivers
+ * (EmergencyAlertReceiver, CriticalLowEmergencyReceiver). Either way, this
+ * object assumes permission is already granted by the time [sendMessage] is
+ * called - SmsManager throws SecurityException otherwise, left to propagate
+ * so the caller surfaces it.
+ *
+ * 2026-08-03: the background timeout receivers used to call [sendToAllEligible]
+ * directly the moment their timer fired - a real signal-lost false alarm (data
+ * gap, not an actual low) auto-texted a family member three times with no
+ * human in the loop at all, which is not something Ryan ever actually
+ * consented to per-send. [postConfirmNotification] replaces that: the timer
+ * firing now only posts a notification with a "Send now" action - the actual
+ * SmsManager call happens ONLY if that's tapped, via EmergencyAlertConfirmReceiver.
+ * This deliberately trades away the "texts someone even if you're completely
+ * unresponsive" case the timeout was originally built for, in favor of never
+ * sending a real text without a real tap - Ryan's explicit call after the
+ * false alarm, not an oversight.
  */
 object EmergencyAlertRepository {
     private const val TAG = "EmergencyAlertRepository"
+
+    const val CONFIRM_NOTIFICATION_ID = 2201
+    private const val REQ_CONFIRM_SEND = 2202
+    private const val REQ_CONFIRM_CONTENT = 2203
 
     private fun contactDao(context: Context) = AppDatabase.getInstance(context).emergencyContactDao()
     private fun logDao(context: Context) = AppDatabase.getInstance(context).emergencyAlertLogDao()
@@ -148,13 +176,69 @@ object EmergencyAlertRepository {
     }
 
     /** Sends [message] to every currently-eligible (not-in-cooldown) contact -
-     *  used by both the manual confirmation flow and the automatic 15-minute
-     *  timeout, so "all contacts get the same text" is enforced in one place. */
+     *  used by both the manual confirmation flow and
+     *  EmergencyAlertConfirmReceiver (the ONLY caller for a background-timer
+     *  fire now - see the class doc), so "all contacts get the same text" is
+     *  enforced in one place. */
     suspend fun sendToAllEligible(context: Context, alertType: EmergencyAlertType, message: String) {
         val eligible = eligibleContacts(context, contacts(context).first())
         for (contact in eligible) {
             runCatching { sendMessage(context, contact, alertType, message) }
                 .onFailure { Log.w(TAG, "failed to auto-text ${contact.name}", it) }
         }
+    }
+
+    /**
+     * Posts a notification with a "Send now" action instead of texting
+     * anyone - called by EmergencyAlertReceiver/CriticalLowEmergencyReceiver
+     * when their background timer fires. Nothing is sent until that action
+     * is tapped (EmergencyAlertConfirmReceiver does the actual send); simply
+     * receiving this notification never results in an SMS on its own.
+     *
+     * Deliberately does NOT check SEND_SMS here - that's checked at the
+     * moment of the actual tap instead (same reasoning as the old pre-check:
+     * a background receiver can't prompt for a runtime permission, but a
+     * missing permission shouldn't hide the prompt entirely, since the
+     * confirm receiver can now surface that as a clear "grant it in the app"
+     * message instead of just silently doing nothing).
+     */
+    fun postConfirmNotification(context: Context, alertType: EmergencyAlertType, message: String) {
+        AlertChannels.ensure(context)
+
+        val sendIntent = Intent(context, EmergencyAlertConfirmReceiver::class.java)
+            .setAction(EmergencyAlertConfirmReceiver.ACTION_CONFIRM_SEND)
+            .putExtra(EmergencyAlertConfirmReceiver.EXTRA_ALERT_TYPE, alertType.storageValue)
+            .putExtra(EmergencyAlertConfirmReceiver.EXTRA_MESSAGE, message)
+        val sendPendingIntent = PendingIntent.getBroadcast(
+            context, REQ_CONFIRM_SEND, sendIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val contentIntent = PendingIntent.getActivity(
+            context, REQ_CONFIRM_CONTENT,
+            Intent(context, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
+            .setSmallIcon(NotificationIconFactory.warningIcon(context))
+            .setContentTitle("Send emergency alert to your contacts?")
+            .setContentText(message)
+            .setStyle(Notification.BigTextStyle().bigText(message))
+            .setCategory(Notification.CATEGORY_ALARM)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            .setColor(ContextCompat.getColor(context, R.color.low))
+            .setContentIntent(contentIntent)
+            .addAction(Notification.Action.Builder(null, "Send now", sendPendingIntent).build())
+            .build()
+
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            NotificationManagerCompat.from(context).notify(CONFIRM_NOTIFICATION_ID, notification)
+        }
+        Log.d(TAG, "posted send-confirmation notification ($alertType) - no text sent yet")
     }
 }
