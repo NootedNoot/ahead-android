@@ -62,7 +62,13 @@ object TuningPrefs {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 }
 
-const val DEFAULT_YELLOW_LOW = 90
+// 2026-08-11: was 90, one of the three hand-synced copies of this threshold
+// (see the workspace CLAUDE.md's "duplicated on purpose" section) missed
+// when the backend/GlucoseStatusService copies were lowered to 80 on
+// 2026-08-08. GlucoseCheckRunner sends this value to the backend as an
+// override on every check, so a stale copy here silently reintroduced the
+// original flat-90s over-alerting the 80 default was meant to fix.
+const val DEFAULT_YELLOW_LOW = 80
 const val DEFAULT_YELLOW_HIGH = 200
 const val DEFAULT_RED_LOW = 70
 const val DEFAULT_RED_HIGH = 250
