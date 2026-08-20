@@ -353,10 +353,6 @@
                 <TextView style="@style/DrawerItemLabel" android:text="Voice Alerts" />
             </LinearLayout>
 
-            <LinearLayout android:id="@+id/drawerEmergencyItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Emergency Contacts" />
-            </LinearLayout>
-
             <LinearLayout android:id="@+id/drawerCgmSyncItem" style="@style/DrawerItem">
                 <TextView style="@style/DrawerItemLabel" android:text="CGM Sync" />
             </LinearLayout>

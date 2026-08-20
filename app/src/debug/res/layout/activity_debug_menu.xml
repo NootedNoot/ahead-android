@@ -241,10 +241,6 @@
                 <Switch android:id="@+id/autoBackgroundSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="@color/accent2" android:trackTint="@color/border" />
             </LinearLayout>
 
-            <LinearLayout style="@style/DebugToggleRow">
-                <TextView style="@style/DebugToggleLabel" android:text="Disable full-screen lockout (sound/vibration/voice/notification still fire normally)" />
-                <Switch android:id="@+id/disableFullScreenSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="@color/accent2" android:trackTint="@color/border" />
-            </LinearLayout>
         </LinearLayout>
 
         <!-- ===================== Chart / UI testing ===================== -->

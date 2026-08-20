@@ -9,10 +9,8 @@ import android.content.pm.PackageManager
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
-import com.aheadt1d.app.emergency.EmergencyAlertScheduler
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
 import com.aheadt1d.app.notifications.NotificationIconFactory
 import com.aheadt1d.app.state.ReadBlockedReason
@@ -36,16 +34,14 @@ object AlertNotifier {
     const val PLATEAU_ALERT_NOTIFICATION_ID = 2003
     const val CORRECTION_ALERT_NOTIFICATION_ID = 2004
 
-    private const val REQ_RED_FSI = 2101
     private const val REQ_RED_CONTENT = 2102
     private const val REQ_YELLOW_CONTENT = 2103
     private const val REQ_SIGNAL_LOST_CONTENT = 2104
     private const val REQ_PLATEAU_CONTENT = 2105
     private const val REQ_CORRECTION_CONTENT = 2106
-    private const val REQ_SIGNAL_LOST_FSI = 2107
 
-    // Same 70 mg/dL split AlertCoordinator/RedAlertActivity each keep their
-    // own copy of - decides which direction's tone plays. Also considers
+    // Same 70 mg/dL split AlertCoordinator keeps its own copy of - decides
+    // which direction's tone plays. Also considers
     // projected like AlertCoordinator's own copy does (see its doc): a
     // still-high current value that's projected to crash into the low band
     // should get the falling/low tone, not the rising/high one.
@@ -54,14 +50,16 @@ object AlertNotifier {
         value <= LOW_HIGH_SPLIT || (projected != null && projected <= LOW_HIGH_SPLIT)
 
     /**
+     * REMOVED 2026-08-20: the full-screen takeover (RedAlertActivity) is
+     * gone, at the owner's explicit request - reported as more headache
+     * (an alarm they couldn't disable) than help. This is now an ordinary
+     * notification for both branches, same delivery tier as yellow, just
+     * with red's own color/copy/channel.
+     *
      * @param recovering True only for a low-side red that's rising as
      *   expected (see AlertCoordinator's low-recovery handling) - the person
      *   is already being warned and is trending back to safety, so this
-     *   fires a calmer heads-up instead of the full emergency treatment: no
-     *   full-screen takeover, no CATEGORY_ALARM sound, "recovering" copy
-     *   instead of "URGENT check now". A genuinely falling low, or ANY high
-     *   (highs never get the calmer treatment - see AlertCoordinator's peak
-     *   tracking), still gets the full takeover.
+     *   fires calmer copy ("recovering") instead of "URGENT check now".
      */
     fun showRedAlert(context: Context, value: Int, projected: Int?, rate: Double?, recovering: Boolean = false) {
         AlertChannels.ensure(context)
@@ -72,37 +70,20 @@ object AlertNotifier {
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.low))
             .setContentIntent(mainActivityIntent(context, REQ_RED_CONTENT))
+            .setCategory(Notification.CATEGORY_STATUS)
+            // Full content on the lock screen: for a genuine red alert,
+            // hiding the number behind "notification hidden" would
+            // defeat the point.
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
 
         if (recovering) {
             builder
                 .setContentTitle("🟠 Still low: $value mg/dL, rising")
                 .setContentText("${projectionLine(projected)} — keep monitoring")
-                .setCategory(Notification.CATEGORY_STATUS)
         } else {
-            // FLAG_UPDATE_CURRENT is load-bearing: successive red intents are
-            // filterEquals-identical (extras don't participate), so without it a
-            // cached PendingIntent would launch the takeover screen with the
-            // FIRST alert's values forever.
-            val fullScreenIntent = PendingIntent.getActivity(
-                context,
-                REQ_RED_FSI,
-                RedAlertActivity.createIntent(context, value, projected, rate),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
             builder
                 .setContentTitle("🔴 URGENT: $value mg/dL ${arrow.label}")
                 .setContentText("${projectionLine(projected)} — check now")
-                .setCategory(Notification.CATEGORY_ALARM)
-                // Full content on the lock screen: for a genuine red alert,
-                // hiding the number behind "notification hidden" would
-                // defeat the point.
-                .setVisibility(Notification.VISIBILITY_PUBLIC)
-            // Debug-only: lets testing skip the forced lock-screen takeover
-            // while keeping sound/vibration/voice/notification exactly as
-            // they'd normally fire - see DebugAlertPrefs.
-            if (!(BuildConfig.DEBUG && DebugAlertPrefs.isFullScreenDisabled(context))) {
-                builder.setFullScreenIntent(fullScreenIntent, true)
-            }
         }
 
         notifyIfAllowed(context) { nm ->
@@ -116,15 +97,11 @@ object AlertNotifier {
         // resolving low spends most of its time in exactly that recovering
         // state, wobbling above/below zero rate, so that leftover tone was
         // still firing constantly and was reported as "the little alarm that
-        // fires on a screen takeover" even though this branch never takes the
+        // fires on a screen takeover" even though this branch never took the
         // screen over. Red is voice + vibration + notification only, full
         // stop - the spoken value says what to DO, the vibration reaches
-        // someone without waking a room, and neither requires the takeover
-        // screen or a tone to work. Voice is ungated (see
+        // someone without waking a room. Voice is ungated (see
         // VoiceAlertEngine.UNGATED_CATEGORIES) so it's never the silent link.
-
-        // CriticalLowSiren is deliberately unaffected by this: its own looping
-        // alarm ringtone is the last-resort tier and stays loud on purpose.
 
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
@@ -169,16 +146,15 @@ object AlertNotifier {
     /**
      * Fired once glucose data has gone stale (see AlertCoordinator.handleStale) -
      * unconditionally, regardless of what the last CONFIRMED severity was.
-     * RED-tier, same delivery as [showRedAlert]: the red/DND-bypassing channel,
-     * full-screen takeover, alarm-stream sound. 2026-07-27: previously
-     * yellow-tier and only fired if the last known reading was already
-     * concerning ("you were heading somewhere bad and we've lost signal,
-     * rather than escalate on a guess"). Reclassified because a total data
-     * blackout is dangerous on its own merits - the person could be dropping
-     * or climbing fast starting the MOMENT signal was lost, with zero
-     * indication, regardless of what the last confirmed value happened to be.
-     * Never claims a glucose number or severity, since none is confirmed -
-     * see RedAlertActivity.createSignalLostIntent's distinct "no data" screen.
+     * RED-tier, same delivery as [showRedAlert]: the red/DND-bypassing channel.
+     * 2026-07-27: previously yellow-tier and only fired if the last known
+     * reading was already concerning ("you were heading somewhere bad and
+     * we've lost signal, rather than escalate on a guess"). Reclassified
+     * because a total data blackout is dangerous on its own merits - the
+     * person could be dropping or climbing fast starting the MOMENT signal
+     * was lost, with zero indication, regardless of what the last confirmed
+     * value happened to be. Never claims a glucose number or severity, since
+     * none is confirmed.
      *
      * [blockedReason] is the runner's app-side diagnosis when one exists -
      * the guidance sentence (shared staleGuidance) then points at the app-side
@@ -194,35 +170,18 @@ object AlertNotifier {
     ) {
         AlertChannels.ensure(context)
 
-        // FLAG_UPDATE_CURRENT for the same reason showRedAlert's does: successive
-        // signal-lost intents are filterEquals-identical, so without it a cached
-        // PendingIntent would relaunch the takeover with the FIRST episode's values.
-        val fullScreenIntent = PendingIntent.getActivity(
-            context,
-            REQ_SIGNAL_LOST_FSI,
-            RedAlertActivity.createSignalLostIntent(context, lastValue, lastArrow, ageMinutes),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val signalLostBuilder = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
+        val notification = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
             .setContentTitle("🔴 No new glucose data — ${ageMinutes}m")
             .setContentText("Last reading $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. ${staleGuidance(blockedReason)}")
-            .setCategory(Notification.CATEGORY_ALARM)
-            // Same reasoning as showRedAlert: hiding the last-known number
-            // behind "notification hidden" would defeat the point of a
-            // takeover-tier alert.
+            .setCategory(Notification.CATEGORY_STATUS)
+            // Full content on the lock screen: hiding the last-known number
+            // behind "notification hidden" would defeat the point.
             .setVisibility(Notification.VISIBILITY_PUBLIC)
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.low))
             .setContentIntent(mainActivityIntent(context, REQ_SIGNAL_LOST_CONTENT))
-        // Debug-only: lets testing skip the forced lock-screen takeover while
-        // keeping sound/vibration/voice/notification exactly as they'd
-        // normally fire - see DebugAlertPrefs.
-        if (!(BuildConfig.DEBUG && DebugAlertPrefs.isFullScreenDisabled(context))) {
-            signalLostBuilder.setFullScreenIntent(fullScreenIntent, true)
-        }
-        val notification = signalLostBuilder.build()
+            .build()
 
         // Shares RED_ALERT_NOTIFICATION_ID with showRedAlert - deliberately: a
         // live glucose-red notification left over from before the blackout
@@ -393,15 +352,8 @@ object AlertNotifier {
         NotificationManagerCompat.from(context).cancel(CORRECTION_ALERT_NOTIFICATION_ID)
     }
 
-    /** Every call site that clears the red slot is, by construction, the app
-     *  itself determining a red episode is no longer active (dismissed by the
-     *  user, downgraded, or auto-resolved after a signal-loss reconnect) - so
-     *  this is also the one place a pending emergency-contact auto-text timer
-     *  (see EmergencyAlertScheduler) should be torn down. Safe/no-op when
-     *  nothing is pending. */
     fun cancelRed(context: Context) {
         NotificationManagerCompat.from(context).cancel(RED_ALERT_NOTIFICATION_ID)
-        EmergencyAlertScheduler.cancel(context)
     }
 
     /** Just the shared yellow/signal-lost slot - deliberately narrower than

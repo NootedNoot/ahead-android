@@ -190,10 +190,6 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(VoiceAlertsActivity.createIntent(this))
         }
-        findViewById<View>(R.id.drawerEmergencyItem).setOnClickListener {
-            drawerLayout.closeDrawer(GravityCompat.START)
-            startActivity(com.aheadt1d.app.emergency.EmergencyContactsActivity.createIntent(this))
-        }
         findViewById<View>(R.id.drawerCgmSyncItem).setOnClickListener {
             drawerLayout.closeDrawer(GravityCompat.START)
             showCgmPathDialog()

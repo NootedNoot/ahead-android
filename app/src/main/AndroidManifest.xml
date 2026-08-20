@@ -55,16 +55,15 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
-    <!-- Red-severity escalation: full-screen takeover over the lock screen,
-         piercing Do Not Disturb, and the battery-optimisation exemption the
-         wizard requests so background checks keep running. -->
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Lets the red channel bypass Do Not Disturb, and the battery-
+         optimisation exemption the wizard requests so background checks
+         keep running. USE_FULL_SCREEN_INTENT and SEND_SMS were removed
+         2026-08-20 along with the full-screen lockout takeover, the
+         critical-low siren, and the emergency-contact auto-text feature
+         (all gone at the owner's explicit request) - nothing in this app
+         uses either anymore. -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-
-    <!-- Emergency Contact Alert: only ever sent after an explicit Yes tap on
-         the red-alert confirmation dialog, never silently. -->
-    <uses-permission android:name="android.permission.SEND_SMS" />
 
     <!-- healthdata: check Health Connect's install/availability status on API < 34.
          Dexcom/Juggluco: so the setup wizard can auto-detect the installed CGM
@@ -107,19 +106,6 @@
             </intent-filter>
         </activity-alias>
 
-        <!-- Red-severity takeover screen. Launched only via the full-screen
-             intent on the red alert notification, never started directly.
-             singleTop so a re-fired alert re-delivers via onNewIntent instead
-             of stacking. -->
-        <activity
-            android:name=".alerts.RedAlertActivity"
-            android:exported="false"
-            android:excludeFromRecents="true"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:launchMode="singleTop"
-            android:theme="@style/Theme.Ahead.RedAlert" />
-
         <activity
             android:name=".setup.SetupWizardActivity"
             android:exported="false"
@@ -136,10 +122,6 @@
 
         <activity
             android:name=".events.EventHistoryActivity"
-            android:exported="false" />
-
-        <activity
-            android:name=".emergency.EmergencyContactsActivity"
             android:exported="false" />
 
         <activity
@@ -201,45 +183,6 @@
                 <action android:name="com.ahead.ble.action.GLUCOSE_UPDATE" />
             </intent-filter>
         </receiver>
-
-        <!-- Fires the emergency-contact auto-text if a red alert goes 15 min
-             unacknowledged (see EmergencyAlertScheduler). exported=false:
-             only our own PendingIntent ever triggers it. -->
-        <receiver
-            android:name=".emergency.EmergencyAlertReceiver"
-            android:exported="false" />
-
-        <!-- The "Send now" action on the confirm notification
-             EmergencyAlertRepository.postConfirmNotification posts - the ONLY
-             thing that actually sends an SMS for a background-timer-fired
-             alert. exported=false: only our own PendingIntent triggers it. -->
-        <receiver
-            android:name=".emergency.EmergencyAlertConfirmReceiver"
-            android:exported="false" />
-
-        <!-- Repeating tick for the critical-low emergency siren (see
-             CriticalLowSiren). exported=false: only our own
-             setAlarmClock() operation PendingIntent ever triggers it. -->
-        <receiver
-            android:name=".alerts.CriticalLowAlarmReceiver"
-            android:exported="false" />
-
-        <!-- Fires the critical-low siren's own emergency-contact auto-text
-             if it goes 10 min unacknowledged (see
-             CriticalLowEmergencyScheduler) - independent of
-             EmergencyAlertReceiver's own 15-min timer for a normal red
-             alert. exported=false: only our own PendingIntent triggers it. -->
-        <receiver
-            android:name=".alerts.CriticalLowEmergencyReceiver"
-            android:exported="false" />
-
-        <!-- Fires when the critical-low notification is swiped away from the
-             shade (see CriticalLowSiren.postNotification's setDeleteIntent) -
-             stops the siren, same as the in-app dismiss button.
-             exported=false: only our own PendingIntent triggers it. -->
-        <receiver
-            android:name=".alerts.CriticalLowDismissReceiver"
-            android:exported="false" />
 
         <!-- CSV event export: hands a cache file to whatever share target the
              user picks (email, Drive, etc) without exposing the whole cache dir. -->

@@ -6,10 +6,6 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.migration.Migration
-import com.aheadt1d.app.emergency.EmergencyAlertLog
-import com.aheadt1d.app.emergency.EmergencyAlertLogDao
-import com.aheadt1d.app.emergency.EmergencyContact
-import com.aheadt1d.app.emergency.EmergencyContactDao
 
 /**
  * First Room database in this app - everything else so far is
@@ -22,18 +18,22 @@ import com.aheadt1d.app.emergency.EmergencyContactDao
  *  1 - user_events only.
  *  2 - added emergency_contacts + emergency_alert_log for the Emergency
  *      Contact Alert feature.
+ *  3 - REMOVED 2026-08-20: the emergency-contact auto-text feature (and the
+ *      full-screen lockout/siren it was tied to) is gone at the owner's
+ *      explicit request. Drops both tables rather than just deleting the
+ *      entity classes, so an existing install's schema actually matches what
+ *      Room expects post-upgrade - just removing the classes without a
+ *      migration would fail Room's schema validation on next launch.
  * Never rely on fallbackToDestructiveMigration - that would silently wipe a
- * user's logged events/contacts on an upgrade.
+ * user's logged events on an upgrade.
  */
 @Database(
-    entities = [UserEvent::class, EmergencyContact::class, EmergencyAlertLog::class],
-    version = 2,
+    entities = [UserEvent::class],
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userEventDao(): UserEventDao
-    abstract fun emergencyContactDao(): EmergencyContactDao
-    abstract fun emergencyAlertLogDao(): EmergencyAlertLogDao
 
     companion object {
         @Volatile
@@ -58,13 +58,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("DROP TABLE IF EXISTS `emergency_contacts`")
+                db.execSQL("DROP TABLE IF EXISTS `emergency_alert_log`")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "ahead_events.db"
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
     }
 }

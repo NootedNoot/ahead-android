@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Solid danger-red fill for DebugButton.Danger (Force RED, Reset
+     everything) - filled, not outline, since these are primary destructive/
+     forcing actions, not secondary ones (see debug_button_ghost for that). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/low" />
+    <corners android:radius="24dp" />
+</shape>

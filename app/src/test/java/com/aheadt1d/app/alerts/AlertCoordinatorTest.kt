@@ -27,10 +27,8 @@ import org.robolectric.annotation.Config
  * these assert the same thing a user would actually observe: did a
  * notification post, and what does it say.
  *
- * EmergencyContactsPrefs defaults to disabled, so these never touch
- * AlarmManager/SMS. VoiceAlertPrefs defaults to enabled, so these do
- * exercise VoiceAlertEngine - Robolectric's TextToSpeech shadow handles that
- * without a real engine.
+ * VoiceAlertPrefs defaults to enabled, so these do exercise VoiceAlertEngine -
+ * Robolectric's TextToSpeech shadow handles that without a real engine.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -202,43 +200,6 @@ class AlertCoordinatorTest {
         AlertCoordinator.evaluate(context, reading(value = 263, severity = "red"), trend(1L, 260, "red"))
 
         assertEquals(firstTitle, redTitle())
-    }
-
-    @Test
-    fun `dismissal suppresses the ongoing-episode heartbeat even past RED_REALERT_COOLDOWN_MS`() {
-        AlertCoordinator.evaluate(context, reading(value = 62, severity = "red"), trend(1L, 62, "red"))
-        assertTrue(redTitle()?.contains("62") == true)
-
-        AlertCoordinator.recordDismissal(context)
-        // Backdate last-fired past RED_REALERT_COOLDOWN_MS (15 min) - without
-        // the dismiss cooldown this alone would be enough to re-fire the
-        // heartbeat.
-        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit()
-            .putLong("last_red_fired_at_ms", System.currentTimeMillis() - 16 * 60_000L)
-            .commit()
-
-        AlertCoordinator.evaluate(context, reading(value = 63, severity = "red"), trend(1L, 62, "red"))
-
-        assertTrue(
-            "dismissal should hold the takeover down despite the elapsed cooldown",
-            redTitle()?.contains("63") != true,
-        )
-    }
-
-    @Test
-    fun `a brand-new episode still fires immediately despite a recent dismissal`() {
-        AlertCoordinator.evaluate(context, reading(value = 62, severity = "red"), trend(1L, 62, "red"))
-        AlertCoordinator.recordDismissal(context)
-        // Cleared back to none, then a genuinely new red episode (new date) -
-        // must not be swallowed by the still-active dismiss cooldown from the
-        // earlier, unrelated episode.
-        AlertCoordinator.evaluate(context, reading(value = 90, severity = "none"), trend(2L, 90, "none"))
-        AlertCoordinator.evaluate(context, reading(value = 50, severity = "red"), trend(3L, 50, "red"))
-
-        assertTrue(
-            "a brand-new episode must always interrupt regardless of an earlier dismissal",
-            redTitle()?.contains("50") == true,
-        )
     }
 
     @Test

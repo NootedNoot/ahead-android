@@ -17,11 +17,6 @@
         <item name="materialCalendarFullscreenTheme">@style/ThemeOverlay.MaterialComponents.MaterialCalendar.Fullscreen</item>
     </style>
 
-    <!-- Red takeover: same dashboard palette, just the alert layout on top. -->
-    <style name="Theme.Ahead.RedAlert" parent="Theme.Ahead">
-        <item name="android:windowBackground">@color/bg</item>
-    </style>
-
     <!-- Setup wizard: its own deeper palette (do not repaint the dashboard). -->
     <style name="Theme.Ahead.Wizard" parent="Theme.Ahead">
         <item name="android:windowBackground">@color/bg_deep</item>

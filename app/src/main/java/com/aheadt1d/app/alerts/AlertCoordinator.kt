@@ -5,10 +5,6 @@ import android.content.SharedPreferences
 import android.util.Log
 import androidx.core.content.edit
 import com.aheadt1d.app.BuildConfig
-import com.aheadt1d.app.emergency.EmergencyAlertRepository
-import com.aheadt1d.app.emergency.EmergencyAlertScheduler
-import com.aheadt1d.app.emergency.EmergencyAlertType
-import com.aheadt1d.app.emergency.EmergencyContactsPrefs
 import com.aheadt1d.app.notifications.GlucoseDisplayState
 import com.aheadt1d.app.state.LatestTrend
 
@@ -45,14 +41,17 @@ import com.aheadt1d.app.state.LatestTrend
  * every process start and the service renders immediately. Without persisted
  * dedup, every app restart mid-episode would re-alarm.
  *
- * Dismiss cooldown (2026-08-04): an explicit dismiss from RedAlertActivity
- * (recordDismissal) starts a DISMISS_COOLDOWN_MS window that suppresses the
- * ongoing-episode re-fire paths (the plain heartbeat, recoveryJustStopped,
- * high-side re-arm) - never a brand-new episode (forceFire). This is
- * CriticalLowSiren's "acknowledged" latch for the shallower ordinary-red band
- * it doesn't cover (roughly 55-70, not deep/fast enough to trip the siren) -
- * without it, a sticky low with a wobbling rate could re-trigger the
- * full-screen takeover within minutes of being dismissed.
+ * REMOVED 2026-08-20, at the owner's explicit request: the full-screen
+ * lockout takeover (RedAlertActivity), the forced-volume critical-low siren
+ * (CriticalLowSiren), and the emergency-contact auto-text escalation
+ * (emergency/) are all gone - reported as more of a headache (an alarm that
+ * couldn't be dismissed) than a help for what the owner actually needs right
+ * now. Red/yellow severity still fires as an ordinary notification (see
+ * AlertNotifier) with voice alerts (kept, separately toggleable) - just
+ * nothing that locks the screen, forces alarm-stream volume, or pages a
+ * third party. The dismiss-cooldown machinery that existed only to protect
+ * the takeover screen from re-popping right after being dismissed went with
+ * it - there's no takeover screen left to protect.
  */
 object AlertCoordinator {
     private const val PREFS_NAME = "ahead_alert_state"
@@ -66,22 +65,8 @@ object AlertCoordinator {
     private const val KEY_LOW_WAS_RECOVERING = "low_was_recovering"
     private const val KEY_RED_LOW_SIDE = "red_low_side"
     private const val KEY_YELLOW_LAST_ALERTED_PROJECTED = "yellow_last_alerted_projected"
-    private const val KEY_LAST_DISMISSED_AT = "last_dismissed_at_ms"
 
     private const val RED_REALERT_COOLDOWN_MS = 15 * 60_000L
-    // Failsafe against the full-screen red takeover popping back up right
-    // after the person just dismissed it (2026-08-04, reported live: a
-    // sticky low sitting in the 55-70 band - too shallow to trip
-    // CriticalLowSiren's own acknowledgment latch, see that class - could
-    // re-trigger RedAlertActivity within minutes of a dismiss tap, via
-    // either the plain RED_REALERT_COOLDOWN_MS heartbeat (timed from last
-    // FIRE, not last dismiss) or the recoveryJustStopped rule (floored at
-    // only MIN_REALERT_GAP_MS = 5 min). Recorded by RedAlertActivity's
-    // dismiss button via recordDismissal(). Deliberately does NOT gate
-    // forceFire (a genuinely new episode, or a fresh reconnect) - only the
-    // heartbeat/re-arm paths for an ONGOING episode respect it, so dismissing
-    // one low doesn't silently swallow a brand new one 10 minutes later.
-    private const val DISMISS_COOLDOWN_MS = 20 * 60_000L
     // Floor under the low-side "recovery just stopped" instant re-fire below.
     // 2026-08-01: that rule had no minimum gap at all, so a low wobbling
     // right around a flat rate (e.g. -0.1/+0.1 noise, or a real but shallow
@@ -126,15 +111,6 @@ object AlertCoordinator {
     // episode" full stop, regardless of how much worse it got - this mirrors
     // fireRedIfWarranted's direction-awareness one tier down.
     private const val YELLOW_MATERIAL_WORSENING_MGDL = 20
-
-    /** Called from RedAlertActivity's dismiss button (both the plain low/high
-     *  red case and the recovering case - any explicit dismiss counts).
-     *  See DISMISS_COOLDOWN_MS's doc for why this exists. */
-    fun recordDismissal(context: Context) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
-            putLong(KEY_LAST_DISMISSED_AT, System.currentTimeMillis())
-        }
-    }
 
     /** Synchronized: the read-decide-persist sequence below must be atomic.
      *  Two concurrent callers both seeing the pre-alert state would each fire
@@ -216,12 +192,6 @@ object AlertCoordinator {
         prefs.edit {
             putBoolean(KEY_SIGNAL_LOST_FIRED, true)
             putLong(KEY_SIGNAL_LOST_LAST_FIRED_AT, now)
-        }
-        if (!alreadyFired) {
-            // Guarded by !alreadyFired - arms exactly once per dark period,
-            // not once per re-alert, so the emergency-contact timeout (its
-            // own separate escalation) isn't reset every 15 minutes forever.
-            scheduleEmergencyAlert(context, EmergencyAlertType.NO_DATA, stale.lastValue, rate = null)
         }
     }
 
@@ -362,7 +332,7 @@ object AlertCoordinator {
                 putBoolean(KEY_RED_LOW_SIDE, isLowSide(reading.value, reading.projected))
             }
         }
-        fireRedIfWarranted(context, prefs, reading, forceFire = newlyRed, newlyRed = newlyRed, now, lastRedFiredAt, suppressAlert)
+        fireRedIfWarranted(context, prefs, reading, forceFire = newlyRed, now, lastRedFiredAt, suppressAlert)
     }
 
     /** Same (severity="red", date) as last handled - a 60s-tick re-emission
@@ -377,38 +347,24 @@ object AlertCoordinator {
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
     ) {
-        fireRedIfWarranted(context, prefs, reading, forceFire = false, newlyRed = false, now, lastRedFiredAt, suppressAlert)
+        fireRedIfWarranted(context, prefs, reading, forceFire = false, now, lastRedFiredAt, suppressAlert)
     }
 
     /** Single decision point for both the transition and heartbeat paths -
      *  they differ only in whether a brand-new episode forces an immediate
      *  fire. Everything else (low-recovery suppression, high-side peak
-     *  tracking, the plain cooldown heartbeat) is identical either way.
-     *
-     *  [newlyRed] is threaded through separately from [forceFire] (today
-     *  they're only ever true together, since handleRedTransition is the
-     *  only caller that ever passes forceFire=true) so the emergency-contact
-     *  timer below is gated on an explicit, self-documented "is this a brand
-     *  new episode" condition rather than an implicit coincidence with
-     *  forceFire's other meaning (post immediately). It must NEVER arm on a
-     *  cooldown/peak-tracking heartbeat repost of an already-ongoing episode -
-     *  RED_REALERT_COOLDOWN_MS happens to also be 15 minutes, so if every
-     *  repost rearmed the clock, an unresolved crisis would defer the auto-
-     *  text forever instead of ever actually reaching the emergency contact. */
+     *  tracking, the plain cooldown heartbeat) is identical either way. */
     private fun fireRedIfWarranted(
         context: Context,
         prefs: SharedPreferences,
         reading: GlucoseDisplayState.Reading,
         forceFire: Boolean,
-        newlyRed: Boolean,
         now: Long,
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
     ) {
         val value = reading.value
         val rate = reading.ratePerMinute
-        val lastDismissedAt = prefs.getLong(KEY_LAST_DISMISSED_AT, 0L)
-        val dismissedRecently = now - lastDismissedAt < DISMISS_COOLDOWN_MS
 
         if (isLowSide(value, reading.projected)) {
             val wasRecovering = prefs.getBoolean(KEY_LOW_WAS_RECOVERING, false)
@@ -429,14 +385,9 @@ object AlertCoordinator {
             // cycle - it only counts as "new information" if it's been at
             // least that long since the last actual alert.
             val recoveryJustStopped = wasRecovering && !recovering && now - lastRedFiredAt >= MIN_REALERT_GAP_MS
-            // dismissedRecently only gates the ongoing-episode re-fire paths
-            // (recoveryJustStopped, the plain cooldown heartbeat) - never
-            // forceFire, so a brand-new episode still always interrupts even
-            // seconds after dismissing an unrelated earlier one.
-            if ((forceFire || (!dismissedRecently && (recoveryJustStopped || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS))) && !suppressAlert) {
+            if ((forceFire || recoveryJustStopped || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
                 AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
-                if (newlyRed) scheduleEmergencyAlert(context, EmergencyAlertType.LOW, value, rate, reading.projected)
             }
             return
         }
@@ -447,31 +398,10 @@ object AlertCoordinator {
         // heartbeat, which is what keeps a long, steady fall from a high
         // loud the whole way down (it can still crash into a low).
         val rearm = updateHighSideTracking(prefs, value)
-        if ((forceFire || (!dismissedRecently && (rearm.exceededPeak || rearm.climbingBack || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS))) && !suppressAlert) {
+        if ((forceFire || rearm.exceededPeak || rearm.climbingBack || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
             AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false)
             prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
-            if (newlyRed) scheduleEmergencyAlert(context, EmergencyAlertType.HIGH, value, rate, reading.projected)
         }
-    }
-
-    /** Arms the 15-minute emergency-contact timer for a genuinely new red
-     *  episode (or, via the NO_DATA overload in handleStale, a new dark
-     *  period). No-ops entirely when the feature is off, so a disabled
-     *  feature never even schedules a wakeup for nothing. */
-    private fun scheduleEmergencyAlert(
-        context: Context,
-        type: EmergencyAlertType,
-        value: Int,
-        rate: Double?,
-        projected: Int? = null,
-    ) {
-        if (!EmergencyContactsPrefs.isEnabled(context)) return
-        // Read once, reused for both the message text and the actual alarm
-        // delay below - see EmergencyAlertScheduler.schedule's doc for why
-        // this can't be two independent reads.
-        val timeoutMinutes = EmergencyContactsPrefs.alertTimeoutMinutes(context)
-        val message = EmergencyAlertRepository.messageFor(context, type, value, rate, timeoutMinutes, projected)
-        EmergencyAlertScheduler.schedule(context, type, message, timeoutMinutes)
     }
 
     /**

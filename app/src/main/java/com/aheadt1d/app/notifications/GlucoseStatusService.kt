@@ -14,7 +14,6 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.aheadt1d.app.alerts.AlertCoordinator
-import com.aheadt1d.app.alerts.CriticalLowSiren
 import com.aheadt1d.app.health.StepTracker
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
@@ -221,13 +220,6 @@ class GlucoseStatusService : Service() {
             // red re-alert cooldown depends on being called on every 60s tick,
             // even when the displayed state is byte-identical to last time.
             AlertCoordinator.evaluate(this, state, trend)
-            // Deliberately separate from AlertCoordinator, not routed through
-            // it - see CriticalLowSiren's class doc for why. Also unaffected
-            // by the signature dedup below: the siren tracks its own
-            // active/tick state independently.
-            if (state is GlucoseDisplayState.Reading) {
-                CriticalLowSiren.check(this, state.value, state.ratePerMinute)
-            }
 
             val signature = state.signature()
             if (signature == lastRenderedSignature) {
@@ -451,9 +443,6 @@ class GlucoseStatusService : Service() {
             val state = toDisplayState(context, raw, trend, blocked)
 
             AlertCoordinator.evaluate(context, state, trend)
-            if (state is GlucoseDisplayState.Reading) {
-                CriticalLowSiren.check(context, state.value, state.ratePerMinute)
-            }
 
             if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
                 // Defensive: guarantees the channel exists even if this fires

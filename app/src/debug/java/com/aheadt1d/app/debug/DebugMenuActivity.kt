@@ -16,8 +16,6 @@ import androidx.lifecycle.lifecycleScope
 import com.aheadt1d.app.GraphActivity
 import com.aheadt1d.app.R
 import com.aheadt1d.app.alerts.AlertNotifier
-import com.aheadt1d.app.alerts.DebugAlertPrefs
-import com.aheadt1d.app.alerts.RedAlertActivity
 import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
 import com.aheadt1d.app.state.DebugGlucoseOverride
@@ -57,7 +55,6 @@ class DebugMenuActivity : AppCompatActivity() {
     private lateinit var randomCountInput: EditText
     private lateinit var autoBackgroundSwitch: Switch
     private lateinit var voiceMasterSwitch: Switch
-    private lateinit var disableFullScreenSwitch: Switch
     private lateinit var batteryStatusText: TextView
     private lateinit var hcPermsStatusText: TextView
     private lateinit var dndStatusText: TextView
@@ -79,7 +76,6 @@ class DebugMenuActivity : AppCompatActivity() {
         randomCountInput = findViewById(R.id.randomCountInput)
         autoBackgroundSwitch = findViewById(R.id.autoBackgroundSwitch)
         voiceMasterSwitch = findViewById(R.id.voiceMasterSwitch)
-        disableFullScreenSwitch = findViewById(R.id.disableFullScreenSwitch)
         batteryStatusText = findViewById(R.id.batteryStatusText)
         hcPermsStatusText = findViewById(R.id.hcPermsStatusText)
         dndStatusText = findViewById(R.id.dndStatusText)
@@ -264,22 +260,6 @@ class DebugMenuActivity : AppCompatActivity() {
         DebugInjection.apply(this, severity, value, projected = null, projectedExtended = null, rate = rate, ageMin = ageMin)
         refreshSystemState()
         scenarioProgressText.text = "Injected $value mg/dL, rate ${"%.1f".format(rate)}, age ${ageMin}m"
-        openRedAlertScreenIfNeeded(severity, value, projected = null, rate = rate)
-    }
-
-    /**
-     * Directly starts RedAlertActivity instead of relying on the posted
-     * notification's full-screen intent to launch it. FSI degrades to a
-     * plain heads-up notification whenever the device is already in active
-     * use (screen on, app foregrounded) - which is exactly the state you're
-     * in while testing from this menu - so without this, injecting a red
-     * reading here would update the dashboard/notification but the
-     * Emergency Contact shield button (which only lives on RedAlertActivity)
-     * would never actually become reachable.
-     */
-    private fun openRedAlertScreenIfNeeded(severity: String, value: Int, projected: Int?, rate: Double?) {
-        if (severity != "red") return
-        startActivity(RedAlertActivity.createIntent(this, value, projected, rate))
     }
 
     private fun playScenario() {
@@ -288,7 +268,6 @@ class DebugMenuActivity : AppCompatActivity() {
         val speedFactor = if (speed10x.isChecked) 10.0 else 1.0
         val fullSeries = scenario.points()
 
-        var redAlertOpened = false
         scenarioJob = lifecycleScope.launch {
             for (i in fullSeries.indices) {
                 val visible = fullSeries.subList(0, i + 1)
@@ -301,14 +280,6 @@ class DebugMenuActivity : AppCompatActivity() {
                 // without also having to wait out the full 5-min-per-point delay.
                 if (scenario != DebugScenario.FLATLINE_STALE || i == 0) {
                     DebugInjection.apply(this@DebugMenuActivity, severity, latest.sgv, null, null, rate)
-                }
-                // Only pop the red-alert screen once per playback (on the first
-                // red point), not on every subsequent tick - otherwise a
-                // scenario that stays red for many points would relaunch the
-                // activity repeatedly.
-                if (!redAlertOpened) {
-                    openRedAlertScreenIfNeeded(severity, latest.sgv, projected = null, rate = rate)
-                    if (severity == "red") redAlertOpened = true
                 }
                 scenarioProgressText.text =
                     "Playing ${scenario.label}: ${i + 1}/${fullSeries.size} (${latest.sgv} mg/dL)"
@@ -335,7 +306,6 @@ class DebugMenuActivity : AppCompatActivity() {
             val rate = HealthConnectManager.calculateRatePerMinute(points) ?: 0.0
             val severity = simpleSeverityFor(it.sgv)
             DebugInjection.apply(this, severity, it.sgv, null, null, rate)
-            openRedAlertScreenIfNeeded(severity, it.sgv, projected = null, rate = rate)
         }
         refreshSystemState()
         scenarioProgressText.text = "Injected ${points.size} random point(s) across 6 hours"
@@ -361,12 +331,8 @@ class DebugMenuActivity : AppCompatActivity() {
             // force-fire regardless of AlertCoordinator's dedup/cooldown.
             AlertNotifier.showRedAlert(this, value = 58, projected = 48, rate = -2.5)
             // Also sync the dashboard/chart to the same value (via the normal
-            // DebugGlucoseOverride + repo path) and open RedAlertActivity
-            // directly - otherwise this button posts a notification whose
-            // number never appears on the dashboard, and whose full-screen
-            // intent silently degrades to a heads-up notification while the
-            // app is foregrounded, so the Emergency Contact shield button is
-            // never actually reachable.
+            // DebugGlucoseOverride + repo path), so this button posts a
+            // notification whose number also appears on the dashboard.
             DebugGlucoseOverride.setPoints(
                 listOf(
                     com.aheadt1d.app.health.GlucosePoint(java.time.Instant.now().minus(Duration.ofMinutes(5)), 65),
@@ -374,7 +340,6 @@ class DebugMenuActivity : AppCompatActivity() {
                 )
             )
             DebugInjection.apply(this, "red", 58, projected = 48, projectedExtended = 48, rate = -2.5)
-            startActivity(RedAlertActivity.createIntent(this, 58, 48, -2.5))
             afterForcedAlert()
         }
         findViewById<Button>(R.id.forceSignalLostButton).setOnClickListener {
@@ -384,12 +349,6 @@ class DebugMenuActivity : AppCompatActivity() {
                 lastArrow = GlucoseTrendArrow.fromRatePerMinute(-2.0),
                 ageMinutes = 20
             )
-            // Signal-lost is now full red-tier delivery (see AlertNotifier) -
-            // directly start the takeover screen's signal-lost variant too,
-            // same reasoning as forceRedButton below: the FSI degrades to a
-            // plain heads-up while the device is already in active use,
-            // which is exactly the state you're in while testing from here.
-            startActivity(RedAlertActivity.createSignalLostIntent(this, 65, GlucoseTrendArrow.fromRatePerMinute(-2.0), 20))
             afterForcedAlert()
         }
         findViewById<Button>(R.id.cancelAlertsButton).setOnClickListener {
@@ -399,11 +358,6 @@ class DebugMenuActivity : AppCompatActivity() {
         voiceMasterSwitch.isChecked = VoiceAlertPrefs.isMasterEnabled(this)
         voiceMasterSwitch.setOnCheckedChangeListener { _, checked ->
             VoiceAlertPrefs.setMasterEnabled(this, checked)
-        }
-
-        disableFullScreenSwitch.isChecked = DebugAlertPrefs.isFullScreenDisabled(this)
-        disableFullScreenSwitch.setOnCheckedChangeListener { _, checked ->
-            DebugAlertPrefs.setFullScreenDisabled(this, checked)
         }
     }
 
