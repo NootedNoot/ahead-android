@@ -5,6 +5,7 @@ import android.os.RemoteException
 import android.util.Log
 import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.alerts.PlateauCoordinator
+import com.aheadt1d.app.bridge.BroadcastGlucoseBuffer
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.network.BackendClient
@@ -18,6 +19,7 @@ import com.aheadt1d.app.tuning.PlateauTuningPrefs
 import com.aheadt1d.app.tuning.TuningPrefs
 import com.aheadt1d.app.upload.UploadCoordinator
 import java.io.IOException
+import java.time.Instant
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -75,7 +77,30 @@ object GlucoseCheckRunner {
     }
 
     private suspend fun runInternal(context: Context): Outcome {
-        val points = readPoints(context) ?: return Outcome.FAILURE
+        var points = readPoints(context) ?: return Outcome.FAILURE
+
+        // ADDED 2026-08-20: AheadBLE V3's direct-broadcast redundancy path
+        // (see GlucoseBroadcastReceiver's class doc for the full reasoning -
+        // this is the ONE place its buffered reading can enter the real
+        // pipeline, and only when Health Connect's own read is still missing
+        // it). consumeIfNewerThan both checks AND clears the buffer, so a
+        // reading Health Connect already covered here is silently discarded,
+        // never reinjected, and never treated as anything other than a
+        // normal Health Connect point.
+        val latestHcTimeMillis = points.lastOrNull()?.time?.toEpochMilli()
+        val fallback = BroadcastGlucoseBuffer.consumeIfNewerThan(latestHcTimeMillis)
+        var usedBroadcastFallback = false
+        if (fallback != null) {
+            Log.w(
+                TAG,
+                "Health Connect read is missing a reading AheadBLE V3 already delivered directly " +
+                    "(mgDl=${fallback.mgDl}, ${System.currentTimeMillis() - fallback.timestampMillis}ms old) " +
+                    "- using it as an unconfirmed fallback point"
+            )
+            points = (points + GlucosePoint(time = Instant.ofEpochMilli(fallback.timestampMillis), sgv = fallback.mgDl))
+                .sortedBy { it.time }
+            usedBroadcastFallback = true
+        }
 
         LatestTrendRepository.updateReadBlocked(null)
 
@@ -97,7 +122,13 @@ object GlucoseCheckRunner {
                     value = latest.sgv,
                     time = latest.time.toEpochMilli(),
                     ratePerMinute = HealthConnectManager.calculateRatePerMinute(points),
-                    deltaFromPrevious = HealthConnectManager.calculateDelta(points)
+                    deltaFromPrevious = HealthConnectManager.calculateDelta(points),
+                    // Only true when THIS specific latest point is the one the
+                    // fallback supplied - if Health Connect's own read already
+                    // had something newer than the fallback (shouldn't happen
+                    // given the consumeIfNewerThan gate above, but not assumed),
+                    // this stays false rather than mislabeling a real HC point.
+                    wasBroadcastSupplemented = usedBroadcastFallback && latest.time.toEpochMilli() == fallback?.timestampMillis
                 )
             )
         }

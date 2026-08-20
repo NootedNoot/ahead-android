@@ -155,7 +155,16 @@ data class RawReading(
     // Null when only one point is available. Derived from the same two points
     // as ratePerMinute, stored here so it survives service restarts without
     // any in-memory state tracking in GlucoseStatusService.
-    val deltaFromPrevious: Int?
+    val deltaFromPrevious: Int?,
+    // ADDED 2026-08-20: true when THIS specific reading came from
+    // AheadBLE V3's direct broadcast fallback (BroadcastGlucoseBuffer), not
+    // a verified Health Connect record - see GlucoseBroadcastReceiver's class
+    // doc. Defaults false so every existing call site (and persisted prefs
+    // predating this field) is unaffected. Not currently surfaced in the UI -
+    // that's a real follow-up, not done here - but the data layer records the
+    // distinction rather than silently treating it as equivalent to a
+    // verified read, per the owner's explicit direction.
+    val wasBroadcastSupplemented: Boolean = false
 )
 
 /**
@@ -242,6 +251,7 @@ object RawReadingStore {
     private const val KEY_TIME = "time"
     private const val KEY_RATE = "rate_per_minute"
     private const val KEY_DELTA = "delta_from_previous"
+    private const val KEY_BROADCAST_SUPPLEMENTED = "was_broadcast_supplemented"
     private const val NO_DELTA = Int.MIN_VALUE
 
     fun save(context: Context, reading: RawReading) {
@@ -250,6 +260,7 @@ object RawReadingStore {
             putLong(KEY_TIME, reading.time)
             putFloat(KEY_RATE, reading.ratePerMinute?.toFloat() ?: Float.NaN)
             putInt(KEY_DELTA, reading.deltaFromPrevious ?: NO_DELTA)
+            putBoolean(KEY_BROADCAST_SUPPLEMENTED, reading.wasBroadcastSupplemented)
         }
     }
 
@@ -262,7 +273,10 @@ object RawReadingStore {
             value = prefs.getInt(KEY_VALUE, 0),
             time = prefs.getLong(KEY_TIME, 0L),
             ratePerMinute = if (rate.isNaN()) null else rate.toDouble(),
-            deltaFromPrevious = if (delta == NO_DELTA) null else delta
+            deltaFromPrevious = if (delta == NO_DELTA) null else delta,
+            // getBoolean's default (false) is also the right answer for prefs
+            // written before this key existed - not just a placeholder.
+            wasBroadcastSupplemented = prefs.getBoolean(KEY_BROADCAST_SUPPLEMENTED, false)
         )
     }
 

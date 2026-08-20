@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- ADDED 2026-08-20: guards GlucoseBroadcastReceiver, which can inject an
+         unconfirmed fallback glucose reading into the real alert pipeline (see
+         that receiver's class doc). protectionLevel="signature" means only an
+         app signed with the SAME certificate as this app can hold it - AheadBLE
+         V3 (com.ahead.ble) declares uses-permission for this same name, and
+         since both are built with the default debug keystore on this owner's
+         machine, that's satisfied for now. A release build needs this
+         re-verified (matching signing, or a different trust model) before
+         shipping - the signature check is what stands between this receiver
+         and any other app on the device being able to spoof a glucose value
+         into a system that can text an emergency contact. -->
+    <permission
+        android:name="com.aheadt1d.app.permission.RECEIVE_GLUCOSE_BROADCAST"
+        android:protectionLevel="signature" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.health.READ_BLOOD_GLUCOSE" />
     <!-- Health Connect treats WorkManager's execution context as "background" even
@@ -167,6 +182,25 @@
         <receiver
             android:name=".work.WatchdogAlarmReceiver"
             android:exported="false" />
+
+        <!-- ADDED 2026-08-20: real-time push from AheadBLE V3 (com.ahead.ble,
+             a separate GPLv3 app reading the G7 sensor directly over BLE - see
+             the workspace CLAUDE.md). Health Connect stays the durable store;
+             this is the instant, redundant path so a Health Connect write
+             glitch doesn't silently lose a reading. exported=true because the
+             sender is a different app/uid, but permission-gated (signature
+             level, see the <permission> declaration above) so only an app
+             signed with this app's own certificate can actually deliver it -
+             not a random app on the device. See GlucoseBroadcastReceiver's
+             class doc for what happens on receipt. -->
+        <receiver
+            android:name=".bridge.GlucoseBroadcastReceiver"
+            android:exported="true"
+            android:permission="com.aheadt1d.app.permission.RECEIVE_GLUCOSE_BROADCAST">
+            <intent-filter>
+                <action android:name="com.ahead.ble.action.GLUCOSE_UPDATE" />
+            </intent-filter>
+        </receiver>
 
         <!-- Fires the emergency-contact auto-text if a red alert goes 15 min
              unacknowledged (see EmergencyAlertScheduler). exported=false:
