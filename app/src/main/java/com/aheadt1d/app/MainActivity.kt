@@ -458,7 +458,47 @@ class MainActivity : AppCompatActivity() {
             // got its own staleness check.
             renderTrendState(LatestTrendRepository.latestTrend.value)
             renderChart()
+            refreshPassiveContext()
         }
+    }
+
+    /**
+     * Surfaces PassiveContextEngine's insight (dawn surge, exercise-drop,
+     * stubborn-high/sticky-low, curvature) below the current-glucose card -
+     * see contextCard's layout comment for why it's wrap_content/GONE rather
+     * than taking weighted space. Deliberately built here, not in
+     * GlucoseStatusService's alert-critical render loop - this is a new,
+     * purely informational surface, and the engine itself never influences
+     * severity/AlertCoordinator either way. Built from the SAME display
+     * state the notification would show (toDisplayState, extracted from
+     * GlucoseStatusService for exactly this reuse) so this card and the
+     * notification can never quietly disagree about what "now" looks like.
+     */
+    private fun refreshPassiveContext() {
+        val cardView = findViewById<View>(R.id.contextCard)
+        val insightView = findViewById<TextView>(R.id.contextInsightText)
+        val tipView = findViewById<TextView>(R.id.contextTipText)
+
+        val raw = LatestTrendRepository.latestRawReading.value
+        val trend = LatestTrendRepository.latestTrend.value
+        val blocked = LatestTrendRepository.readBlocked.value
+        val state = com.aheadt1d.app.notifications.toDisplayState(applicationContext, raw, trend, blocked)
+
+        val reading = state as? com.aheadt1d.app.notifications.GlucoseDisplayState.Reading
+        val summary = reading?.let {
+            com.aheadt1d.app.health.PassiveContextEngine.evaluateContext(applicationContext, it, cachedPoints)
+        }
+
+        val insight = summary?.primaryInsight
+        if (insight == null) {
+            cardView.visibility = View.GONE
+            return
+        }
+        cardView.visibility = View.VISIBLE
+        insightView.text = insight
+        val tip = summary.actionableTip
+        tipView.text = tip ?: ""
+        tipView.visibility = if (tip.isNullOrBlank()) View.GONE else View.VISIBLE
     }
 
     /**

@@ -200,6 +200,51 @@
 
             </LinearLayout>
 
+            <!-- Passive context insight (PassiveContextEngine) - GONE by default,
+                 only appears when there's something worth saying (dawn surge,
+                 exercise-drop, stubborn-high/sticky-low, etc). wrap_content on
+                 purpose, never layout_weight - the trend card below still owns
+                 all remaining vertical space so the "fits one screen, no
+                 scrolling" layout goal (see the root LinearLayout's comment)
+                 holds whether or not this card is showing. Purely informational,
+                 never touches severity/alerts - see MainActivity's wiring. -->
+            <LinearLayout
+                android:id="@+id/contextCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/card_background"
+                android:padding="14dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:text="CONTEXT"
+                    android:textColor="@color/muted"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.08"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:id="@+id/contextInsightText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13.5sp" />
+
+                <TextView
+                    android:id="@+id/contextTipText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:textColor="@color/muted"
+                    android:textSize="12.5sp"
+                    android:visibility="gone" />
+
+            </LinearLayout>
+
             <!-- Trend preview - fixed to the last hour, no inline controls.
                  The full pan/zoom + 1h/3h/6h + Tight/Full/Auto experience now
                  lives only in GraphActivity, reached by tapping this card (or

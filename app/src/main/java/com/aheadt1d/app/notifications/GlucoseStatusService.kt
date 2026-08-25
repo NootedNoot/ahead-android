@@ -315,72 +315,10 @@ class GlucoseStatusService : Service() {
         private const val LOCAL_YELLOW_RATE_FALLING = -1.5
         private const val LOCAL_YELLOW_RATE_RISING = 2.5
 
-        // Companion (not instance-scoped) so refreshNotification below can call
-        // it without a live service instance - see refreshNotification's doc
-        // comment for why that matters. Takes context explicitly instead of an
-        // implicit Service `this`; behavior is unchanged from when this lived
-        // as an instance method.
-        private fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, blocked: ReadBlockedReason?): GlucoseDisplayState {
-            if (raw == null) return GlucoseDisplayState.NoData
-
-            // Staleness routes through the shared isStale() (state package) - the
-            // same rule MainActivity and the wizard use - so the two surfaces can
-            // never disagree about the boundary.
-            if (isStale(context, raw)) {
-                return GlucoseDisplayState.Stale(
-                    lastValue = raw.value,
-                    lastReadingTime = raw.time,
-                    ageMinutes = minutesSinceReading(raw) ?: 0,
-                    lastArrow = GlucoseTrendArrow.fromRatePerMinute(raw.ratePerMinute),
-                    blockedReason = blocked
-                )
-            }
-
-            // Primary: rate calculated on-device from the two most recent consecutive
-            // Health Connect readings. Independent of the backend - never stale from
-            // dedup or network issues.
-            // Fallback: backend trend rate, but only trusted when its scored timestamp
-            // is close enough to this raw reading's time (within tolerance) - if it's
-            // stale/dedup'd its direction could be hours out of date.
-            // When neither source has a rate, null → fromRatePerMinute → FLAT.
-            // Rate comes from the shared effectiveRatePerMinute() - the same
-            // function MainActivity displays from, so the notification and the
-            // main screen can never disagree about the rate for one check cycle.
-            // The same tolerance gate covers severity/projection: only trust
-            // backend fields scored around this same reading.
-            val trendIsCurrent = trend != null && abs(trend.date - raw.time) <= TREND_MATCH_TOLERANCE_MS
-
-            val rate = effectiveRatePerMinute(raw, trend)
-
-            // Local, client-side 15-min-ahead projection from this poll's own
-            // raw value/rate - independent of the backend. Used only as a
-            val decision = SeverityEngine.classify(
-                currentValue = raw.value,
-                ratePerMinute = rate,
-            )
-
-            // Hard safety floor: <= 60 is always RED immediately
-            val finalSeverity = if (raw.value <= 60) {
-                "red"
-            } else {
-                decision.severity.takeIf { it != "none" }
-            }
-
-            val finalProjected = decision.projected15m
-            val finalExtended = decision.projectedExtended
-
-            return GlucoseDisplayState.Reading(
-                value = raw.value,
-                arrow = GlucoseTrendArrow.fromRatePerMinute(rate),
-                readingTime = raw.time,
-                deltaFromPrevious = raw.deltaFromPrevious,
-                trendIsComputed = rate != null,
-                severity = finalSeverity,
-                projected = finalProjected,
-                projectedExtended = finalExtended,
-                ratePerMinute = rate
-            )
-        }
+        // toDisplayState moved to GlucoseDisplayState.kt 2026-08-25 (pure
+        // refactor) so MainActivity can build the same state for
+        // PassiveContextEngine without depending on this service class -
+        // still called unqualified below since both files share this package.
 
         /**
          * Refreshes the persistent status notification (and re-evaluates
