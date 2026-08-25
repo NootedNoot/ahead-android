@@ -47,6 +47,12 @@
     <string name="notes_all_dates">All dates</string>
     <string name="notes_filter_by_date">Filter by date…</string>
     <string name="notes_clear_date_filter">Clear</string>
+
+    <string name="archive_title">ARCHIVE</string>
+    <string name="archive_subtitle">Every day Ahead has recorded, held indefinitely. Tap a day to export and share it.</string>
+    <string name="archive_empty_state">Nothing archived yet</string>
+    <string name="archive_share_day">Share</string>
+    <string name="archive_drawer_item">Archive</string>
     <string name="notes_empty_state">No notes match these filters</string>
     <string name="graph_back">Close graph</string>
     <string name="log_event_fab_description">Log an event</string>

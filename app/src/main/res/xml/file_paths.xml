@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="events" path="." />
+    <!-- DailyArchiveExporter writes into the public Documents dir by default,
+         falling back to app-specific external storage if that's unavailable
+         (see its own getArchiveDirectory doc) - both need a FileProvider
+         root or sharing an archive file throws IllegalArgumentException:
+         "Failed to find configured root". -->
+    <external-path name="archive" path="Documents/Ahead_Archive/" />
+    <external-files-path name="archive_fallback" path="Documents/Ahead_Archive/" />
 </paths>

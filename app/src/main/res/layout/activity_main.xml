@@ -351,6 +351,10 @@
                 <TextView style="@style/DrawerItemLabel" android:text="Data Upload" />
             </LinearLayout>
 
+            <LinearLayout android:id="@+id/drawerArchiveItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="@string/archive_drawer_item" />
+            </LinearLayout>
+
             <!-- Debug-only - each gone by default, shown only when
                  BuildConfig.DEBUG (see MainActivity.setupDrawer). -->
             <TextView

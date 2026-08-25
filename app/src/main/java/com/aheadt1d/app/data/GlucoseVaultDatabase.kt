@@ -149,6 +149,62 @@ class GlucoseVaultDatabase(context: Context) : SQLiteOpenHelper(context, DATABAS
         return records
     }
 
+    data class DailySummary(
+        val dateEpochDay: Long,
+        val isoDate: String,
+        val count: Long,
+        val firstMillis: Long,
+        val lastMillis: Long,
+    )
+
+    /**
+     * One row per calendar day (device-local timezone) that has at least one
+     * vault record, newest first - the "which days have data" enumeration
+     * DailyArchiveExporter.exportDay needs a specific date for but the vault
+     * itself never tracked. A single GROUP BY query rather than pulling every
+     * row into Kotlin, since the vault is explicitly designed to grow to
+     * 10+ years of history.
+     *
+     * 2026-08-25: first version grouped by substr(COL_ISO_TIME, 1, 10) - the
+     * UTC date string - which only matches device-local calendar days when
+     * the device IS UTC. Live-tested on a UTC-6 device and it split a single
+     * real local day across two rows (both mislabeled with the same date,
+     * since the label was derived from firstMillis in local time while the
+     * GROUP BY key was the UTC date) - confusing, not just "a few hours off"
+     * as originally assumed. SQLite's own 'localtime' modifier converts
+     * using the device's current timezone at query time, so this groups by
+     * date(epoch_millis/1000, 'unixepoch', 'localtime') instead - matches
+     * DailyArchiveExporter's own local-midnight slicing exactly.
+     */
+    fun getDailySummaries(): List<DailySummary> {
+        val summaries = mutableListOf<DailySummary>()
+        val cursor = readableDatabase.rawQuery(
+            """
+            SELECT date($COL_EPOCH_MILLIS / 1000, 'unixepoch', 'localtime') AS day,
+                   COUNT(*), MIN($COL_EPOCH_MILLIS), MAX($COL_EPOCH_MILLIS)
+            FROM $TABLE_READINGS
+            GROUP BY day
+            ORDER BY day DESC
+            """.trimIndent(),
+            null,
+        )
+        cursor.use {
+            while (it.moveToNext()) {
+                val isoDate = it.getString(0)
+                summaries.add(
+                    DailySummary(
+                        dateEpochDay = java.time.LocalDate.parse(isoDate).toEpochDay(),
+                        isoDate = isoDate,
+                        count = it.getLong(1),
+                        firstMillis = it.getLong(2),
+                        lastMillis = it.getLong(3),
+                    )
+                )
+            }
+        }
+        return summaries
+    }
+
     /**
      * Total lifetime count of unique readings safely stored in the vault.
      */

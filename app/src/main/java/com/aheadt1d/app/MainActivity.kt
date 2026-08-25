@@ -207,6 +207,10 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(com.aheadt1d.app.upload.UploadSettingsActivity.createIntent(this))
         }
+        findViewById<View>(R.id.drawerArchiveItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(com.aheadt1d.app.data.ArchiveBrowserActivity.createIntent(this))
+        }
         updateDrawerSilenceLabel()
 
         if (BuildConfig.DEBUG) {
