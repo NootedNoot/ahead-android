@@ -23,4 +23,11 @@ interface UserEventDao {
 
     @Query("SELECT * FROM user_events WHERE timestamp BETWEEN :startMillis AND :endMillis ORDER BY timestamp ASC")
     fun getInRange(startMillis: Long, endMillis: Long): Flow<List<UserEvent>>
+
+    /** Most recent event of a given tag at or before [beforeMillis] - a plain
+     *  one-shot query (not a Flow), for GlucoseCheckRunner's per-check-cycle
+     *  "how long since the last bolus" lookup (see
+     *  UserEventRepository.mostRecentInsulinTimestamp). */
+    @Query("SELECT * FROM user_events WHERE tag = :tag AND timestamp <= :beforeMillis ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getMostRecentByTag(tag: String, beforeMillis: Long): UserEvent?
 }

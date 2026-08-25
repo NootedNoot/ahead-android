@@ -56,4 +56,17 @@ object UserEventRepository {
 
     fun eventsInRange(context: Context, startMillis: Long, endMillis: Long): Flow<List<UserEvent>> =
         dao(context).getInRange(startMillis, endMillis)
+
+    /**
+     * Epoch millis of the most recent logged INSULIN event at or before
+     * [beforeMillis], or null if none exists yet. Feeds
+     * GlucoseCheckRunner's lastBolusTimestamp field, which the backend turns
+     * into a per-reading minutesSinceLastBolus - see
+     * ahead-backend/guess-engine.js's disabled bolus-dependent guess blocks,
+     * which this unlocks. Deliberately timestamp-only, no dose amount (out
+     * of scope for v1 - would need a Room schema migration, and nothing
+     * currently disabled needs more than timing).
+     */
+    suspend fun mostRecentInsulinTimestamp(context: Context, beforeMillis: Long = System.currentTimeMillis()): Long? =
+        dao(context).getMostRecentByTag(EventTag.INSULIN.storageValue, beforeMillis)?.timestamp
 }

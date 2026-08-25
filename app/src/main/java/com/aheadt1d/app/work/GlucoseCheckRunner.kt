@@ -6,6 +6,7 @@ import android.util.Log
 import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.alerts.PlateauCoordinator
 import com.aheadt1d.app.bridge.BroadcastGlucoseBuffer
+import com.aheadt1d.app.events.UserEventRepository
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.network.BackendClient
@@ -160,6 +161,16 @@ object GlucoseCheckRunner {
             return Outcome.SUCCESS
         }
 
+        // Feeds the backend's per-reading minutesSinceLastBolus (see
+        // guess-engine.js's disabled bolus-dependent guesses) - a plain
+        // epoch-millis lookup against the events table, not a dose value
+        // (see UserEventRepository.mostRecentInsulinTimestamp's doc for why
+        // that's out of scope). Best-effort: absent entirely rather than
+        // failing the whole check if this one extra query throws.
+        val lastBolusTimestamp = runCatching {
+            UserEventRepository.mostRecentInsulinTimestamp(context)
+        }.getOrNull()
+
         val body = JSONObject().apply {
             put("readings", JSONArray(points.map { point ->
                 JSONObject().apply {
@@ -167,6 +178,7 @@ object GlucoseCheckRunner {
                     put("date", point.time.toEpochMilli())
                 }
             }))
+            lastBolusTimestamp?.let { put("lastBolusTimestamp", it) }
             // Development-only overrides. Release builds leave backend defaults
             // authoritative; debug values are validated again on the server.
             if (BuildConfig.DEBUG) {
