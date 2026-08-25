@@ -23,6 +23,8 @@ import com.aheadt1d.app.state.TREND_MATCH_TOLERANCE_MS
 import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.isStale
 import com.aheadt1d.app.state.minutesSinceReading
+import org.aheadt1d.ratemath.RateMath
+import org.aheadt1d.ratemath.SeverityEngine
 import com.aheadt1d.app.work.AlarmScheduler
 import com.aheadt1d.app.work.GlucoseCheckRunner
 import com.aheadt1d.app.work.WorkScheduler
@@ -228,6 +230,17 @@ class GlucoseStatusService : Service() {
             }
             lastRenderedSignature = signature
 
+            // Level 1 & 2 Historical Vault: Persist every fresh reading to SQLite and daily archive
+            if (raw != null) {
+                try {
+                    com.aheadt1d.app.data.GlucoseVaultDatabase.getInstance(this)
+                        .recordReading(raw.time, raw.value, "HEALTH_CONNECT", trend?.rate, trend?.severity)
+                    com.aheadt1d.app.data.DailyArchiveExporter.exportDay(this)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Vault recording non-fatal error: ${t.message}")
+                }
+            }
+
             if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
                 NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, GlucoseNotifier.buildNotification(this, state))
                 Log.d(TAG, "render: notification re-posted for $state")
@@ -341,37 +354,20 @@ class GlucoseStatusService : Service() {
 
             // Local, client-side 15-min-ahead projection from this poll's own
             // raw value/rate - independent of the backend. Used only as a
-            // fallback below, when the backend's trend hasn't caught up yet.
-            val localProjected = rate?.let { (raw.value + it * 15).roundToInt() }
+            val decision = SeverityEngine.classify(
+                currentValue = raw.value,
+                ratePerMinute = rate,
+            )
 
-            // Hard safety floor: an actual reading this low is RED regardless of
-            // what the backend's trend/projection says (mirrors SEVERE_LOW_RED_FLOOR
-            // in trend-detector.js and GlucoseSeverity.kt's display floor).
+            // Hard safety floor: <= 60 is always RED immediately
             val finalSeverity = if (raw.value <= 60) {
                 "red"
-            } else if (trendIsCurrent) {
-                trend?.severity
             } else {
-                // Backend classification only runs on GlucoseCheckWorker's ~15-min
-                // WorkManager cadence (true 5-min periodic work isn't available on
-                // Android) or a manual Check Now - this poll runs every 5 min, so a
-                // fast-moving crossing can otherwise sit unclassified for up to a
-                // full Worker cycle. Falls back to a local yellow-only nudge using
-                // the same 15-min projection shape, and both the projection AND
-                // rate default thresholds trend-detector.js uses
-                // (YELLOW_PROJECTED_LOW/HIGH, YELLOW_RATE_FALLING/RISING - kept in
-                // sync by hand, no shared source of truth across the two repos).
-                //
-                // Deliberately capped at yellow, never red: the backend's red path
-                // has noise-suppression this simple straight-line projection
-                // doesn't (assessRateTrajectory dampens/suppresses on a single noisy
-                // reading before trusting a RED escalation) - a false-positive
-                // full-screen takeover off one bad Health Connect point would be a
-                // worse failure than a several-minute-late yellow. The raw.value<=60
-                // hard floor above already covers the one local-only RED case that
-                // matters most (a genuinely severe low), independent of the backend.
-                localFallbackYellowSeverity(raw.value, localProjected, rate)
+                decision.severity.takeIf { it != "none" }
             }
+
+            val finalProjected = decision.projected15m
+            val finalExtended = decision.projectedExtended
 
             return GlucoseDisplayState.Reading(
                 value = raw.value,
@@ -380,36 +376,10 @@ class GlucoseStatusService : Service() {
                 deltaFromPrevious = raw.deltaFromPrevious,
                 trendIsComputed = rate != null,
                 severity = finalSeverity,
-                // Backend's own 15-min projection when it's current; otherwise the
-                // local fallback projection (so the alert/notification text shown
-                // for a locally-detected yellow has a real number, not "trending
-                // out of range") - never both, never stale-backend-mixed-with-local.
-                projected = if (trendIsCurrent) trend?.projected else localProjected,
-                projectedExtended = if (trendIsCurrent) trend?.projectedExtended else null,
+                projected = finalProjected,
+                projectedExtended = finalExtended,
                 ratePerMinute = rate
             )
-        }
-
-        /** See toDisplayState's fallback branch above for why this is yellow-only.
-         *  Rate is checked first, independent of projection - mirrors
-         *  trend-detector.js's classifySeverity ordering (rate escalation before
-         *  the projection check), so a fast-moving crossing isn't missed here just
-         *  because it hasn't been caught by the (possibly local, less precise)
-         *  15-min projection yet.
-         *
-         *  2026-08-09: added the currentValue<=70 check, mirroring the same fix in
-         *  trend-detector.js's classifySeverity. Without it, lowering
-         *  LOCAL_YELLOW_PROJECTED_LOW to 80 would have silently dropped this local
-         *  fallback's coverage of a real recovering low (e.g. 65 rising, locally
-         *  projected 85) to nothing - raw.value<=60 above is already RED, but 61-70
-         *  is still a real low right now, rising or not, and deserves at least this
-         *  fallback's yellow rather than waiting up to ~15 min for the backend to
-         *  catch up and say so. */
-        private fun localFallbackYellowSeverity(currentValue: Int, projected: Int?, rate: Double?): String? {
-            if (currentValue <= 70) return "yellow"
-            if (rate != null && (rate <= LOCAL_YELLOW_RATE_FALLING || rate >= LOCAL_YELLOW_RATE_RISING)) return "yellow"
-            if (projected == null) return null
-            return if (projected <= LOCAL_YELLOW_PROJECTED_LOW || projected >= LOCAL_YELLOW_PROJECTED_HIGH) "yellow" else null
         }
 
         /**

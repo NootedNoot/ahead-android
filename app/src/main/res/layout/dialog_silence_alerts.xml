@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/bg"
+    android:padding="20dp">
+
+    <TextView
+        android:id="@+id/silenceDialogTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🔕 Silence All Alerts"
+        android:textColor="@color/text_primary"
+        android:textSize="18sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/silenceDialogMessage"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Temporarily suppress all alarm sounds, vibrations, voice alerts, and notifications so you can treat a low in peace without interruptions."
+        android:textColor="@color/muted"
+        android:textSize="13sp"
+        android:lineSpacingExtra="2dp" />
+
+    <TextView
+        android:id="@+id/silenceDialogStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:textColor="@color/ok"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:text="Status: Alerts Active" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:layout_marginTop="14dp">
+
+        <Button
+            android:id="@+id/btnSilence10"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/button_background"
+            android:textColor="@color/text_primary"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:text="Silence for 10 minutes" />
+
+        <Button
+            android:id="@+id/btnSilence15"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/button_background"
+            android:textColor="@color/text_primary"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:text="Silence for 15 minutes" />
+
+        <Button
+            android:id="@+id/btnSilence30"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/button_background"
+            android:textColor="@color/text_primary"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:text="Silence for 30 minutes" />
+
+        <Button
+            android:id="@+id/btnSilence60"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/button_background"
+            android:textColor="@color/text_primary"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:text="Silence for 1 hour" />
+
+        <Button
+            android:id="@+id/btnCancelSilence"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/button_ghost"
+            android:textColor="@color/low"
+            android:padding="12dp"
+            android:layout_marginTop="4dp"
+            android:text="Cancel Silence / Re-enable Alerts" />
+
+    </LinearLayout>
+
+</LinearLayout>

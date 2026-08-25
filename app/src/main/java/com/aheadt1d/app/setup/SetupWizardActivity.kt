@@ -281,11 +281,6 @@ class SetupWizardActivity : AppCompatActivity() {
         setStatus(R.id.tv_notif_post_status, postOk, getString(R.string.wizard_notif_post), getString(R.string.wizard_notif_post))
         findViewById<Button>(R.id.btn_notif_post).visibility = if (postOk) View.GONE else View.VISIBLE
 
-        val fsiOk = Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || nm.canUseFullScreenIntent()
-        setStatus(R.id.tv_notif_fsi_status, fsiOk, getString(R.string.wizard_notif_fsi), getString(R.string.wizard_notif_fsi))
-        findViewById<Button>(R.id.btn_notif_fsi).visibility =
-            if (fsiOk || Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) View.GONE else View.VISIBLE
-
         val dndOk = nm.isNotificationPolicyAccessGranted
         setStatus(R.id.tv_notif_dnd_status, dndOk, getString(R.string.wizard_notif_dnd), getString(R.string.wizard_notif_dnd))
         findViewById<Button>(R.id.btn_notif_dnd).visibility = if (dndOk) View.GONE else View.VISIBLE
@@ -321,15 +316,6 @@ class SetupWizardActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_notif_post).setOnClickListener {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
-        findViewById<Button>(R.id.btn_notif_fsi).setOnClickListener {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                runCatching {
-                    startActivity(
-                        Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:$packageName"))
-                    )
-                }
             }
         }
         findViewById<Button>(R.id.btn_notif_dnd).setOnClickListener {

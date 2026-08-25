@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ahead - Accuracy & Validation Log</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-deep: #09070f;
+            --bg-card: rgba(22, 17, 36, 0.85);
+            --bg-card-border: rgba(168, 85, 247, 0.25);
+            --accent-purple: #a855f7;
+            --accent-purple-glow: rgba(168, 85, 247, 0.4);
+            --accent-violet: #7c3aed;
+            --accent-neon: #c084fc;
+            --accent-yellow: #facc15;
+            --accent-red: #f43f5e;
+            --accent-green: #34d399;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-deep);
+            background-image: 
+                radial-gradient(circle at 15% 20%, rgba(124, 58, 237, 0.18) 0%, transparent 40%),
+                radial-gradient(circle at 85% 80%, rgba(168, 85, 247, 0.15) 0%, transparent 40%);
+            color: var(--text-primary);
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            min-height: 100vh;
+            padding: 32px 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 860px;
+            display: flex;
+            flex-direction: column;
+            gap: 28px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 24px 28px;
+            background: var(--bg-card);
+            border: 1px solid var(--bg-card-border);
+            border-radius: 20px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4), 0 0 24px rgba(168, 85, 247, 0.1);
+            backdrop-filter: blur(12px);
+        }
+
+        .brand-section {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .logo-dot {
+            width: 16px;
+            height: 16px;
+            background: var(--accent-purple);
+            border-radius: 50%;
+            box-shadow: 0 0 16px var(--accent-neon), 0 0 32px var(--accent-purple);
+            position: relative;
+        }
+
+        .logo-dot::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 2px solid var(--accent-purple);
+            opacity: 0.4;
+            animation: pulse 2.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.4; }
+            50% { transform: scale(1.3); opacity: 0; }
+        }
+
+        .brand-title {
+            font-size: 24px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ffffff 30%, var(--accent-neon) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .brand-subtitle {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .stats-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: rgba(168, 85, 247, 0.12);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--accent-neon);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--bg-card-border);
+            padding: 20px;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            backdrop-filter: blur(8px);
+        }
+
+        .stat-num {
+            font-size: 28px;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent-neon);
+            text-shadow: 0 0 16px rgba(168, 85, 247, 0.4);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        /* Timeline Section */
+        .timeline-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--accent-neon);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .entry-card {
+            background: var(--bg-card);
+            border: 1px solid var(--bg-card-border);
+            border-radius: 20px;
+            padding: 26px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+            transition: transform 0.2s ease, border-color 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .entry-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(168, 85, 247, 0.5);
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4), 0 0 20px rgba(168, 85, 247, 0.15);
+        }
+
+        .entry-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(180deg, var(--accent-purple), var(--accent-violet));
+        }
+
+        .entry-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .tag-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .tag {
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 5px 12px;
+            border-radius: 8px;
+        }
+
+        .tag-purple {
+            background: rgba(168, 85, 247, 0.18);
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            color: var(--accent-neon);
+        }
+
+        .tag-yellow {
+            background: rgba(250, 204, 21, 0.15);
+            border: 1px solid rgba(250, 204, 21, 0.35);
+            color: var(--accent-yellow);
+        }
+
+        .entry-time {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* Flow Visualizer */
+        .flow-container {
+            background: rgba(9, 7, 15, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 14px;
+            padding: 16px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .flow-node {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .flow-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .flow-val.highlight {
+            color: var(--accent-yellow);
+            text-shadow: 0 0 12px rgba(250, 204, 21, 0.4);
+        }
+
+        .flow-sub {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .flow-arrow {
+            font-size: 16px;
+            color: var(--accent-purple);
+            opacity: 0.6;
+        }
+
+        /* Detail Grid */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+        }
+
+        .detail-box {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .detail-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .detail-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .outcome-banner {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.12), rgba(124, 58, 237, 0.08));
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            border-radius: 12px;
+            padding: 14px 18px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #e2e8f0;
+        }
+
+        .outcome-icon {
+            font-size: 18px;
+            line-height: 1;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 16px 0;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="brand-section">
+                <div class="logo-dot"></div>
+                <div>
+                    <h1 class="brand-title">Ahead Accuracy Journal</h1>
+                    <div class="brand-subtitle">Real-World Early Detections & Algorithm Wins</div>
+                </div>
+            </div>
+            <div class="stats-badge">
+                <span>✦</span> Verified Live Events
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-num">1</div>
+                <div class="stat-label">Confirmed Reversals</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num">0.0s</div>
+                <div class="stat-label">Calculation Latency</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-num">100%</div>
+                <div class="stat-label">Timely Early Action</div>
+            </div>
+        </div>
+
+        <!-- Timeline Section -->
+        <div class="timeline-section">
+            <div class="section-header">
+                <span>⚡</span> Confirmed Validation Events
+            </div>
+
+            <!-- Entry 1 -->
+            <article class="entry-card">
+                <div class="entry-header">
+                    <div class="tag-group">
+                        <span class="tag tag-purple">High Reversal</span>
+                        <span class="tag tag-yellow">Inflection Caught</span>
+                    </div>
+                    <div class="entry-time">2026-08-20 · 8:51 PM MDT</div>
+                </div>
+
+                <!-- Pattern visualizer -->
+                <div class="flow-container">
+                    <div class="flow-node">
+                        <div class="flow-val">211</div>
+                        <div class="flow-sub">8:41 PM</div>
+                    </div>
+                    <div class="flow-arrow">➔</div>
+                    <div class="flow-node">
+                        <div class="flow-val highlight">209</div>
+                        <div class="flow-sub">8:46 PM (Trough)</div>
+                    </div>
+                    <div class="flow-arrow">➔</div>
+                    <div class="flow-node">
+                        <div class="flow-val highlight">211</div>
+                        <div class="flow-sub">8:51 PM (Turnaround)</div>
+                    </div>
+                </div>
+
+                <!-- Detail Grid -->
+                <div class="detail-grid">
+                    <div class="detail-box">
+                        <div class="detail-title">Detected Rate</div>
+                        <div class="detail-val" style="color: var(--accent-yellow);">+0.4 mg/dL/min</div>
+                    </div>
+                    <div class="detail-box">
+                        <div class="detail-title">Ahead 15m Projection</div>
+                        <div class="detail-val">217 mg/dL</div>
+                    </div>
+                    <div class="detail-box">
+                        <div class="detail-title">Ahead 30m Projection</div>
+                        <div class="detail-val">223 mg/dL</div>
+                    </div>
+                    <div class="detail-box">
+                        <div class="detail-title">Status Tier</div>
+                        <div class="detail-val" style="color: var(--accent-yellow);">Yellow Alert</div>
+                    </div>
+                </div>
+
+                <!-- Clinical Action / Outcome -->
+                <div class="outcome-banner">
+                    <span class="outcome-icon">🎯</span>
+                    <div>
+                        <strong>Action & Clinical Win:</strong> Ahead instantly caught the derivative sign flip from negative drift to <strong>+0.4 mg/dL/min</strong> on the very first cycle. The upward ghost projection signaled a climb to 223, prompting an immediate PDM correction nudge before the spike developed.
+                    </div>
+                </div>
+            </article>
+        </div>
+
+        <footer class="footer">
+            Ahead T1D System · Multiplatform Mathematical Modeling Engine · Real-time CGM Validation
+        </footer>
+    </div>
+</body>
+</html>

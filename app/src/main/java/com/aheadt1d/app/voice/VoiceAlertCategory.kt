@@ -15,11 +15,9 @@ package com.aheadt1d.app.voice
  * "Speak signal-lost alerts" toggle stays meaningful - a user may reasonably
  * want one on and the other off.
  *
- * EMERGENCY (2026-07-31, CriticalLowSiren) is the one category with no
- * settings-screen toggle at all - VoiceAlertEngine.speak() special-cases it
- * to skip both the master and per-category gates. A value low enough to
- * trigger the siren is exactly the case where "the user turned voice off"
- * must not be the reason they didn't hear it.
+ * EMERGENCY (CriticalLowSiren's ungated voice category) was removed
+ * 2026-08-20 along with CriticalLowSiren itself - see AlertCoordinator's
+ * class doc for the full removal note.
  */
 enum class VoiceAlertCategory(val pitch: Float, val rate: Float) {
     RED(pitch = 1.1f, rate = 1.15f),
@@ -30,7 +28,4 @@ enum class VoiceAlertCategory(val pitch: Float, val rate: Float) {
     // reclassified.
     PLATEAU(pitch = 0.95f, rate = 0.95f),
     CORRECTION(pitch = 0.95f, rate = 0.95f),
-    // Highest urgency profile in the app - see the class doc above for why
-    // this bypasses the normal gating entirely.
-    EMERGENCY(pitch = 1.2f, rate = 1.2f),
 }

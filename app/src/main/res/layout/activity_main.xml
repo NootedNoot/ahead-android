@@ -20,51 +20,6 @@
          overflowing or leaving dead space. -->
     <!-- FrameLayout wrapper so the two banners can float over everything else
          without adding to the vertical layout flow. -->
-    <FrameLayout
-        android:layout_width="match_parent"
-        android:layout_height="match_parent">
-
-        <!-- Debug-only: visible for as long as the Debug Menu's glucose
-             injection/scenario override is active, so it's never silently
-             mistaken for a real (or dead) live feed. Gone in release builds and
-             whenever no override is set. -->
-        <TextView
-            android:id="@+id/debugOverrideBanner"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top"
-            android:background="@color/low"
-            android:padding="6dp"
-            android:text="⚠ DEBUG: showing injected data, not live Health Connect"
-            android:textAlignment="center"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
-        <!-- Shown only when Do Not Disturb access was previously granted and has
-             since been revoked (see AlertChannels.dndAccessRegressed) - a red
-             alert could otherwise arrive silenced with no warning. Never shown
-             for a user who simply never granted it (that's an intentional
-             choice, not a regression). GONE by default costs nothing in the
-             layout; released builds show this too, unlike the debug banner
-             above. Tapping it jumps straight to the DND-access settings screen. -->
-        <TextView
-            android:id="@+id/dndRegressionBanner"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top"
-            android:background="@color/high"
-            android:clickable="true"
-            android:focusable="true"
-            android:padding="8dp"
-            android:text="⚠️ Do Not Disturb access was lost — red alerts may go silent. Tap to fix."
-            android:textAlignment="center"
-            android:textColor="#000000"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:visibility="gone" />
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="match_parent"
@@ -76,10 +31,7 @@
             android:paddingTop="8dp"
             android:paddingBottom="12dp">
 
-            <!-- App bar: hamburger + wordmark + live indicator. Replaces the
-                 old hidden long-press debugLabel entry point and the bottom
-                 footer row entirely - every destination now lives in the
-                 drawer this opens. -->
+            <!-- App bar: hamburger + wordmark + live indicator. -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -132,6 +84,41 @@
 
             </LinearLayout>
 
+            <!-- Debug-only: visible for as long as the Debug Menu's glucose
+                 injection/scenario override is active, so it's never silently
+                 mistaken for a real (or dead) live feed. Sits cleanly below App Bar. -->
+            <TextView
+                android:id="@+id/debugOverrideBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/low"
+                android:padding="8dp"
+                android:layout_marginBottom="6dp"
+                android:text="🚨 * INJECTED TEST DATA ACTIVE * (NOT REAL CGM DATA) 🚨"
+                android:textAlignment="center"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <!-- Shown only when Do Not Disturb access was previously granted and has
+                 since been revoked (see AlertChannels.dndAccessRegressed) -->
+            <TextView
+                android:id="@+id/dndRegressionBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/high"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="8dp"
+                android:layout_marginBottom="6dp"
+                android:text="⚠️ Do Not Disturb access was lost — red alerts may go silent. Tap to fix."
+                android:textAlignment="center"
+                android:textColor="#000000"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -141,6 +128,7 @@
                 android:padding="18dp">
 
                 <TextView
+                    android:id="@+id/currentGlucoseLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/current_glucose_label"
@@ -276,8 +264,6 @@
 
         </LinearLayout>
 
-    </FrameLayout>
-
     <!-- ===================== Drawer ===================== -->
     <ScrollView
         android:layout_width="264dp"
@@ -348,6 +334,10 @@
             </LinearLayout>
 
             <TextView style="@style/DrawerSectionLabel" android:text="SAFETY" />
+
+            <LinearLayout android:id="@+id/drawerSilenceItem" style="@style/DrawerItem">
+                <TextView android:id="@+id/drawerSilenceLabel" style="@style/DrawerItemLabel" android:text="🔕 Silence Alerts" />
+            </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerVoiceItem" style="@style/DrawerItem">
                 <TextView style="@style/DrawerItemLabel" android:text="Voice Alerts" />

@@ -1,20 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- "Blazing A" - bold white A-stroke on the full-bleed purple background,
-     plus one green accent dot where the crossbar gap sits. Chosen from a
-     38-option icon exploration; matches option #25 exactly. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Outer soft glow ring -->
     <path
-        android:pathData="M54,18 L26,86 M54,18 L82,86 M35,64 L46,64 M62,64 L73,64"
-        android:strokeColor="#F4EEFF"
-        android:strokeWidth="11"
+        android:pathData="M54,62m-14,0a14,14 0,1 1,28 0a14,14 0,1 1,-28 0"
+        android:fillColor="#33A855F7" />
+
+    <!-- Modern Bold Ahead 'A' / Forward Arrow Glyph -->
+    <path
+        android:pathData="M54,20 L27,84 M54,20 L81,84 M36,62 L45,62 M63,62 L72,62"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="10"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000" />
+
+    <!-- Pulse Ring -->
     <path
-        android:fillColor="#3DDC97"
-        android:pathData="M54,64m-6,0a6,6 0,1 1,12 0a6,6 0,1 1,-12 0" />
+        android:pathData="M54,62m-8,0a8,8 0,1 1,16 0a8,8 0,1 1,-16 0"
+        android:strokeColor="#C084FC"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000" />
+
+    <!-- Electric Neon Glowing Pulse Core (Purple & Emerald) -->
+    <path
+        android:pathData="M54,62m-5.5,0a5.5,5.5 0,1 1,11 0a5.5,5.5 0,1 1,-11 0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="62"
+                android:gradientRadius="5.5">
+                <item android:offset="0.0" android:color="#E9D5FF" />
+                <item android:offset="0.6" android:color="#A855F7" />
+                <item android:offset="1.0" android:color="#7C3AED" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Emerald precision spark inside core -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M54,62m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0" />
 </vector>

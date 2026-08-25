@@ -28,10 +28,6 @@ object VoiceAlertEngine {
     /**
      * Categories that ignore BOTH the master and per-category voice toggles.
      *
-     * EMERGENCY: a critical-low siren must not be silenceable by a general
-     * preference - that tier exists precisely for the case where every other
-     * channel has failed.
-     *
      * RED (2026-08-01): promoted here when the red-tier alert tone was
      * removed at the owner's request. Before that, sound carried red alerts
      * and voice was a bonus layer; now voice IS the audible half of "voice
@@ -43,9 +39,11 @@ object VoiceAlertEngine {
      *
      * Everything below red (yellow, plateau, correction, signal-lost) still
      * respects both toggles - those are informational tiers where the user's
-     * stated preference should win.
+     * stated preference should win. EMERGENCY (CriticalLowSiren's own
+     * ungated category) was removed along with CriticalLowSiren itself on
+     * 2026-08-20 - see AlertCoordinator's class doc.
      */
-    private val UNGATED_CATEGORIES = setOf(VoiceAlertCategory.EMERGENCY, VoiceAlertCategory.RED)
+    private val UNGATED_CATEGORIES = setOf(VoiceAlertCategory.RED)
 
     private var tts: TextToSpeech? = null
     @Volatile private var ready = false
@@ -89,6 +87,10 @@ object VoiceAlertEngine {
      * EMERGENCY and RED skip both gates entirely (see [UNGATED_CATEGORIES]).
      */
     fun speak(context: Context, category: VoiceAlertCategory, text: String) {
+        if (com.aheadt1d.app.alerts.AlertSilenceManager.isSilenced(context)) {
+            Log.d(TAG, "Skipping voice $category: alerts silenced")
+            return
+        }
         if (category !in UNGATED_CATEGORIES) {
             if (!VoiceAlertPrefs.isMasterEnabled(context)) {
                 Log.d(TAG, "Skipped $category: master voice toggle off")
@@ -118,6 +120,13 @@ object VoiceAlertEngine {
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "ahead-$category")
         }
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, "ahead-$category-${System.currentTimeMillis()}")
+    }
+
+    fun stop() {
+        runCatching {
+            tts?.stop()
+            abandonFocus()
+        }
     }
 
     private fun requestFocus() {

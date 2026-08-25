@@ -114,7 +114,7 @@ const val TREND_MATCH_TOLERANCE_MS = 10 * 60_000L
 fun effectiveRatePerMinute(raw: RawReading?, trend: LatestTrend?): Double? {
     if (raw == null) return null
     val trendIsCurrent = trend != null && abs(trend.date - raw.time) <= TREND_MATCH_TOLERANCE_MS
-    return if (trendIsCurrent) trend?.rate ?: raw.ratePerMinute else raw.ratePerMinute
+    return raw.ratePerMinute ?: if (trendIsCurrent) trend?.rate else null
 }
 
 /** One rule-engine hypothesis for a glucose event. Always a question in the

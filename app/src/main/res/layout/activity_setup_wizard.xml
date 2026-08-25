@@ -126,9 +126,6 @@
                 <TextView android:id="@+id/tv_notif_post_status" style="@style/WizardStatus" />
                 <Button android:id="@+id/btn_notif_post" style="@style/WizardButtonGhost" android:text="@string/wizard_notif_post_btn" />
 
-                <TextView android:id="@+id/tv_notif_fsi_status" style="@style/WizardStatus" />
-                <Button android:id="@+id/btn_notif_fsi" style="@style/WizardButtonGhost" android:text="@string/wizard_notif_fsi_btn" />
-
                 <TextView android:id="@+id/tv_notif_dnd_status" style="@style/WizardStatus" />
                 <TextView style="@style/WizardBody" android:text="@string/wizard_notif_dnd_hint" />
                 <Button android:id="@+id/btn_notif_dnd" style="@style/WizardButtonGhost" android:text="@string/wizard_notif_dnd_btn" />

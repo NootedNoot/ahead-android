@@ -67,6 +67,10 @@ object AlertTones {
      *  acknowledged loop. Self-releases on completion/error. */
     fun play(context: Context, tone: Tone) {
         val appContext = context.applicationContext
+        if (AlertSilenceManager.isSilenced(appContext)) {
+            Log.d(TAG, "Skipping tone $tone - alerts silenced")
+            return
+        }
         // Urgent tones (red/signal-lost) force the alarm stream to max first,
         // same as CriticalLowSiren - USAGE_ALARM audio attributes alone only
         // guarantee this isn't BLOCKED by DND, not that it's audible; a

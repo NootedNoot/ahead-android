@@ -22,6 +22,8 @@ import com.aheadt1d.app.state.DebugGlucoseOverride
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.voice.VoiceAlertPrefs
 import com.aheadt1d.app.work.WorkScheduler
+import androidx.core.content.ContextCompat
+import com.aheadt1d.app.alerts.AlertSilenceManager
 import androidx.core.content.edit
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -62,6 +64,7 @@ class DebugMenuActivity : AppCompatActivity() {
     private lateinit var debugEventTagSpinner: Spinner
     private lateinit var debugEventNoteInput: EditText
     private lateinit var debugEventHoursAgoInput: EditText
+    private lateinit var silenceStatusText: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -83,6 +86,7 @@ class DebugMenuActivity : AppCompatActivity() {
         debugEventTagSpinner = findViewById(R.id.debugEventTagSpinner)
         debugEventNoteInput = findViewById(R.id.debugEventNoteInput)
         debugEventHoursAgoInput = findViewById(R.id.debugEventHoursAgoInput)
+        silenceStatusText = findViewById(R.id.silenceStatusText)
 
         scenarioSpinner.adapter = ArrayAdapter(
             this,
@@ -95,6 +99,7 @@ class DebugMenuActivity : AppCompatActivity() {
             com.aheadt1d.app.events.EventTag.entries.map { "${it.glyph} ${it.label}" }
         )
 
+        setupSilenceKillswitch()
         setupResetAll()
         setupGlucoseInjection()
         setupNotificationTesting()
@@ -109,6 +114,43 @@ class DebugMenuActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshSystemState()
+        updateSilenceStatus()
+    }
+
+    private fun updateSilenceStatus() {
+        if (AlertSilenceManager.isSilenced(this)) {
+            val rem = AlertSilenceManager.getRemainingMinutes(this)
+            silenceStatusText.text = "Status: 🔕 SILENCED (${rem}m remaining)"
+            silenceStatusText.setTextColor(ContextCompat.getColor(this, R.color.low))
+        } else {
+            silenceStatusText.text = "Status: Alerts Active (Normal)"
+            silenceStatusText.setTextColor(ContextCompat.getColor(this, R.color.ok))
+        }
+    }
+
+    private fun setupSilenceKillswitch() {
+        updateSilenceStatus()
+
+        findViewById<Button>(R.id.silence10mButton).setOnClickListener {
+            AlertSilenceManager.silence(this, 10)
+            updateSilenceStatus()
+        }
+        findViewById<Button>(R.id.silence15mButton).setOnClickListener {
+            AlertSilenceManager.silence(this, 15)
+            updateSilenceStatus()
+        }
+        findViewById<Button>(R.id.silence30mButton).setOnClickListener {
+            AlertSilenceManager.silence(this, 30)
+            updateSilenceStatus()
+        }
+        findViewById<Button>(R.id.silence60mButton).setOnClickListener {
+            AlertSilenceManager.silence(this, 60)
+            updateSilenceStatus()
+        }
+        findViewById<Button>(R.id.cancelSilenceButton).setOnClickListener {
+            AlertSilenceManager.cancelSilence(this)
+            updateSilenceStatus()
+        }
     }
 
     // ===================== Reset everything =====================

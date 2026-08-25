@@ -65,8 +65,19 @@ object AlertCoordinator {
     private const val KEY_LOW_WAS_RECOVERING = "low_was_recovering"
     private const val KEY_RED_LOW_SIDE = "red_low_side"
     private const val KEY_YELLOW_LAST_ALERTED_PROJECTED = "yellow_last_alerted_projected"
+    private const val KEY_LAST_LOW_EVENT_AT = "last_low_event_at_ms"
 
-    private const val RED_REALERT_COOLDOWN_MS = 15 * 60_000L
+    private const val RED_LOW_REALERT_COOLDOWN_MS = 15 * 60_000L
+    // High-side red re-alert cooldown: set to 45 minutes to give insulin time
+    // to take effect and avoid severe alarm fatigue on fluctuating highs
+    // (e.g. 330 -> 300 -> 340 -> 290) that have already been treated.
+    private const val RED_HIGH_REALERT_COOLDOWN_MS = 45 * 60_000L
+
+    // Post-hypo recovery grace period: for 40 minutes after a treated low
+    // (<= 80 mg/dL), intentional fast rises (+2.5, +3.5 mg/dL/min) and expected
+    // rebound spikes stay completely silent unless glucose breaches 240 mg/dL.
+    private const val POST_HYPO_RECOVERY_GRACE_WINDOW_MS = 40 * 60_000L
+    private const val RECOVERY_REBOUND_CEILING_MGDL = 240
     // Floor under the low-side "recovery just stopped" instant re-fire below.
     // 2026-08-01: that rule had no minimum gap at all, so a low wobbling
     // right around a flat rate (e.g. -0.1/+0.1 noise, or a real but shallow
@@ -76,7 +87,7 @@ object AlertCoordinator {
     // episode (forceFire) is NOT gated by this - only the instant re-fire on
     // a sign flip is. Below this floor, a sign flip still updates the
     // recovering/state tracking, it just doesn't independently interrupt
-    // again - the plain RED_REALERT_COOLDOWN_MS heartbeat still applies.
+    // again - the plain RED_LOW_REALERT_COOLDOWN_MS heartbeat still applies.
     private const val MIN_REALERT_GAP_MS = 5 * 60_000L
     // Same cadence as the red re-alert heartbeat - an ongoing blackout is at
     // least as urgent as an ongoing red glucose reading, and there's no
@@ -91,11 +102,11 @@ object AlertCoordinator {
     // Low-side red clear hysteresis. Once a critical LOW has fired red, the alert
     // is held up until the value climbs solidly past the danger band - not the
     // instant it nudges back over the floor - so a BG hovering near the cutoff
-    // can't flicker the red alert on and off. Set a buffer above LOW_HIGH_SPLIT
-    // (70): reaching 75 is an unambiguous recovery, not a one-reading wobble.
+    // can't flicker the red alert on and off. Set to 80 mg/dL (updated 2026-08-20
+    // at owner request) so recovery is clear and unambiguous.
     // High-side reds are deliberately NOT held this way (a fast fall from a high
     // is its own hazard, not something to latch).
-    private const val LOW_RED_CLEAR_HYSTERESIS = 75
+    private const val LOW_RED_CLEAR_HYSTERESIS = 80
     // Minimum mg/dL movement for a high-side peak/climb-back to count as a
     // re-arm trigger - below this it's ordinary CGM sensor noise, not a
     // meaningful change. See the class doc's HIGH side note.
@@ -117,6 +128,12 @@ object AlertCoordinator {
      *  the alarm for the same episode. */
     @Synchronized
     fun evaluate(context: Context, state: GlucoseDisplayState, trend: LatestTrend?) {
+        if (AlertSilenceManager.isSilenced(context)) {
+            AlertNotifier.cancelAlerts(context)
+            AlertNotifier.cancelPlateau(context)
+            AlertNotifier.cancelCorrection(context)
+            return
+        }
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         when (state) {
             is GlucoseDisplayState.Reading -> {
@@ -219,6 +236,10 @@ object AlertCoordinator {
         val suppressAlert = CheckNowSuppression.isSuppressed()
         if (suppressAlert) Log.d("CheckNow", "Suppressed alert - app foregrounded")
 
+        if (reading.value <= LOW_RED_CLEAR_HYSTERESIS || isLowSide(reading.value, reading.projected)) {
+            prefs.edit { putLong(KEY_LAST_LOW_EVENT_AT, now) }
+        }
+
         // Exact same scored reading already handled (same severity AND date):
         // process-restart replay, the 60s tick, or a re-emission. Nothing new
         // to do except the re-alert heartbeats (which may still re-fire via
@@ -229,7 +250,7 @@ object AlertCoordinator {
         if (severity == prevSeverity && date == prevDate) {
             when (severity) {
                 "red" -> handleRedHeartbeat(context, prefs, reading, now, lastRedFiredAt, suppressAlert)
-                "yellow" -> fireYellowIfWarranted(context, prefs, reading, forceFire = false, suppressAlert)
+                "yellow" -> fireYellowIfWarranted(context, prefs, reading, forceFire = false, suppressAlert, now)
             }
             return
         }
@@ -270,10 +291,10 @@ object AlertCoordinator {
                 // seeds the baseline; a continuing episode only re-posts if the
                 // projection has moved materially further into danger since the
                 // last one shown - see fireYellowIfWarranted.
-                fireYellowIfWarranted(context, prefs, reading, forceFire = prevSeverity != "yellow", suppressAlert)
+                fireYellowIfWarranted(context, prefs, reading, forceFire = prevSeverity != "yellow", suppressAlert, now)
             }
             else -> {
-                if (prevSeverity != "none") AlertNotifier.cancelAlerts(context)
+                AlertNotifier.cancelAlerts(context)
                 if (prevSeverity == "red") clearRedEpisodeState(prefs)
                 prefs.edit { remove(KEY_YELLOW_LAST_ALERTED_PROJECTED) }
             }
@@ -385,20 +406,19 @@ object AlertCoordinator {
             // cycle - it only counts as "new information" if it's been at
             // least that long since the last actual alert.
             val recoveryJustStopped = wasRecovering && !recovering && now - lastRedFiredAt >= MIN_REALERT_GAP_MS
-            if ((forceFire || recoveryJustStopped || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
+            if ((forceFire || recoveryJustStopped || now - lastRedFiredAt >= RED_LOW_REALERT_COOLDOWN_MS) && !suppressAlert) {
                 AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
             }
             return
         }
 
-        // High side: never suppressed. Peak tracking only ever adds an
-        // extra reason to fire sooner (exceeding the peak, or bouncing back
-        // up within 20 pts of it) - it never blocks the plain cooldown
-        // heartbeat, which is what keeps a long, steady fall from a high
-        // loud the whole way down (it can still crash into a low).
-        val rearm = updateHighSideTracking(prefs, value)
-        if ((forceFire || rearm.exceededPeak || rearm.climbingBack || now - lastRedFiredAt >= RED_REALERT_COOLDOWN_MS) && !suppressAlert) {
+        // High side: 45-minute management window for treated highs.
+        // Fluctuating highs (e.g. 330 -> 300 -> 340 -> 290) are already being
+        // managed, so repeat alarms during the 45-min insulin action window
+        // cause alarm fatigue. It only re-alerts once RED_HIGH_REALERT_COOLDOWN_MS
+        // has elapsed or if it's a brand-new episode (forceFire).
+        if ((forceFire || now - lastRedFiredAt >= RED_HIGH_REALERT_COOLDOWN_MS) && !suppressAlert) {
             AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false)
             prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
         }
@@ -424,11 +444,32 @@ object AlertCoordinator {
         reading: GlucoseDisplayState.Reading,
         forceFire: Boolean,
         suppressAlert: Boolean,
+        now: Long = System.currentTimeMillis(),
     ) {
         val projected = reading.projected
 
+        // Post-hypo recovery grace period: 40 minutes after treating a low,
+        // intentional rises out of the low (e.g. drinking juice) are healthy
+        // and expected. Mute yellow alerts while climbing under 240 mg/dL.
+        val lastLowAt = prefs.getLong(KEY_LAST_LOW_EVENT_AT, 0L)
+        val inPostHypoGraceWindow = now - lastLowAt <= POST_HYPO_RECOVERY_GRACE_WINDOW_MS
+        val isRecoveringRise = reading.ratePerMinute != null && reading.ratePerMinute > 0 && reading.value < RECOVERY_REBOUND_CEILING_MGDL
+
+        if (inPostHypoGraceWindow && isRecoveringRise) {
+            if (BuildConfig.DEBUG) {
+                Log.d("AlertCoordinator", "Yellow alert suppressed: in 40m post-hypo recovery grace window (value=${reading.value}, rate=${reading.ratePerMinute})")
+            }
+            if (projected != null) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
+            return
+        }
+
         if (forceFire) {
-            if (!suppressAlert) {
+            val isHighSide = (reading.projected ?: reading.value) >= YELLOW_MID_POINT
+            val isFastRise = reading.ratePerMinute != null && reading.ratePerMinute >= 1.5
+            val isEscalatedHigh = (reading.projected ?: reading.value) >= 240 || reading.value >= 240
+            val shouldAudiblyAlert = !isHighSide || isFastRise || isEscalatedHigh
+
+            if (!suppressAlert && shouldAudiblyAlert) {
                 AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute)
             }
             if (projected != null) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }

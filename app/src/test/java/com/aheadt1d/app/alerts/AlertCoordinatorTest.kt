@@ -165,41 +165,38 @@ class AlertCoordinatorTest {
     }
 
     @Test
-    fun `low red clear hysteresis holds the alert below 75, cancels once past it`() {
+    fun `low red clear hysteresis holds the alert below 80, cancels once past it`() {
         AlertCoordinator.evaluate(context, reading(value = 55, severity = "red"), trend(1L, 55, "red"))
         assertTrue(redTitle() != null)
 
-        // Severity dropped to none, but value (65) is still under the 75
+        // Severity dropped to none, but value (76) is still under the 80
         // clear-hysteresis buffer - must hold the red alert, not cancel it.
-        AlertCoordinator.evaluate(context, reading(value = 65, severity = "none"), trend(2L, 65, "none"))
-        assertTrue("red alert should still be held", redTitle() != null)
+        AlertCoordinator.evaluate(context, reading(value = 76, severity = "none"), trend(2L, 76, "none"))
+        assertTrue("red alert should still be held under 80", redTitle() != null)
 
-        // Now solidly past the buffer - should actually clear.
-        AlertCoordinator.evaluate(context, reading(value = 80, severity = "none"), trend(3L, 80, "none"))
+        // Now solidly past the buffer (81) - should actually clear.
+        AlertCoordinator.evaluate(context, reading(value = 81, severity = "none"), trend(3L, 81, "none"))
         assertNull("red alert should now be cancelled", redTitle())
     }
 
     @Test
-    fun `high red re-arms on a real move toward danger past the peak`() {
-        AlertCoordinator.evaluate(context, reading(value = 260, severity = "red"), trend(1L, 260, "red"))
-        assertTrue(redTitle()?.contains("260") == true)
-
-        // Same severity+date heartbeat, still well inside cooldown, but a
-        // genuine new peak (>= RED_HIGH_REARM_THRESHOLD_MGDL past the old one).
-        AlertCoordinator.evaluate(context, reading(value = 278, severity = "red"), trend(1L, 260, "red"))
-        assertTrue("expected a re-fire on a material new peak", redTitle()?.contains("278") == true)
-    }
-
-    @Test
-    fun `high red heartbeat with only noise-level movement does not repost`() {
-        AlertCoordinator.evaluate(context, reading(value = 260, severity = "red"), trend(1L, 260, "red"))
+    fun `high red suppresses repeat alerts during 45-minute management window, re-alerts after cooldown`() {
+        AlertCoordinator.evaluate(context, reading(value = 330, severity = "red"), trend(1L, 330, "red"))
         val firstTitle = redTitle()
+        assertTrue("initial high red should fire", firstTitle?.contains("330") == true)
 
-        // +3 mg/dL is below RED_HIGH_REARM_THRESHOLD_MGDL (15) - ordinary
-        // sensor noise, must not re-fire mid-cooldown.
-        AlertCoordinator.evaluate(context, reading(value = 263, severity = "red"), trend(1L, 260, "red"))
+        // Fluctuating high (drops to 300 then bumps to 340) inside the 45-min window
+        // must NOT re-alarm (prevents alarm fatigue during insulin action).
+        AlertCoordinator.evaluate(context, reading(value = 340, severity = "red"), trend(2L, 340, "red"))
+        assertEquals("must suppress repeat alerts on fluctuating high within 45m", firstTitle, redTitle())
 
-        assertEquals(firstTitle, redTitle())
+        // Backdate last fired timestamp past 45 minutes
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit()
+            .putLong("last_red_fired_at_ms", System.currentTimeMillis() - 46 * 60_000L)
+            .commit()
+
+        AlertCoordinator.evaluate(context, reading(value = 320, severity = "red"), trend(3L, 320, "red"))
+        assertTrue("expected high re-alert after 45-minute cooldown elapsed", redTitle()?.contains("320") == true)
     }
 
     @Test
@@ -232,5 +229,34 @@ class AlertCoordinatorTest {
             "expected a re-fire reflecting the new age after cooldown, got: ${redTitle()}",
             redTitle()?.contains("36m") == true,
         )
+    }
+
+    @Test
+    fun `post-hypo recovery rise inside 40 minutes is suppressed under 240 ceiling`() {
+        // Step 1: Caught a low early at 82 mg/dL -> yellow alert fires
+        AlertCoordinator.evaluate(context, reading(value = 80, severity = "yellow", ratePerMinute = -1.5), trend(1L, 80, "yellow"))
+        
+        // Step 2: Treated with juice, now climbing fast (+3.5 mg/dL/min, value 110, projected 157)
+        // Inside the 40-minute recovery window, this must NOT fire another yellow alert.
+        val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
+        context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 110, severity = "yellow", ratePerMinute = 3.5, projected = 157),
+            trend(2L, 110, "yellow")
+        )
+
+        val yellowNotif = shadowNm.getNotification(yellowNotificationId)
+        assertNull("expected yellow alert to be suppressed during 40-minute post-hypo recovery", yellowNotif)
+
+        // Step 3: If glucose blows past the 240 ceiling (e.g. 245), alert is allowed
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 245, severity = "yellow", ratePerMinute = 2.0, projected = 260),
+            trend(3L, 245, "yellow")
+        )
+        val ceilingNotif = shadowNm.getNotification(yellowNotificationId)
+        assertTrue("expected alert once crossing the 240 mg/dL recovery ceiling", ceilingNotif != null)
     }
 }

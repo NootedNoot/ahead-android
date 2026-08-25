@@ -20,7 +20,6 @@ object VoiceAlertPrefs {
     private const val KEY_SIGNAL_LOST = "speak_signal_lost"
     private const val KEY_PLATEAU = "speak_plateau"
     private const val KEY_CORRECTION = "speak_correction"
-    private const val KEY_EMERGENCY = "speak_emergency"
 
     fun isMasterEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_MASTER, true)
@@ -40,10 +39,6 @@ object VoiceAlertPrefs {
         VoiceAlertCategory.SIGNAL_LOST -> KEY_SIGNAL_LOST
         VoiceAlertCategory.PLATEAU -> KEY_PLATEAU
         VoiceAlertCategory.CORRECTION -> KEY_CORRECTION
-        // Never actually read - VoiceAlertEngine.speak() special-cases
-        // EMERGENCY and never calls isCategoryEnabled/keyFor for it. Present
-        // only so this `when` stays exhaustive.
-        VoiceAlertCategory.EMERGENCY -> KEY_EMERGENCY
     }
 
     private fun defaultFor(category: VoiceAlertCategory): Boolean = when (category) {
@@ -58,8 +53,6 @@ object VoiceAlertPrefs {
         // emergency, so it shouldn't speak aloud unless explicitly asked.
         VoiceAlertCategory.PLATEAU -> false
         VoiceAlertCategory.CORRECTION -> false
-        // Never actually read - see keyFor's EMERGENCY branch above.
-        VoiceAlertCategory.EMERGENCY -> true
     }
 
     private fun prefs(context: Context) =

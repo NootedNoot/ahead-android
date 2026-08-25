@@ -55,41 +55,6 @@
     <string name="chart_high_threshold_label">High · 180 mg/dL</string>
     <string name="chart_now_label">Now</string>
 
-    <!-- Red alert takeover -->
-    <string name="red_alert_heading">URGENT GLUCOSE ALERT</string>
-    <string name="red_alert_projected">Projected %1$d mg/dL in 15 minutes</string>
-    <string name="red_alert_no_projection">Glucose is heading out of a safe range</string>
-    <!-- Signal-lost variant of the same takeover screen (RedAlertActivity.createSignalLostIntent) -->
-    <string name="red_alert_signal_lost_heading">NO GLUCOSE DATA</string>
-    <!-- Critical-low siren variant (RedAlertActivity.createCriticalEmergencyIntent, CriticalLowSiren) -->
-    <string name="red_alert_critical_emergency_heading">🚨 CRITICAL LOW — TREAT NOW</string>
-    <string name="red_alert_critical_emergency_subtext">Alarm repeats until you treat and confirm below</string>
-    <string name="red_alert_dismiss">Dismiss</string>
-    <string name="red_alert_stop_alarm">I\'m treating this — stop the alarm</string>
-    <string name="red_alert_send_emergency">Send Emergency Alert</string>
-    <!-- %1$d is the CURRENT EmergencyContactsPrefs.alertTimeoutMinutes() value,
-         not a fixed number - filled in at display time so this can never go
-         stale if that setting is changed. -->
-    <string name="emergency_sms_rationale">Ahead needs SMS permission to text your emergency contacts. This happens when you confirm a red alert yourself, or automatically if a red alert goes unacknowledged for %1$d minutes.</string>
-    <string name="emergency_sms_denied">SMS permission was denied, so no message was sent. You can allow it from Android Settings if you change your mind.</string>
-    <string name="emergency_send_failed">Couldn\'t send the emergency SMS. Check your signal and try again.</string>
-    <string name="emergency_contacts_title">Emergency Contacts</string>
-    <string name="emergency_contacts_entry">Emergency Contacts</string>
-    <string name="emergency_master_label">Send emergency alerts</string>
-    <string name="emergency_master_desc">Ask before texting your emergency contact(s) during a red-severity alert</string>
-    <string name="emergency_add_contact">Add contact</string>
-    <string name="emergency_no_contacts">No emergency contacts yet. Add one from your phone\'s contacts.</string>
-    <!-- Distinct from emergency_alert_timeout_label below despite sharing the
-         same default number - this one paces REPEAT texts to the same
-         contact after a send already happened. -->
-    <string name="emergency_cooldown_label">Minimum time between repeat texts to the same contact (minutes)</string>
-    <!-- The NEW auto-text delay: how long a red alert may go undismissed
-         before this contact gets texted automatically. -->
-    <string name="emergency_alert_timeout_label">Auto-text if a red alert goes unacknowledged for (minutes)</string>
-    <string name="emergency_your_name_label">Your name (used in the alert text)</string>
-    <string name="emergency_remove">Remove</string>
-    <string name="emergency_sms_permission_granted">✓ SMS permission granted</string>
-    <string name="emergency_sms_permission_missing">⚠ SMS permission was revoked — texts will NOT send. Tap to fix.</string>
 
     <!-- CGM path setting - which reader app syncs your glucose data, used only
          to pick the staleness-alert threshold (see LatestTrendStore). Exposed
@@ -172,12 +137,9 @@
     <string name="wizard_notif_title">Alerts &amp; notifications</string>
     <string name="wizard_notif_body">Ahead needs a few notification permissions so red alerts can reach you — even on the lock screen and through Do Not Disturb.</string>
     <string name="wizard_notif_post">Show notifications</string>
-    <string name="wizard_notif_fsi">Full-screen alerts</string>
     <string name="wizard_notif_dnd">Alerts through Do Not Disturb</string>
     <string name="wizard_notif_post_btn">Allow notifications</string>
-    <string name="wizard_notif_fsi_btn">Allow full-screen alerts</string>
     <string name="wizard_notif_dnd_btn">Allow Do Not Disturb access</string>
-    <string name="wizard_notif_fsi_auto">Granted automatically on this Android version</string>
     <string name="wizard_notif_dnd_hint">Find Ahead in the list and turn it on.</string>
 
     <!-- Step 8: done -->

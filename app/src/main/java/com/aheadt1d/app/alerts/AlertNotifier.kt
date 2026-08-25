@@ -62,6 +62,7 @@ object AlertNotifier {
      *   fires calmer copy ("recovering") instead of "URGENT check now".
      */
     fun showRedAlert(context: Context, value: Int, projected: Int?, rate: Double?, recovering: Boolean = false) {
+        if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
 
@@ -85,6 +86,7 @@ object AlertNotifier {
                 .setContentTitle("🔴 URGENT: $value mg/dL ${arrow.label}")
                 .setContentText("${projectionLine(projected)} — check now")
         }
+        builder.addAction(snoozeAction(context, 15))
 
         notifyIfAllowed(context) { nm ->
             nm.notify(RED_ALERT_NOTIFICATION_ID, builder.build())
@@ -119,6 +121,7 @@ object AlertNotifier {
      *  chirps) and, like the channel itself, respects DND rather than
      *  piercing it. */
     fun showYellowAlert(context: Context, value: Int, projected: Int?, rate: Double?) {
+        if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
 
@@ -130,6 +133,7 @@ object AlertNotifier {
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.high))
             .setContentIntent(mainActivityIntent(context, REQ_YELLOW_CONTENT))
+            .addAction(snoozeAction(context, 15))
             .build()
 
         notifyIfAllowed(context) { nm -> nm.notify(YELLOW_ALERT_NOTIFICATION_ID, notification) }
@@ -168,6 +172,7 @@ object AlertNotifier {
         ageMinutes: Long,
         blockedReason: ReadBlockedReason? = null,
     ) {
+        if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
 
         val notification = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
@@ -181,6 +186,7 @@ object AlertNotifier {
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.low))
             .setContentIntent(mainActivityIntent(context, REQ_SIGNAL_LOST_CONTENT))
+            .addAction(snoozeAction(context, 15))
             .build()
 
         // Shares RED_ALERT_NOTIFICATION_ID with showRedAlert - deliberately: a
@@ -223,6 +229,7 @@ object AlertNotifier {
         highThreshold: Int,
         highDurationMinutes: Int,
     ) {
+        if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
 
         val (title, text) = if (tier <= 1) {
@@ -282,6 +289,7 @@ object AlertNotifier {
         plateauActive: Boolean,
         isLow: Boolean = false,
     ) {
+        if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
 
         val verb = if (isLow) "rising" else "trending down"
@@ -324,6 +332,7 @@ object AlertNotifier {
      * same pattern as the red/yellow/plateau alerts.
      */
     fun showRepeatCorrectionAlert(context: Context, minutesSinceFirstCorrection: Long, isLow: Boolean = false) {
+        if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
 
         val direction = if (isLow) "low" else "elevated"
@@ -392,6 +401,21 @@ object AlertNotifier {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE
         )
+
+    private fun snoozeAction(context: Context, minutes: Int = 15): Notification.Action {
+        val intent = AlertSnoozeReceiver.createIntent(context, minutes)
+        val pending = PendingIntent.getBroadcast(
+            context,
+            minutes,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return Notification.Action.Builder(
+            null,
+            "Snooze ${minutes}m",
+            pending
+        ).build()
+    }
 
     private inline fun notifyIfAllowed(context: Context, block: (NotificationManagerCompat) -> Unit) {
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==

@@ -47,6 +47,38 @@
             android:textColor="@color/muted"
             android:textSize="13sp" />
 
+        <!-- ===================== Silence All Alerts Killswitch ===================== -->
+
+        <LinearLayout style="@style/DebugCard.Danger">
+            <TextView style="@style/DebugCardTitle.Danger" android:text="🔕 SILENCE ALL ALERTS (KILLSWITCH)" />
+            <TextView
+                style="@style/DebugLabel"
+                android:text="Temporarily suppresses all tones, vibrations, spoken voice alerts, and notifications so you can treat a low in peace without interruptions." />
+
+            <TextView
+                android:id="@+id/silenceStatusText"
+                style="@style/DebugSubheading"
+                android:textColor="@color/ok"
+                android:text="Status: Alerts Active" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="6dp">
+                <Button android:id="@+id/silence10mButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="4dp" android:text="10 min" />
+                <Button android:id="@+id/silence15mButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="4dp" android:text="15 min" />
+                <Button android:id="@+id/silence30mButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="4dp" android:text="30 min" />
+                <Button android:id="@+id/silence60mButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:text="1 hr" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/cancelSilenceButton"
+                style="@style/DebugButton.Danger"
+                android:layout_marginTop="6dp"
+                android:text="Cancel Silence / Re-enable Alerts" />
+        </LinearLayout>
+
         <!-- ===================== Reset everything ===================== -->
 
         <LinearLayout style="@style/DebugCard.Danger">

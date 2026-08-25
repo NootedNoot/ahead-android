@@ -11,6 +11,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import android.widget.Button
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,8 +27,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.aheadt1d.app.alerts.AlertChannels
+import com.aheadt1d.app.alerts.AlertSilenceManager
 import org.aheadt1d.ratemath.RateMath
 import org.aheadt1d.ratemath.RatePoint
+import org.aheadt1d.ratemath.SeverityEngine
 import org.aheadt1d.ratemath.TrajectoryKind
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
@@ -38,9 +41,11 @@ import com.aheadt1d.app.state.DebugGlucoseOverride
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
+import com.aheadt1d.app.state.TREND_MATCH_TOLERANCE_MS
 import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.isStale
 import com.aheadt1d.app.state.staleGuidance
+import kotlin.math.abs
 import com.aheadt1d.app.ui.GlucoseSeverity
 import com.aheadt1d.app.voice.VoiceAlertsActivity
 import com.aheadt1d.app.work.WorkScheduler
@@ -186,6 +191,10 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(com.aheadt1d.app.health.HealthActivity.createIntent(this))
         }
+        findViewById<View>(R.id.drawerSilenceItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            showSilenceDialog()
+        }
         findViewById<View>(R.id.drawerVoiceItem).setOnClickListener {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(VoiceAlertsActivity.createIntent(this))
@@ -198,6 +207,7 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(com.aheadt1d.app.upload.UploadSettingsActivity.createIntent(this))
         }
+        updateDrawerSilenceLabel()
 
         if (BuildConfig.DEBUG) {
             findViewById<View>(R.id.drawerDebugSectionLabel).visibility = View.VISIBLE
@@ -236,6 +246,69 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         })
+    }
+
+    private fun showSilenceDialog() {
+        val view = layoutInflater.inflate(R.layout.dialog_silence_alerts, null)
+        val dialog = AlertDialog.Builder(this)
+            .setView(view)
+            .setNegativeButton("Close", null)
+            .create()
+
+        val isSilenced = AlertSilenceManager.isSilenced(this)
+        val remaining = AlertSilenceManager.getRemainingMinutes(this)
+        val titleView = view.findViewById<TextView>(R.id.silenceDialogTitle)
+        val statusView = view.findViewById<TextView>(R.id.silenceDialogStatus)
+
+        if (isSilenced) {
+            titleView.text = "🔕 Alerts Silenced (${remaining}m left)"
+            statusView.text = "Status: 🔕 SILENCED (${remaining}m remaining)"
+            statusView.setTextColor(ContextCompat.getColor(this, R.color.low))
+        } else {
+            titleView.text = "🔕 Silence All Alerts"
+            statusView.text = "Status: Alerts Active (Normal)"
+            statusView.setTextColor(ContextCompat.getColor(this, R.color.ok))
+        }
+
+        view.findViewById<Button>(R.id.btnSilence10).setOnClickListener {
+            AlertSilenceManager.silence(this, 10)
+            updateDrawerSilenceLabel()
+            dialog.dismiss()
+        }
+        view.findViewById<Button>(R.id.btnSilence15).setOnClickListener {
+            AlertSilenceManager.silence(this, 15)
+            updateDrawerSilenceLabel()
+            dialog.dismiss()
+        }
+        view.findViewById<Button>(R.id.btnSilence30).setOnClickListener {
+            AlertSilenceManager.silence(this, 30)
+            updateDrawerSilenceLabel()
+            dialog.dismiss()
+        }
+        view.findViewById<Button>(R.id.btnSilence60).setOnClickListener {
+            AlertSilenceManager.silence(this, 60)
+            updateDrawerSilenceLabel()
+            dialog.dismiss()
+        }
+        view.findViewById<Button>(R.id.btnCancelSilence).setOnClickListener {
+            AlertSilenceManager.cancelSilence(this)
+            updateDrawerSilenceLabel()
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
+    private fun updateDrawerSilenceLabel() {
+        val labelView = findViewById<TextView>(R.id.drawerSilenceLabel) ?: return
+        if (AlertSilenceManager.isSilenced(this)) {
+            val rem = AlertSilenceManager.getRemainingMinutes(this)
+            labelView.text = "🔕 Silenced (${rem}m left)"
+            labelView.setTextColor(ContextCompat.getColor(this, R.color.low))
+        } else {
+            labelView.text = "🔕 Silence Alerts"
+            labelView.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
+        }
     }
 
     /**
@@ -285,6 +358,7 @@ class MainActivity : AppCompatActivity() {
     // resume would be obnoxious.
     override fun onResume() {
         super.onResume()
+        updateDrawerSilenceLabel()
         // Catches a DND-access revocation that happened while the app wasn't
         // in the foreground (system "clean up permissions" prompt, an OEM
         // auto-revoke, the user toggling it off in Settings) - the wizard
@@ -518,8 +592,17 @@ class MainActivity : AppCompatActivity() {
      *  debug override." This banner is the tell. */
     private fun updateDebugOverrideBanner() {
         if (!BuildConfig.DEBUG) return
-        findViewById<View>(R.id.debugOverrideBanner).visibility =
-            if (DebugGlucoseOverride.isActive) View.VISIBLE else View.GONE
+        val active = DebugGlucoseOverride.isActive
+        findViewById<View>(R.id.debugOverrideBanner)?.visibility =
+            if (active) View.VISIBLE else View.GONE
+        val label = findViewById<TextView>(R.id.currentGlucoseLabel) ?: return
+        if (active) {
+            label.text = "🚨 * INJECTED TEST DATA * 🚨"
+            label.setTextColor(ContextCompat.getColor(this, R.color.low))
+        } else {
+            label.setText(R.string.current_glucose_label)
+            label.setTextColor(ContextCompat.getColor(this, R.color.muted))
+        }
     }
 
     // Routes through the shared isStale() (state package) - the same rule the
@@ -748,17 +831,18 @@ class MainActivity : AppCompatActivity() {
         // show "No recent trend data" even when glucose data is perfectly live.
         val rawReading = LatestTrendRepository.latestRawReading.value
         val rawIsFresh = rawReading != null && isFresh(Instant.ofEpochMilli(rawReading.time))
-        if (trend == null || rawReading == null || !rawIsFresh) {
+        if (rawReading == null || !rawIsFresh) {
             severityView.setText(R.string.trend_unavailable)
             projectionContainer.visibility = View.GONE
             return
         }
-        // Rate comes from the shared effectiveRatePerMinute(), NOT trend.rate
-        // directly - the persistent notification renders from the same
-        // function, so both surfaces always show the identical rate for a
-        // given check cycle.
-        val rate = effectiveRatePerMinute(rawReading, trend)
-        severityView.text = describe(trend, rate)
+        val rate = rawReading.ratePerMinute ?: trend?.rate
+        val decision = SeverityEngine.classify(
+            currentValue = rawReading.value,
+            ratePerMinute = rate,
+        )
+        val currentSeverity = decision.severity.takeIf { it != "none" }
+        severityView.text = describe(currentSeverity, rate)
 
         // Projections are a straight-line extrapolation from the SAME effective
         // rate shown in the line above (value + rate * minutes), so the number,
@@ -779,8 +863,8 @@ class MainActivity : AppCompatActivity() {
     private fun colorIntFor(sgv: Int): Int =
         ContextCompat.getColor(this, GlucoseSeverity.bucketFor(sgv).colorRes)
 
-    private fun describe(trend: LatestTrend, rate: Double?): String {
-        val severityLabel = when (trend.severity) {
+    private fun describe(severity: String?, rate: Double?): String {
+        val severityLabel = when (severity) {
             "red" -> "Red alert"
             "yellow" -> "Yellow"
             // "Stable" describes the number, not the severity tier - severity

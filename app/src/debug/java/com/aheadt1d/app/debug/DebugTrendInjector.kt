@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.aheadt1d.app.BuildConfig
+import com.aheadt1d.app.state.DebugGlucoseOverride
+import com.aheadt1d.app.state.LatestTrendRepository
 
 /**
  * Debug-only. Injects a synthetic reading + matching-timestamp trend into the
@@ -28,12 +30,22 @@ class DebugTrendInjector : BroadcastReceiver() {
 
         val ctx = context.applicationContext
 
-        // `--es action cancel` clears any posted alerts without going through a
-        // severity transition. Handy for resetting a test device.
         if (intent.getStringExtra("action") == "cancel") {
             com.aheadt1d.app.alerts.AlertNotifier.cancelAlerts(ctx)
             val nmc = ctx.getSystemService(android.app.NotificationManager::class.java)
             Log.d(TAG, "after cancelAlerts, active=" + nmc.activeNotifications.joinToString { "${it.id}" })
+            return
+        }
+
+        if (intent.getStringExtra("action") == "reset") {
+            com.aheadt1d.app.alerts.AlertNotifier.cancelAlerts(ctx)
+            com.aheadt1d.app.alerts.AlertNotifier.cancelPlateau(ctx)
+            com.aheadt1d.app.alerts.AlertNotifier.cancelCorrection(ctx)
+            ctx.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit().clear().apply()
+            DebugGlucoseOverride.clear()
+            LatestTrendRepository.clear(ctx)
+            com.aheadt1d.app.work.WorkScheduler.runOnce(ctx)
+            Log.d(TAG, "Reset all debug test state and queued live check")
             return
         }
 
@@ -42,9 +54,15 @@ class DebugTrendInjector : BroadcastReceiver() {
         val projected = if (intent.hasExtra("projected")) intent.getIntExtra("projected", 68) else null
         val projectedExtended = if (intent.hasExtra("projExt")) intent.getIntExtra("projExt", 68) else projected
         val rate = if (intent.hasExtra("rate")) intent.getFloatExtra("rate", -2.8f).toDouble() else -2.8
-        // `--ei ageMin N` backdates the reading N minutes so the stale / signal-lost
-        // path can be exercised without waiting for real data to go dark.
         val ageMin = intent.getIntExtra("ageMin", 0)
+
+        val readingTime = java.time.Instant.now().minusSeconds(ageMin * 60L)
+        val prevValue = (value - (rate * 5)).toInt().coerceIn(20, 500)
+        val points = listOf(
+            com.aheadt1d.app.health.GlucosePoint(readingTime.minus(java.time.Duration.ofMinutes(5)), prevValue),
+            com.aheadt1d.app.health.GlucosePoint(readingTime, value)
+        )
+        DebugGlucoseOverride.setPoints(points)
 
         DebugInjection.apply(ctx, severity, value, projected, projectedExtended, rate, ageMin)
     }
