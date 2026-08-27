@@ -227,6 +227,11 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(com.aheadt1d.app.data.ArchiveBrowserActivity.createIntent(this))
         }
+        findViewById<View>(R.id.drawerAccountItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(com.aheadt1d.app.account.AccountSettingsActivity.createIntent(this))
+        }
+        findViewById<TextView>(R.id.drawerUserLabel).text = AuthPrefs.displayLabel(this) ?: ""
         updateDrawerSilenceLabel()
 
         if (BuildConfig.DEBUG) {

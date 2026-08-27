@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
@@ -116,6 +117,7 @@ class LoginActivity : AppCompatActivity() {
                 setLoading(false)
                 showError(e.message ?: "Something went wrong")
             } catch (e: Exception) {
+                Log.w(TAG, "Login/signup network failure", e)
                 setLoading(false)
                 showError("Couldn't reach the server - check your connection and try again")
             }
@@ -134,6 +136,7 @@ class LoginActivity : AppCompatActivity() {
     }
 
     companion object {
+        private const val TAG = "LoginActivity"
         private const val MODE_LOGIN = 0
         private const val MODE_SIGNUP = 1
 

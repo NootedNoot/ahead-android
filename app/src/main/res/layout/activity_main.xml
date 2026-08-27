@@ -340,10 +340,11 @@
                     android:textStyle="bold" />
 
                 <TextView
+                    android:id="@+id/drawerUserLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text="Ryan"
+                    android:text=""
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
 
@@ -376,6 +377,10 @@
 
             <LinearLayout android:id="@+id/drawerHealthItem" style="@style/DrawerItem">
                 <TextView style="@style/DrawerItemLabel" android:text="Health Data" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerAccountItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Account" />
             </LinearLayout>
 
             <TextView style="@style/DrawerSectionLabel" android:text="SAFETY" />
