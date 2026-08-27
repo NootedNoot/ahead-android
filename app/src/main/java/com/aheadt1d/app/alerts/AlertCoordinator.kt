@@ -24,17 +24,15 @@ import com.aheadt1d.app.state.LatestTrend
  *    alerts are suppressed - the person is already being warned/treating.
  *    The moment recovery stalls or reverses, it alerts immediately again,
  *    same urgency as a brand-new low.
- *  - HIGH side: never suppressed - a fast fall from a high can still crash
- *    into a low, so "it's been falling for a while" is not a reason to go
- *    quiet. Instead tracks a local peak: retreating <20 pts then climbing
- *    back up re-arms (still bouncing near the danger zone); retreating >=20
- *    pts (a real move toward safety) means climbing back up alone doesn't
- *    re-fire UNLESS it exceeds the original peak, which always fires. Both
- *    of those re-arm triggers require at least RED_HIGH_REARM_THRESHOLD_MGDL
- *    of movement (2026-07-19: previously any single mg/dL uptick counted,
- *    which let ordinary CGM sensor noise on a flat-but-noisy high re-fire
- *    every few minutes, bypassing RED_REALERT_COOLDOWN_MS entirely - a
- *    genuinely flat high still gets its heartbeat via the plain cooldown).
+ *  - HIGH side: no peak/re-arm tracking - a fast fall from a high can still
+ *    crash into a low, so "it's been falling for a while" is not a reason to
+ *    go fully quiet, but there's no bounce-detection layered on top either.
+ *    Just the flat RED_HIGH_REALERT_COOLDOWN_MS heartbeat (45 min), plus the
+ *    correction-aware grace below (2026-08-26 note: an earlier version of
+ *    this file had a fully-built peak/re-arm tracker described in this
+ *    comment - confirmed dead code, never called - removed rather than
+ *    wired in, since the flat cooldown + correction grace already cover the
+ *    real cases that came up in practice).
  *
  * All decision state is persisted so it survives process death - critical,
  * because LatestTrendRepository.init() replays the last trend from disk on
@@ -52,6 +50,35 @@ import com.aheadt1d.app.state.LatestTrend
  * third party. The dismiss-cooldown machinery that existed only to protect
  * the takeover screen from re-popping right after being dismissed went with
  * it - there's no takeover screen left to protect.
+ *
+ * 2026-08-26: two related fixes/additions, both reported live off a real
+ * episode (354 mg/dL, re-alerted 14 min apart while never actually clearing
+ * red-adjacent territory):
+ *
+ * 1. Yellow/red flapping no longer bypasses RED_HIGH_REALERT_COOLDOWN_MS.
+ *    handleRedTransition previously treated ANY entry into red (including
+ *    re-entering from a brief yellow dip - the value never actually got back
+ *    in range) as a "brand-new episode" and force-fired immediately. Only a
+ *    genuinely fresh episode (entering from "none") does that now; a
+ *    yellow-then-red flap falls through to the ordinary cooldown/grace path
+ *    like any other heartbeat. The LOW side is deliberately NOT changed here
+ *    - a low re-entering red after a brief yellow dip still always fires
+ *    immediately, since a fluctuating low is exactly the kind of new
+ *    information worth interrupting for (see fireRedIfWarranted).
+ *
+ * 2. Correction-aware re-alert grace, via PlateauCoordinator's read-only
+ *    accessors (see that object's doc for the boundary exception). Logging a
+ *    correction never suppresses the FIRST alert of an episode, and never
+ *    suppresses while the value is still moving the wrong way (still
+ *    climbing on a high, still falling on a low) - only holds off a repeat
+ *    alert while the direction looks like the correction is doing its job.
+ *    Low and high are asymmetric on purpose, per the owner: a low needs to
+ *    resolve fast and shouldn't stay silenced long even with repeat
+ *    corrections (LOW_CORRECTION_GRACE_MS, fixed 30 min from the FIRST
+ *    correction - matches PlateauCoordinator's own non-extending anchor for
+ *    the same window). A high can be legitimately managed over hours with
+ *    several doses (HIGH_CORRECTION_GRACE_MS, rolling 90 min from the MOST
+ *    RECENT correction - extends with every additional one logged).
  */
 object AlertCoordinator {
     private const val PREFS_NAME = "ahead_alert_state"
@@ -60,9 +87,8 @@ object AlertCoordinator {
     private const val KEY_LAST_RED_FIRED_AT = "last_red_fired_at_ms"
     private const val KEY_SIGNAL_LOST_FIRED = "signal_lost_fired"
     private const val KEY_SIGNAL_LOST_LAST_FIRED_AT = "signal_lost_last_fired_at_ms"
-    private const val KEY_RED_PEAK_VALUE = "red_peak_value"
-    private const val KEY_RED_LAST_VALUE = "red_last_value"
     private const val KEY_LOW_WAS_RECOVERING = "low_was_recovering"
+    private const val KEY_LOW_WAS_HELD = "low_was_held"
     private const val KEY_RED_LOW_SIDE = "red_low_side"
     private const val KEY_YELLOW_LAST_ALERTED_PROJECTED = "yellow_last_alerted_projected"
     private const val KEY_LAST_LOW_EVENT_AT = "last_low_event_at_ms"
@@ -89,16 +115,17 @@ object AlertCoordinator {
     // recovering/state tracking, it just doesn't independently interrupt
     // again - the plain RED_LOW_REALERT_COOLDOWN_MS heartbeat still applies.
     private const val MIN_REALERT_GAP_MS = 5 * 60_000L
+    // Correction-aware re-alert grace (2026-08-26, at the owner's request) -
+    // see the class doc's item 2 for the full reasoning on why these are
+    // asymmetric. Fixed, non-extending window on the low side (a low needs to
+    // resolve fast); rolling, extends-per-correction window on the high side
+    // (a high can be legitimately managed over hours with several doses).
+    private const val LOW_CORRECTION_GRACE_MS = 30 * 60_000L
+    private const val HIGH_CORRECTION_GRACE_MS = 90 * 60_000L
     // Same cadence as the red re-alert heartbeat - an ongoing blackout is at
     // least as urgent as an ongoing red glucose reading, and there's no
     // reason for it to go quiet just because the first alert already fired.
     private const val SIGNAL_LOST_REALERT_COOLDOWN_MS = 15 * 60_000L
-    // Same 70 mg/dL split the chart's low/high threshold lines and
-    // RedAlertActivity's emergency-contact classifier already use - red only
-    // ever fires for a critical low or critical high, never the 70-180 band,
-    // so this cleanly separates the two without needing a dedicated field.
-    private const val LOW_HIGH_SPLIT = 70
-    private const val PEAK_RETREAT_REARM_THRESHOLD = 20
     // Low-side red clear hysteresis. Once a critical LOW has fired red, the alert
     // is held up until the value climbs solidly past the danger band - not the
     // instant it nudges back over the floor - so a BG hovering near the cutoff
@@ -107,10 +134,6 @@ object AlertCoordinator {
     // High-side reds are deliberately NOT held this way (a fast fall from a high
     // is its own hazard, not something to latch).
     private const val LOW_RED_CLEAR_HYSTERESIS = 80
-    // Minimum mg/dL movement for a high-side peak/climb-back to count as a
-    // re-arm trigger - below this it's ordinary CGM sensor noise, not a
-    // meaningful change. See the class doc's HIGH side note.
-    private const val RED_HIGH_REARM_THRESHOLD_MGDL = 15
     // Roughly the middle of the 70-180 healthy band. Only used to infer which
     // direction counts as "worse" for the current yellow episode (lower vs
     // higher) - never to decide severity itself, which is entirely the
@@ -250,7 +273,7 @@ object AlertCoordinator {
         if (severity == prevSeverity && date == prevDate) {
             when (severity) {
                 "red" -> handleRedHeartbeat(context, prefs, reading, now, lastRedFiredAt, suppressAlert)
-                "yellow" -> fireYellowIfWarranted(context, prefs, reading, forceFire = false, suppressAlert, now)
+                "yellow" -> fireYellowIfWarranted(context, prefs, reading, forceFire = false, downgradedFromRed = false, suppressAlert, now)
             }
             return
         }
@@ -291,7 +314,12 @@ object AlertCoordinator {
                 // seeds the baseline; a continuing episode only re-posts if the
                 // projection has moved materially further into danger since the
                 // last one shown - see fireYellowIfWarranted.
-                fireYellowIfWarranted(context, prefs, reading, forceFire = prevSeverity != "yellow", suppressAlert, now)
+                fireYellowIfWarranted(
+                    context, prefs, reading,
+                    forceFire = prevSeverity != "yellow",
+                    downgradedFromRed = prevSeverity == "red",
+                    suppressAlert, now,
+                )
             }
             else -> {
                 AlertNotifier.cancelAlerts(context)
@@ -315,18 +343,17 @@ object AlertCoordinator {
      *  wrong EmergencyAlertType if it goes unacknowledged, texting an
      *  emergency contact that the person is HIGH while they're actually
      *  crashing low. 2026-08-01: found via a real episode that scored red
-     *  at value=79/projected=67 and was misclassified high-side. */
-    private fun isLowSide(value: Int, projected: Int?): Boolean =
-        value <= LOW_HIGH_SPLIT || (projected != null && projected <= LOW_HIGH_SPLIT)
+     *  at value=79/projected=67 and was misclassified high-side. See
+     *  AlertThresholds.kt - this now delegates to the one shared copy of the
+     *  same formula that AlertNotifier also uses. */
 
-    /** Wipes peak-tracking state when a red episode ends, so the next one
-     *  (low or high) starts from a clean slate instead of inheriting a stale
-     *  peak/last-value from an unrelated earlier episode. */
+    /** Wipes per-episode state when a red episode ends, so the next one
+     *  (low or high) starts from a clean slate instead of inheriting stale
+     *  state from an unrelated earlier episode. */
     private fun clearRedEpisodeState(prefs: SharedPreferences) {
         prefs.edit {
-            remove(KEY_RED_PEAK_VALUE)
-            remove(KEY_RED_LAST_VALUE)
             remove(KEY_LOW_WAS_RECOVERING)
+            remove(KEY_LOW_WAS_HELD)
             remove(KEY_RED_LOW_SIDE)
         }
     }
@@ -343,17 +370,30 @@ object AlertCoordinator {
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
     ) {
-        val newlyRed = prevSeverity != "red"
-        if (newlyRed) {
+        // "Entering red" (structural bookkeeping - reseed the side-tracking
+        // state that clearRedEpisodeState wipes on any red->yellow downgrade)
+        // is not the same question as "should this force-fire immediately"
+        // (see the class doc's item 1) - a yellow->red flap re-enters red
+        // structurally but is NOT a fresh episode on the high side.
+        val enteringRed = prevSeverity != "red"
+        if (enteringRed) {
             prefs.edit {
-                putInt(KEY_RED_PEAK_VALUE, reading.value)
-                putInt(KEY_RED_LAST_VALUE, reading.value)
                 // Remember which side this episode is, so the clear-hysteresis
                 // below only ever holds a LOW red (never a high one).
                 putBoolean(KEY_RED_LOW_SIDE, isLowSide(reading.value, reading.projected))
             }
         }
-        fireRedIfWarranted(context, prefs, reading, forceFire = newlyRed, now, lastRedFiredAt, suppressAlert)
+        val forceFire = if (isLowSide(reading.value, reading.projected)) {
+            enteringRed
+        } else {
+            // High side only: a yellow->red flap is the person never actually
+            // getting out of the high, not new information - fall through to
+            // the ordinary cooldown/grace path in fireRedIfWarranted instead
+            // of bypassing it. Only a genuinely fresh episode (was in-range)
+            // force-fires.
+            prevSeverity == "none"
+        }
+        fireRedIfWarranted(context, prefs, reading, forceFire, now, lastRedFiredAt, suppressAlert)
     }
 
     /** Same (severity="red", date) as last handled - a 60s-tick re-emission
@@ -388,25 +428,45 @@ object AlertCoordinator {
         val rate = reading.ratePerMinute
 
         if (isLowSide(value, reading.projected)) {
-            val wasRecovering = prefs.getBoolean(KEY_LOW_WAS_RECOVERING, false)
             val recovering = rate != null && rate > 0
-            prefs.edit { putBoolean(KEY_LOW_WAS_RECOVERING, recovering) }
 
-            if (recovering && !forceFire) {
-                // Suppress follow-ups while genuinely recovering - the person
-                // is already being warned/treating, so a repeat here wouldn't
-                // change what they do next. A brand-new episode still always
-                // fires once even if already rising at first detection.
+            // Correction-aware grace: a logged low correction holds off a
+            // follow-up alert for up to LOW_CORRECTION_GRACE_MS from when it
+            // was FIRST logged (fixed - see PlateauCoordinator's
+            // activeLowCorrectionAnchorMs doc for why this doesn't extend on
+            // repeat corrections, unlike the high side below), as long as the
+            // value isn't actively getting worse. Falling further despite a
+            // logged correction is new information worth an immediate alert,
+            // same as a fresh low.
+            val correctionAnchor = PlateauCoordinator.activeLowCorrectionAnchorMs(context)
+            val inCorrectionGrace = correctionAnchor != null && now - correctionAnchor < LOW_CORRECTION_GRACE_MS
+            val worsening = rate != null && rate < 0
+            val correctionHolding = inCorrectionGrace && !worsening
+
+            val wasHeld = prefs.getBoolean(KEY_LOW_WAS_HELD, false)
+            val held = recovering || correctionHolding
+            prefs.edit {
+                putBoolean(KEY_LOW_WAS_RECOVERING, recovering)
+                putBoolean(KEY_LOW_WAS_HELD, held)
+            }
+
+            if (held && !forceFire) {
+                // Suppress follow-ups while genuinely recovering OR while a
+                // logged correction's grace window says "give it a moment" -
+                // the person is already being warned/treating, so a repeat
+                // here wouldn't change what they do next. A brand-new episode
+                // still always fires once even if already rising at first
+                // detection.
                 return
             }
-            // Recovery just stalled/reversed is new information worth an
+            // Held-state just stalled/reversed is new information worth an
             // immediate alert, same urgency as a fresh low - otherwise fall
             // back to the plain re-alert cooldown. Gated by MIN_REALERT_GAP_MS
             // (see its doc) so a wobbling rate can't retrigger this every
             // cycle - it only counts as "new information" if it's been at
             // least that long since the last actual alert.
-            val recoveryJustStopped = wasRecovering && !recovering && now - lastRedFiredAt >= MIN_REALERT_GAP_MS
-            if ((forceFire || recoveryJustStopped || now - lastRedFiredAt >= RED_LOW_REALERT_COOLDOWN_MS) && !suppressAlert) {
+            val heldJustStopped = wasHeld && !held && now - lastRedFiredAt >= MIN_REALERT_GAP_MS
+            if ((forceFire || heldJustStopped || now - lastRedFiredAt >= RED_LOW_REALERT_COOLDOWN_MS) && !suppressAlert) {
                 AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
             }
@@ -418,6 +478,23 @@ object AlertCoordinator {
         // managed, so repeat alarms during the 45-min insulin action window
         // cause alarm fatigue. It only re-alerts once RED_HIGH_REALERT_COOLDOWN_MS
         // has elapsed or if it's a brand-new episode (forceFire).
+        //
+        // Correction-aware grace on top: a logged high correction holds off a
+        // follow-up alert for up to HIGH_CORRECTION_GRACE_MS from the MOST
+        // RECENT correction logged (rolling - see PlateauCoordinator's
+        // activeHighCorrectionAnchorMs doc for why repeat corrections extend
+        // this, unlike the low side above), as long as the value isn't still
+        // climbing. Still climbing despite a logged correction is new
+        // information worth an immediate alert, same urgency as a fresh high.
+        val correctionAnchor = PlateauCoordinator.activeHighCorrectionAnchorMs(context)
+        val inCorrectionGrace = correctionAnchor != null && now - correctionAnchor < HIGH_CORRECTION_GRACE_MS
+        val stillClimbing = rate != null && rate > 0
+        val correctionHolding = inCorrectionGrace && !stillClimbing
+
+        if (correctionHolding && !forceFire) {
+            return
+        }
+
         if ((forceFire || now - lastRedFiredAt >= RED_HIGH_REALERT_COOLDOWN_MS) && !suppressAlert) {
             AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false)
             prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
@@ -443,6 +520,7 @@ object AlertCoordinator {
         prefs: SharedPreferences,
         reading: GlucoseDisplayState.Reading,
         forceFire: Boolean,
+        downgradedFromRed: Boolean,
         suppressAlert: Boolean,
         now: Long = System.currentTimeMillis(),
     ) {
@@ -467,7 +545,21 @@ object AlertCoordinator {
             val isHighSide = (reading.projected ?: reading.value) >= YELLOW_MID_POINT
             val isFastRise = reading.ratePerMinute != null && reading.ratePerMinute >= 1.5
             val isEscalatedHigh = (reading.projected ?: reading.value) >= 240 || reading.value >= 240
-            val shouldAudiblyAlert = !isHighSide || isFastRise || isEscalatedHigh
+            // 2026-08-26, real reported case: 298 red -> 283 yellow, falling
+            // -3.1 mg/dL/min, still forced an audible ping purely because 283
+            // is numerically >=240 - with zero regard for the fact that this
+            // was an already-tracked, already-alerted episode actively
+            // improving on its own (IOB working), not a fresh escalation. A
+            // red episode resolving down into yellow while still falling is
+            // improvement in progress - don't let isEscalatedHigh override
+            // that just because the number is still big. Only applies to a
+            // genuine downgrade-from-red; a brand-new episode (prevSeverity
+            // "none") that happens to already be falling still alerts
+            // normally, since there's no prior red episode it could be
+            // "improving" from.
+            val improvingFromRed = downgradedFromRed && isHighSide &&
+                reading.ratePerMinute != null && reading.ratePerMinute < 0
+            val shouldAudiblyAlert = (!isHighSide || isFastRise || isEscalatedHigh) && !improvingFromRed
 
             if (!suppressAlert && shouldAudiblyAlert) {
                 AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute)
@@ -488,33 +580,4 @@ object AlertCoordinator {
         }
     }
 
-    private data class HighSideRearm(val exceededPeak: Boolean, val climbingBack: Boolean)
-
-    /** Updates (and persists) the running peak + last-seen value for the
-     *  active high-side episode, and reports whether this update alone is
-     *  reason to re-fire: a new peak that clears the old one by at least
-     *  [RED_HIGH_REARM_THRESHOLD_MGDL] always is; climbing back up by at
-     *  least that same threshold while still within [PEAK_RETREAT_REARM_THRESHOLD]
-     *  points of the peak is (still bouncing near the danger zone); climbing
-     *  back up after a real >=20pt retreat is NOT, unless it's also a
-     *  material new peak. The peak itself still ratchets to the true running
-     *  max on every call regardless of threshold, so retreat/climb distances
-     *  stay accurate even across a run of sub-threshold noise. */
-    private fun updateHighSideTracking(prefs: SharedPreferences, value: Int): HighSideRearm {
-        val peak = prefs.getInt(KEY_RED_PEAK_VALUE, value)
-        val lastValue = prefs.getInt(KEY_RED_LAST_VALUE, value)
-
-        val exceededPeak = value - peak >= RED_HIGH_REARM_THRESHOLD_MGDL
-        val newPeak = maxOf(peak, value)
-        val retreatFromPeak = newPeak - value
-        val climbingBack = !exceededPeak &&
-            value - lastValue >= RED_HIGH_REARM_THRESHOLD_MGDL &&
-            retreatFromPeak < PEAK_RETREAT_REARM_THRESHOLD
-
-        prefs.edit {
-            putInt(KEY_RED_PEAK_VALUE, newPeak)
-            putInt(KEY_RED_LAST_VALUE, value)
-        }
-        return HighSideRearm(exceededPeak, climbingBack)
-    }
 }

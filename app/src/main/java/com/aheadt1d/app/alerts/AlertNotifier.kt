@@ -45,9 +45,8 @@ object AlertNotifier {
     // projected like AlertCoordinator's own copy does (see its doc): a
     // still-high current value that's projected to crash into the low band
     // should get the falling/low tone, not the rising/high one.
-    private const val LOW_HIGH_SPLIT = 70
-    private fun isLowSide(value: Int, projected: Int?): Boolean =
-        value <= LOW_HIGH_SPLIT || (projected != null && projected <= LOW_HIGH_SPLIT)
+    // isLowSide/LOW_HIGH_SPLIT moved to AlertThresholds.kt (2026-08-26) -
+    // shared with AlertCoordinator, see that file's doc for why.
 
     /**
      * REMOVED 2026-08-20: the full-screen takeover (RedAlertActivity) is

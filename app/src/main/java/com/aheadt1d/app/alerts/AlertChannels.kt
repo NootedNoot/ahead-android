@@ -180,8 +180,9 @@ object AlertChannels {
             // Deliberately NOT restoring the fallback alarm sound that was
             // added here earlier the same day - that existed to guarantee red
             // was never silent, which is no longer the goal for this tier.
-            // CriticalLowSiren keeps its own always-loud alarm for the
-            // genuinely critical case.
+            // (The critical-low siren that once covered the genuinely
+            // critical case was removed 2026-08-20, at the owner's request -
+            // there's nothing left standing in for it.)
             setSound(null, null)
         }
 

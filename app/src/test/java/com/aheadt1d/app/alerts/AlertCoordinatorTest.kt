@@ -52,6 +52,19 @@ class AlertCoordinatorTest {
         // between tests in the same class.
         context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit().clear().commit()
         context.getSharedPreferences("ahead_alert_channels", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences("ahead_plateau_state", Context.MODE_PRIVATE).edit().clear().commit()
+        com.aheadt1d.app.state.LatestTrendRepository.clear(context)
+    }
+
+    /** Logs a correction the way EventLogDialogs' real hook does, at whatever
+     *  glucose value determines high vs low direction - see
+     *  PlateauCoordinator.onCorrectionLogged's doc. */
+    private fun logCorrection(glucoseValue: Int, timestamp: Long = System.currentTimeMillis()) {
+        com.aheadt1d.app.state.LatestTrendRepository.updateRawReading(
+            context,
+            com.aheadt1d.app.state.RawReading(value = glucoseValue, time = timestamp, ratePerMinute = null, deltaFromPrevious = null),
+        )
+        PlateauCoordinator.onCorrectionLogged(context, timestamp)
     }
 
     private fun reading(
@@ -200,6 +213,176 @@ class AlertCoordinatorTest {
     }
 
     @Test
+    fun `high red does not re-fire on a yellow-then-red flap within the cooldown`() {
+        // 2026-08-26: real reported case - 351 red, dipped to yellow for two
+        // cycles as the rate flattened right at the boundary, then back to red
+        // 14 minutes later. Used to force-fire immediately on re-entry; must
+        // now fall through to the ordinary 45-minute cooldown instead.
+        AlertCoordinator.evaluate(context, reading(value = 351, severity = "red"), trend(1L, 351, "red"))
+        val firstTitle = redTitle()
+        assertTrue("initial high red should fire", firstTitle?.contains("351") == true)
+
+        AlertCoordinator.evaluate(context, reading(value = 354, severity = "yellow"), trend(2L, 354, "yellow"))
+        AlertCoordinator.evaluate(context, reading(value = 352, severity = "yellow"), trend(3L, 352, "yellow"))
+        AlertCoordinator.evaluate(context, reading(value = 352, severity = "red"), trend(4L, 352, "red"))
+
+        // The yellow dip cancels the interruptive red notification (existing,
+        // unrelated behavior - the persistent status notification still shows
+        // the real value throughout); what this fix actually prevents is a
+        // BRAND NEW interruptive alert firing for 352 immediately on
+        // re-entry, bypassing the 45-minute cooldown. redTitle() must
+        // therefore be neither the stale "351" content nor a freshly-posted
+        // "352" one - nothing should have force-fired.
+        assertTrue(
+            "yellow-then-red flap within the cooldown must not force an immediate re-alert",
+            redTitle()?.contains("352") != true,
+        )
+    }
+
+    @Test
+    fun `high red still fires immediately on a genuinely fresh episode from in-range`() {
+        AlertCoordinator.evaluate(context, reading(value = 150, severity = "none"), trend(1L, 150, "none"))
+        AlertCoordinator.evaluate(context, reading(value = 280, severity = "red"), trend(2L, 280, "red"))
+
+        assertTrue("a fresh episode from in-range must still fire immediately", redTitle()?.contains("280") == true)
+    }
+
+    @Test
+    fun `high red re-alert is held during correction grace while not climbing`() {
+        logCorrection(glucoseValue = 310)
+        AlertCoordinator.evaluate(context, reading(value = 351, severity = "red"), trend(1L, 351, "red"))
+        val firstTitle = redTitle()
+
+        // Backdate past the 45-min cooldown so only the correction grace is
+        // being tested here, not the plain cooldown.
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit()
+            .putLong("last_red_fired_at_ms", System.currentTimeMillis() - 46 * 60_000L)
+            .commit()
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 352, severity = "red", ratePerMinute = -0.2),
+            trend(2L, 352, "red"),
+        )
+
+        assertEquals(
+            "flat/falling within the 90-minute correction grace must not re-alert",
+            firstTitle,
+            redTitle(),
+        )
+    }
+
+    @Test
+    fun `high red re-alert fires immediately if still climbing despite a logged correction`() {
+        logCorrection(glucoseValue = 310)
+        AlertCoordinator.evaluate(context, reading(value = 351, severity = "red"), trend(1L, 351, "red"))
+
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit()
+            .putLong("last_red_fired_at_ms", System.currentTimeMillis() - 46 * 60_000L)
+            .commit()
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 370, severity = "red", ratePerMinute = 1.2),
+            trend(2L, 370, "red"),
+        )
+
+        assertTrue(
+            "still climbing despite a logged correction must alert immediately",
+            redTitle()?.contains("370") == true,
+        )
+    }
+
+    @Test
+    fun `high red re-alert resumes once past the 90-minute correction grace`() {
+        logCorrection(glucoseValue = 310, timestamp = System.currentTimeMillis() - 91 * 60_000L)
+        AlertCoordinator.evaluate(context, reading(value = 351, severity = "red"), trend(1L, 351, "red"))
+
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit()
+            .putLong("last_red_fired_at_ms", System.currentTimeMillis() - 46 * 60_000L)
+            .commit()
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 352, severity = "red", ratePerMinute = -0.2),
+            trend(2L, 352, "red"),
+        )
+
+        assertTrue(
+            "past the 90-minute grace, the plain cooldown heartbeat should resume",
+            redTitle()?.contains("352") == true,
+        )
+    }
+
+    @Test
+    fun `low red re-alert is held during 30-minute correction grace while flat`() {
+        logCorrection(glucoseValue = 55)
+        AlertCoordinator.evaluate(context, reading(value = 55, severity = "red", ratePerMinute = 0.0), trend(1L, 55, "red"))
+        val firstTitle = redTitle()
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 56, severity = "red", ratePerMinute = 0.0),
+            trend(1L, 55, "red"),
+        )
+
+        assertEquals(
+            "flat within the 30-minute low correction grace must not re-alert",
+            firstTitle,
+            redTitle(),
+        )
+    }
+
+    @Test
+    fun `low red re-alert fires if still falling despite a logged correction`() {
+        logCorrection(glucoseValue = 55)
+        AlertCoordinator.evaluate(context, reading(value = 55, severity = "red", ratePerMinute = 0.0), trend(1L, 55, "red"))
+
+        // Falling counts as "held state just stopped" (same MIN_REALERT_GAP_MS
+        // floor the low-recovery path already uses, see fireRedIfWarranted) -
+        // backdate past it so this test isolates the direction check, not the
+        // noise floor.
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit()
+            .putLong("last_red_fired_at_ms", System.currentTimeMillis() - 6 * 60_000L)
+            .commit()
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 50, severity = "red", ratePerMinute = -1.0),
+            trend(1L, 55, "red"),
+        )
+
+        assertTrue(
+            "still falling despite a logged correction must alert immediately",
+            redTitle()?.contains("50") == true,
+        )
+    }
+
+    @Test
+    fun `low red re-alert resumes once past the fixed 30-minute correction grace`() {
+        logCorrection(glucoseValue = 55, timestamp = System.currentTimeMillis() - 31 * 60_000L)
+        AlertCoordinator.evaluate(context, reading(value = 55, severity = "red", ratePerMinute = 0.0), trend(1L, 55, "red"))
+
+        // Grace already expired, so this is exercising the plain
+        // RED_LOW_REALERT_COOLDOWN_MS heartbeat, not the correction grace -
+        // backdate past it too.
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit()
+            .putLong("last_red_fired_at_ms", System.currentTimeMillis() - 16 * 60_000L)
+            .commit()
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 56, severity = "red", ratePerMinute = 0.0),
+            trend(1L, 55, "red"),
+        )
+
+        assertTrue(
+            "past the fixed 30-minute grace, the plain heartbeat should resume",
+            redTitle()?.contains("56") == true,
+        )
+    }
+
+    @Test
     fun `signal lost fires immediately and re-fires only after the cooldown elapses`() {
         val stale1 = GlucoseDisplayState.Stale(
             lastValue = 90, lastReadingTime = 0L, ageMinutes = 20, lastArrow = GlucoseTrendArrow.FLAT,
@@ -228,6 +411,67 @@ class AlertCoordinatorTest {
         assertTrue(
             "expected a re-fire reflecting the new age after cooldown, got: ${redTitle()}",
             redTitle()?.contains("36m") == true,
+        )
+    }
+
+    @Test
+    fun `yellow downgrade from red while falling fast does not audibly alert even above 240`() {
+        // 2026-08-26, real reported case: 298 red -> 283 yellow, falling
+        // -3.1 mg/dL/min - previously force-alerted purely because 283 is
+        // still numerically >=240, with no regard for the fact that this was
+        // an already-tracked episode improving on its own.
+        AlertCoordinator.evaluate(context, reading(value = 298, severity = "red"), trend(1L, 298, "red"))
+        val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
+        context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 283, severity = "yellow", ratePerMinute = -3.1, projected = 238),
+            trend(2L, 283, "yellow"),
+        )
+
+        assertNull(
+            "a red episode improving into yellow while falling fast must not force an audible alert",
+            shadowNm.getNotification(yellowNotificationId),
+        )
+    }
+
+    @Test
+    fun `yellow downgrade from red still alerts if not actually falling`() {
+        AlertCoordinator.evaluate(context, reading(value = 298, severity = "red"), trend(1L, 298, "red"))
+        val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
+        context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
+
+        // Flat, not falling - the "improving" exception must not apply.
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 283, severity = "yellow", ratePerMinute = 0.0, projected = 283),
+            trend(2L, 283, "yellow"),
+        )
+
+        assertTrue(
+            "a red->yellow downgrade that isn't actually falling should still alert (still >=240)",
+            shadowNm.getNotification(yellowNotificationId) != null,
+        )
+    }
+
+    @Test
+    fun `a fresh yellow episode above 240 still alerts even if already falling`() {
+        // No prior red episode to be "improving" from - the exception is
+        // specific to a downgrade, not to falling-fast in general.
+        AlertCoordinator.evaluate(context, reading(value = 150, severity = "none"), trend(1L, 150, "none"))
+        val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
+        context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 250, severity = "yellow", ratePerMinute = -3.0, projected = 220),
+            trend(2L, 250, "yellow"),
+        )
+
+        assertTrue(
+            "a fresh yellow episode (no prior red) must still alert regardless of direction",
+            shadowNm.getNotification(yellowNotificationId) != null,
         )
     }
 
