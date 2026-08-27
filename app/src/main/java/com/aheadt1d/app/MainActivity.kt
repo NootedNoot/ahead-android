@@ -28,6 +28,8 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.aheadt1d.app.alerts.AlertChannels
 import com.aheadt1d.app.alerts.AlertSilenceManager
+import com.aheadt1d.app.auth.AuthPrefs
+import com.aheadt1d.app.auth.LoginActivity
 import org.aheadt1d.ratemath.RateMath
 import org.aheadt1d.ratemath.RatePoint
 import org.aheadt1d.ratemath.SeverityEngine
@@ -92,6 +94,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Checked BEFORE the wizard, deliberately: AuthPrefs.isSetUp() is
+        // "do we have a device key" (permanent, never expires - see that
+        // object's doc), not "is the app fully configured." An existing
+        // user updating onto accounts already has SetupPrefs.isComplete =
+        // true and gets sent straight through Login back to the dashboard,
+        // no wizard replay; a fresh install goes Login -> Wizard ->
+        // Dashboard. Either way this ordering means the wizard never has to
+        // know or care about login state.
+        if (!AuthPrefs.isSetUp(this)) {
+            startActivity(LoginActivity.createIntent(this))
+            finish()
+            return
+        }
 
         // First launch (or setup never completed): hand off to the guided
         // wizard and don't build the dashboard this time around.

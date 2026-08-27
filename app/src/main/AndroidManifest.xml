@@ -15,6 +15,15 @@
     <permission
         android:name="com.aheadt1d.app.permission.RECEIVE_GLUCOSE_BROADCAST"
         android:protectionLevel="signature" />
+    <!-- Defining a custom permission does NOT implicitly grant it to the
+         defining app itself - PackageManager still requires an explicit
+         uses-permission before this app's own GlucoseBroadcastReceiver is
+         actually held to grant it (confirmed live 2026-08-25: every delivery
+         attempt from AheadBLE was rejected with "Permission Denial: receiving
+         ... requires ... due to sender com.ahead.ble" even though both apps
+         share the same debug-keystore signature - the receiver simply never
+         held the permission it was supposedly protected by). -->
+    <uses-permission android:name="com.aheadt1d.app.permission.RECEIVE_GLUCOSE_BROADCAST" />
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.health.READ_BLOOD_GLUCOSE" />
@@ -138,6 +147,10 @@
 
         <activity
             android:name=".upload.UploadSettingsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".auth.LoginActivity"
             android:exported="false" />
 
         <service

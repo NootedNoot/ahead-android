@@ -195,7 +195,7 @@ object GlucoseCheckRunner {
         }
 
         return try {
-            val responseJson = BackendClient.postCheckTrend(body)
+            val responseJson = BackendClient.postCheckTrend(context, body)
             // Dumps the full payload (glucose value, severity, rate, guesses) -
             // never in release, where a bugreport/logcat pull would otherwise
             // expose real health data.
