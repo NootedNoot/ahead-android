@@ -157,6 +157,10 @@
             android:name=".account.AccountSettingsActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".sharing.ManageSharingActivity"
+            android:exported="false" />
+
         <service
             android:name=".notifications.GlucoseStatusService"
             android:exported="false"

@@ -46,12 +46,8 @@ class AccountSettingsActivity : AppCompatActivity() {
         findViewById<View>(R.id.backButton).setOnClickListener { finish() }
         emailText.text = AuthPrefs.email(this) ?: "—"
 
-        // ManageSharingActivity lands in the next pass (phase 3e) - referenced
-        // by class name so this screen compiles and is fully testable on its
-        // own before that class exists, same pattern MainActivity already
-        // uses for its debug-only screens.
         findViewById<View>(R.id.manageSharingRow).setOnClickListener {
-            startActivity(Intent().setClassName(packageName, "$packageName.sharing.ManageSharingActivity"))
+            startActivity(com.aheadt1d.app.sharing.ManageSharingActivity.createIntent(this))
         }
 
         findViewById<View>(R.id.logOutButton).setOnClickListener { confirmLogOut() }
