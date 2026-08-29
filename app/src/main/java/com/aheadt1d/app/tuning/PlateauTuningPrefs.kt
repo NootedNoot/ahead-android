@@ -2,6 +2,7 @@ package com.aheadt1d.app.tuning
 
 import android.content.Context
 import androidx.core.content.edit
+import org.aheadt1d.ratemath.SeverityEngine
 
 /**
  * Debug tuning for the sustained-high-plateau (Gap 1) and correction-response
@@ -23,11 +24,14 @@ data class PlateauTuningParameters(
     // own trio rather than reusing the high-side fields above: fast carbs
     // reverse a low far quicker than insulin reverses a high, so the window
     // is much shorter and the rate check is a positive (rising) bar instead
-    // of a negative (falling) one. lowThreshold defaults to the same 70 mg/dL
-    // AlertCoordinator.LOW_HIGH_SPLIT already uses for "this is a low" -
-    // kept as its own independent constant (not imported) for the same
-    // decoupling reason highThreshold above is independent of the backend's
-    // severity classification.
+    // of a negative (falling) one. lowThreshold is a fully independent
+    // tuning knob - own SharedPreferences key, own override, never sent to
+    // the backend - that just happens to START at the same value
+    // SeverityEngine.DEFAULT_RED_LOW uses (2026-08-28: was a literal 70,
+    // one of six independent copies of this number found during a
+    // fragmentation audit). Overriding this in the debug menu does NOT
+    // touch SeverityEngine's own value or vice versa - only the DEFAULT is
+    // shared now, not the tuning mechanism.
     val lowThreshold: Int = DEFAULT_LOW_THRESHOLD,
     val lowCorrectionWindowMinutes: Int = DEFAULT_LOW_CORRECTION_WINDOW_MIN,
     val lowResponseRateThreshold: Double = DEFAULT_LOW_RESPONSE_RATE_THRESHOLD,
@@ -108,13 +112,13 @@ object PlateauTuningPrefs {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 }
 
-const val DEFAULT_HIGH_THRESHOLD = 250
+val DEFAULT_HIGH_THRESHOLD = SeverityEngine.DEFAULT_RED_HIGH
 const val DEFAULT_HIGH_DURATION_MIN = 90
 const val DEFAULT_HYSTERESIS_BUFFER = 20
 const val DEFAULT_ESCALATION_STEP_MIN = 60
 const val DEFAULT_COOLDOWN_MIN = 60
 const val DEFAULT_CORRECTION_WINDOW_MIN = 45
 const val DEFAULT_RESPONSE_RATE_THRESHOLD = -1.0
-const val DEFAULT_LOW_THRESHOLD = 70
+val DEFAULT_LOW_THRESHOLD = SeverityEngine.DEFAULT_RED_LOW
 const val DEFAULT_LOW_CORRECTION_WINDOW_MIN = 20
 const val DEFAULT_LOW_RESPONSE_RATE_THRESHOLD = 1.0

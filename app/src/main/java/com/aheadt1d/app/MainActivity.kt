@@ -32,7 +32,6 @@ import com.aheadt1d.app.auth.AuthPrefs
 import com.aheadt1d.app.auth.LoginActivity
 import org.aheadt1d.ratemath.RateMath
 import org.aheadt1d.ratemath.RatePoint
-import org.aheadt1d.ratemath.SeverityEngine
 import org.aheadt1d.ratemath.TrajectoryKind
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
@@ -65,7 +64,6 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import kotlin.math.abs
-import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -885,41 +883,46 @@ class MainActivity : AppCompatActivity() {
     // without returning anything new (dedup, downtime, a redeploy resetting
     // its in-memory state) while this stays showing "Stable" from hours ago
     // with nothing to indicate it's not live anymore.
+    /**
+     * 2026-08-28: rewritten to build the exact same GlucoseDisplayState
+     * refreshPassiveContext() already builds (via the shared toDisplayState),
+     * instead of independently re-deriving a rate (`rawReading.ratePerMinute
+     * ?: trend?.rate`, with no freshness gate on the trend fallback - unlike
+     * effectiveRatePerMinute's gated version) and calling
+     * SeverityEngine.classify() a second time. Found during a fragmentation
+     * audit: this was the only other live call site for SeverityEngine.classify
+     * in the app besides GlucoseDisplayState.toDisplayState (the one that
+     * actually drives AlertCoordinator), with slightly different inputs - the
+     * on-screen severity/projection and the alert-firing severity/projection
+     * could theoretically have disagreed. They can't now: same function, same
+     * inputs, same answer, computed once. The projection text is now the
+     * same decay-aware projection the alert pipeline uses (was previously a
+     * plain flat extrapolation here) - a real accuracy improvement, not just
+     * a dedup.
+     */
     private fun renderTrendState(trend: LatestTrend?) {
         val severityView = findViewById<TextView>(R.id.latestSeverityText)
         val projectionContainer = findViewById<View>(R.id.projectionContainer)
         val projectionView = findViewById<TextView>(R.id.projectionText)
-        // Freshness is checked against the raw Health Connect reading, not
-        // trend.date. The backend dedups check-trend calls server-side and can
-        // stop advancing trend.date for 30+ minutes while fresh HC readings
-        // keep arriving — using trend.date here would cause the trend line to
-        // show "No recent trend data" even when glucose data is perfectly live.
+
         val rawReading = LatestTrendRepository.latestRawReading.value
-        val rawIsFresh = rawReading != null && isFresh(Instant.ofEpochMilli(rawReading.time))
-        if (rawReading == null || !rawIsFresh) {
+        val blocked = LatestTrendRepository.readBlocked.value
+        val state = com.aheadt1d.app.notifications.toDisplayState(applicationContext, rawReading, trend, blocked)
+        val reading = state as? com.aheadt1d.app.notifications.GlucoseDisplayState.Reading
+        if (reading == null) {
             severityView.setText(R.string.trend_unavailable)
             projectionContainer.visibility = View.GONE
             return
         }
-        val rate = rawReading.ratePerMinute ?: trend?.rate
-        val decision = SeverityEngine.classify(
-            currentValue = rawReading.value,
-            ratePerMinute = rate,
-        )
-        val currentSeverity = decision.severity.takeIf { it != "none" }
-        severityView.text = describe(currentSeverity, rate)
+        val rate = reading.ratePerMinute
+        severityView.text = describe(reading.severity, rate)
 
-        // Projections are a straight-line extrapolation from the SAME effective
-        // rate shown in the line above (value + rate * minutes), so the number,
-        // the rate, and the projection can never disagree. Hidden when no rate
-        // is computable - a lone reading with nothing to diff against.
-        if (rate == null) {
+        if (rate == null || reading.projected == null) {
             projectionContainer.visibility = View.GONE
             return
         }
-        val projected15 = (rawReading.value + rate * PROJECTION_15_MIN).roundToInt()
-        val projected30 = (rawReading.value + rate * PROJECTION_30_MIN).roundToInt()
-        projectionView.text = "$projected15 in 15m · $projected30 in 30m"
+        projectionView.text = "${reading.projected} in ${PROJECTION_15_MIN}m" +
+            (reading.projectedExtended?.let { " · $it in ${PROJECTION_30_MIN}m" } ?: "")
         projectionContainer.visibility = View.VISIBLE
     }
 

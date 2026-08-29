@@ -4,12 +4,10 @@ import android.content.Context
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.RawReading
 import com.aheadt1d.app.state.ReadBlockedReason
-import com.aheadt1d.app.state.TREND_MATCH_TOLERANCE_MS
 import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.isStale
 import com.aheadt1d.app.state.minutesSinceReading
 import org.aheadt1d.ratemath.SeverityEngine
-import kotlin.math.abs
 
 /**
  * What the ongoing notification should show right now. Kept separate from
@@ -29,13 +27,17 @@ sealed class GlucoseDisplayState {
         // distinguish a genuine flat trend from an unknown one can check this.
         val trendIsComputed: Boolean,
         // Severity ("none"|"yellow"|"red") and 15-min-ahead projected value.
-        // Backend-scored when the latest trend is current (same tolerance gate
-        // as the arrow-rate fallback); when it's too old to trust, falls back
-        // to a local, client-side projection instead of going null - see
-        // toDisplayState below. The local fallback only ever
-        // yields "yellow", never "red" - a stale backend "red" would be worse
-        // than none, but a stale/noisy local "red" would be worse still (a
-        // false-positive full-screen takeover).
+        // 2026-08-28: always computed on-device via SeverityEngine.classify
+        // (ahead-rate-math) now - the backend's own classifySeverity
+        // (trend-detector.js) is never read here at all, so this no longer
+        // depends on the backend being reachable or its scoring being fresh.
+        // This is a real architectural shift from how this field used to
+        // work (backend-scored-when-fresh, local-yellow-only-fallback
+        // otherwise) - see AlertCoordinator's own class doc, which still
+        // needs updating to match. null means SeverityEngine classified
+        // this as "none" (not "couldn't be computed" - classify() always
+        // returns a real answer) - AlertCoordinator's own null-check reads
+        // null as "nothing to alert on."
         val severity: String?,
         val projected: Int?,
         // 30-min projection, shown next to the 15-min one in the alert text.
@@ -95,19 +97,22 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
     // dedup or network issues.
     // Fallback: backend trend rate, but only trusted when its scored timestamp
     // is close enough to this raw reading's time (within tolerance) - if it's
-    // stale/dedup'd its direction could be hours out of date.
+    // stale/dedup'd its direction could be hours out of date. This tolerance
+    // check lives inside effectiveRatePerMinute() itself now (see
+    // LatestTrendStore.kt) - a near-identical check used to be duplicated
+    // here too (as `trendIsCurrent`) back when this function also used it to
+    // decide whether to trust the backend's severity; removed 2026-08-28
+    // since severity is unconditionally local now (see below) and the
+    // duplicate check had gone dead without anyone noticing.
     // When neither source has a rate, null → fromRatePerMinute → FLAT.
     // Rate comes from the shared effectiveRatePerMinute() - the same
     // function MainActivity displays from, so the notification and the
     // main screen can never disagree about the rate for one check cycle.
-    // The same tolerance gate covers severity/projection: only trust
-    // backend fields scored around this same reading.
-    val trendIsCurrent = trend != null && abs(trend.date - raw.time) <= TREND_MATCH_TOLERANCE_MS
-
     val rate = effectiveRatePerMinute(raw, trend)
 
-    // Local, client-side 15-min-ahead projection from this poll's own
-    // raw value/rate - independent of the backend. Used only as a
+    // Severity/projection: entirely local now, via SeverityEngine
+    // (ahead-rate-math) - see the Reading.severity field doc above for why
+    // this is a real architectural shift, not just a refactor.
     val decision = SeverityEngine.classify(
         currentValue = raw.value,
         ratePerMinute = rate,

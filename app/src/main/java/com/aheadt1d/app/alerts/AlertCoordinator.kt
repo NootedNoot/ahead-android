@@ -136,8 +136,11 @@ object AlertCoordinator {
     private const val LOW_RED_CLEAR_HYSTERESIS = 80
     // Roughly the middle of the 70-180 healthy band. Only used to infer which
     // direction counts as "worse" for the current yellow episode (lower vs
-    // higher) - never to decide severity itself, which is entirely the
-    // backend's call.
+    // higher) - never to decide severity itself. (2026-08-28: that severity
+    // decision used to be "entirely the backend's call," as this comment
+    // used to say - it's entirely on-device now, via SeverityEngine in
+    // ahead-rate-math, called from GlucoseDisplayState.toDisplayState. This
+    // class never computes severity itself either way, just reacts to it.)
     private const val YELLOW_MID_POINT = 125
     // How much further into danger the 15-min projection has to move, past
     // wherever it was when the last yellow alert fired, before a second one

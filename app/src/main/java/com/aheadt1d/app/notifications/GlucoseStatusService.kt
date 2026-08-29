@@ -297,24 +297,6 @@ class GlucoseStatusService : Service() {
         // ~15-min period is only a resurrection backstop, no longer the driver.
         private const val CHECK_INTERVAL_MS = 5 * 60_000L
 
-        // Mirrors trend-detector.js's YELLOW_PROJECTED_LOW/HIGH defaults - used
-        // only for the local yellow-only fallback in toDisplayState, never as a
-        // replacement for the backend's own (tunable) classification.
-        // 2026-08-09: lowered 90->80 to match trend-detector.js - it was firing
-        // this local fallback (not just the backend) on a flat, comfortably-normal
-        // ~90-94, since this fallback runs every 5-min poll whenever the backend's
-        // ~15-min classification hasn't caught up yet, which per the doc above is
-        // often, not rare. Forgetting this hand-synced copy the first time around
-        // is exactly the trap the "duplicated on purpose" section of this repo's
-        // CLAUDE.md warns about.
-        private const val LOCAL_YELLOW_PROJECTED_LOW = 80
-        private const val LOCAL_YELLOW_PROJECTED_HIGH = 200
-
-        // Mirrors trend-detector.js's YELLOW_RATE_FALLING/RISING defaults - same
-        // hand-synced scope note as the projection thresholds above.
-        private const val LOCAL_YELLOW_RATE_FALLING = -1.5
-        private const val LOCAL_YELLOW_RATE_RISING = 2.5
-
         // toDisplayState moved to GlucoseDisplayState.kt 2026-08-25 (pure
         // refactor) so MainActivity can build the same state for
         // PassiveContextEngine without depending on this service class -

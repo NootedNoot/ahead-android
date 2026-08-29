@@ -2,6 +2,7 @@ package com.aheadt1d.app.tuning
 
 import android.content.Context
 import androidx.core.content.edit
+import org.aheadt1d.ratemath.SeverityEngine
 
 /** Debug tuning persisted on the phone and attached only to debug backend checks. */
 data class TuningParameters(
@@ -62,15 +63,21 @@ object TuningPrefs {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 }
 
-// 2026-08-11: was 90, one of the three hand-synced copies of this threshold
-// (see the workspace CLAUDE.md's "duplicated on purpose" section) missed
-// when the backend/GlucoseStatusService copies were lowered to 80 on
-// 2026-08-08. GlucoseCheckRunner sends this value to the backend as an
-// override on every check, so a stale copy here silently reintroduced the
-// original flat-90s over-alerting the 80 default was meant to fix.
-const val DEFAULT_YELLOW_LOW = 80
-const val DEFAULT_YELLOW_HIGH = 200
-const val DEFAULT_RED_LOW = 70
-const val DEFAULT_RED_HIGH = 250
+// 2026-08-11: this was 90, one of three hand-synced copies of this
+// threshold that missed a sync when the backend/GlucoseStatusService copies
+// were lowered to 80 on 2026-08-08 - a stale copy here silently
+// reintroduced the original flat-90s over-alerting the 80 default was meant
+// to fix. That incident is exactly why, 2026-08-28, these four now read
+// from SeverityEngine (ahead-rate-math) instead of redeclaring their own
+// literals - a fragmentation audit found SIX independent copies of these
+// same numbers across this app and ahead-backend, one of which (a
+// different one, SeverityEngine's own pre-fix value) had ALREADY silently
+// drifted again (260 vs the correct 250). One source of truth now; these
+// still exist as separate constants only so debug tuning's coerceIn bounds
+// and this file's own doc/call sites don't need touching.
+val DEFAULT_YELLOW_LOW = SeverityEngine.DEFAULT_YELLOW_LOW
+val DEFAULT_YELLOW_HIGH = SeverityEngine.DEFAULT_YELLOW_HIGH
+val DEFAULT_RED_LOW = SeverityEngine.DEFAULT_RED_LOW
+val DEFAULT_RED_HIGH = SeverityEngine.DEFAULT_RED_HIGH
 const val DEFAULT_EXTENDED_MINUTES = 30
 const val DEFAULT_SMOOTHING_INTERVALS = 2
