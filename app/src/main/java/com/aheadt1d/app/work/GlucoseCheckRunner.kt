@@ -117,6 +117,18 @@ object GlucoseCheckRunner {
         // staleness check on a much older LatestTrend.date even though fresh
         // readings keep arriving.
         points.lastOrNull()?.let { latest ->
+            // Any point in the trailing POST_HYPO_RECOVERY_GRACE_WINDOW_MS (40
+            // min) at or below RECOVERING_FROM_LOW_TRIGGER_MGDL (80) - the
+            // SAME window/threshold SeverityEngine's grace period and
+            // trend-detector.js's processNewReading both use. WINDOW_MINUTES
+            // above (45) already covers this, so no extra Health Connect read
+            // needed. Found during a fragmentation audit that this was never
+            // actually computed anywhere on the on-device path - the grace
+            // period existed and was tested but silently inert.
+            val recoveringFromLow = points.any { p ->
+                p.sgv <= org.aheadt1d.ratemath.SeverityEngine.RECOVERING_FROM_LOW_TRIGGER_MGDL &&
+                    java.time.Duration.between(p.time, latest.time).toMillis() <= org.aheadt1d.ratemath.SeverityEngine.POST_HYPO_RECOVERY_GRACE_WINDOW_MS
+            }
             LatestTrendRepository.updateRawReading(
                 context,
                 RawReading(
@@ -129,7 +141,8 @@ object GlucoseCheckRunner {
                     // had something newer than the fallback (shouldn't happen
                     // given the consumeIfNewerThan gate above, but not assumed),
                     // this stays false rather than mislabeling a real HC point.
-                    wasBroadcastSupplemented = usedBroadcastFallback && latest.time.toEpochMilli() == fallback?.timestampMillis
+                    wasBroadcastSupplemented = usedBroadcastFallback && latest.time.toEpochMilli() == fallback?.timestampMillis,
+                    recoveringFromLow = recoveringFromLow
                 )
             )
         }

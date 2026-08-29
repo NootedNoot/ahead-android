@@ -164,7 +164,20 @@ data class RawReading(
     // that's a real follow-up, not done here - but the data layer records the
     // distinction rather than silently treating it as equivalent to a
     // verified read, per the owner's explicit direction.
-    val wasBroadcastSupplemented: Boolean = false
+    val wasBroadcastSupplemented: Boolean = false,
+    // ADDED 2026-08-29: whether any reading in the trailing 40 minutes was
+    // <= 80 mg/dL - the exact trigger SeverityEngine's post-hypo recovery
+    // grace period needs (see its RECOVERING_FROM_LOW_TRIGGER_MGDL/
+    // POST_HYPO_RECOVERY_GRACE_WINDOW_MS). Computed once in
+    // GlucoseCheckRunner (where the reading-history window is already being
+    // read for the backend POST) rather than re-derived at every call site.
+    // Found during a fragmentation audit that GlucoseDisplayState never
+    // actually passed this to SeverityEngine.classify() at all - the whole
+    // grace-period feature was built and tested but silently inert on the
+    // real device. Defaults false so pre-existing persisted prefs (written
+    // before this field existed) degrade to "not recovering," the same
+    // behavior as before this fix - never a false positive from a missing key.
+    val recoveringFromLow: Boolean = false
 )
 
 /**
@@ -252,6 +265,7 @@ object RawReadingStore {
     private const val KEY_RATE = "rate_per_minute"
     private const val KEY_DELTA = "delta_from_previous"
     private const val KEY_BROADCAST_SUPPLEMENTED = "was_broadcast_supplemented"
+    private const val KEY_RECOVERING_FROM_LOW = "recovering_from_low"
     private const val NO_DELTA = Int.MIN_VALUE
 
     fun save(context: Context, reading: RawReading) {
@@ -261,6 +275,7 @@ object RawReadingStore {
             putFloat(KEY_RATE, reading.ratePerMinute?.toFloat() ?: Float.NaN)
             putInt(KEY_DELTA, reading.deltaFromPrevious ?: NO_DELTA)
             putBoolean(KEY_BROADCAST_SUPPLEMENTED, reading.wasBroadcastSupplemented)
+            putBoolean(KEY_RECOVERING_FROM_LOW, reading.recoveringFromLow)
         }
     }
 
@@ -276,7 +291,8 @@ object RawReadingStore {
             deltaFromPrevious = if (delta == NO_DELTA) null else delta,
             // getBoolean's default (false) is also the right answer for prefs
             // written before this key existed - not just a placeholder.
-            wasBroadcastSupplemented = prefs.getBoolean(KEY_BROADCAST_SUPPLEMENTED, false)
+            wasBroadcastSupplemented = prefs.getBoolean(KEY_BROADCAST_SUPPLEMENTED, false),
+            recoveringFromLow = prefs.getBoolean(KEY_RECOVERING_FROM_LOW, false)
         )
     }
 

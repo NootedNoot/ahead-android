@@ -113,9 +113,15 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
     // Severity/projection: entirely local now, via SeverityEngine
     // (ahead-rate-math) - see the Reading.severity field doc above for why
     // this is a real architectural shift, not just a refactor.
+    // recoveringFromLow is computed once in GlucoseCheckRunner (where the
+    // reading-history window is already being read) and persisted onto
+    // RawReading - see that field's own doc for why this wiring was missing
+    // entirely until 2026-08-29, and why fixing it here (not re-deriving
+    // history in this function) is the right place.
     val decision = SeverityEngine.classify(
         currentValue = raw.value,
         ratePerMinute = rate,
+        recoveringFromLow = raw.recoveringFromLow,
     )
 
     // Hard safety floor: <= 60 is always RED immediately
