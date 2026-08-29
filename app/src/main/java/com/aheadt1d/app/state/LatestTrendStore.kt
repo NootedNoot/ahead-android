@@ -177,7 +177,43 @@ data class RawReading(
     // real device. Defaults false so pre-existing persisted prefs (written
     // before this field existed) degrade to "not recovering," the same
     // behavior as before this fix - never a false positive from a missing key.
-    val recoveringFromLow: Boolean = false
+    val recoveringFromLow: Boolean = false,
+    // ADDED 2026-08-29 (the "smarter math" wiring pass):
+    //
+    // recentRates - up to the last 3 point-to-point rates (oldest -> newest),
+    // exactly what SeverityEngine.assessRateTrajectory needs to classify
+    // DECELERATING/NOISY. Found DURING this pass that GlucoseDisplayState's
+    // real call to SeverityEngine.classify() never passed this at all - it
+    // silently defaulted to emptyList(), which means trajectory
+    // classification (and therefore decay-based projection AND noisy-spike
+    // RED suppression) has NEVER actually engaged on a real device, despite
+    // being fully built and tested. This is the single most consequential
+    // gap found this session - fixing it is also a prerequisite for
+    // TreatmentEffectWindow's physiological decay to ever have anything to
+    // apply to (it only matters inside the DECELERATING branch).
+    //
+    // severityRatePerMinute - RateConsensus's median of three independent
+    // rate estimates (2-point slope, Kalman filter, linear regression),
+    // used ONLY to feed SeverityEngine's severity/projection decision - the
+    // DISPLAYED rate/arrow (this class's own [ratePerMinute] field) stays
+    // exactly the raw 2-point number it's always been, so what someone sees
+    // on screen never changes, only what quietly drives the alert decision
+    // underneath it gets more robust to any single method's blind spot.
+    //
+    // excursionDurationMinutes - how long the current low/high excursion has
+    // actually been running, feeding TreatmentEffectWindow's asymmetric
+    // 30-min-low/90-min-high treatment-effect trust window.
+    //
+    // All three default to empty/null so pre-existing persisted prefs
+    // degrade to the exact same behavior as before this pass (empty
+    // recentRates -> CONSISTENT trajectory, same as always; null rate/
+    // duration -> classify() falls back to the plain rate/undamped decay it
+    // already used) - never a behavior change from a missing key, only from
+    // a genuinely fresh read going through GlucoseCheckRunner's new
+    // computation.
+    val recentRates: List<Double> = emptyList(),
+    val severityRatePerMinute: Double? = null,
+    val excursionDurationMinutes: Long? = null
 )
 
 /**
@@ -266,7 +302,11 @@ object RawReadingStore {
     private const val KEY_DELTA = "delta_from_previous"
     private const val KEY_BROADCAST_SUPPLEMENTED = "was_broadcast_supplemented"
     private const val KEY_RECOVERING_FROM_LOW = "recovering_from_low"
+    private const val KEY_RECENT_RATES = "recent_rates"
+    private const val KEY_SEVERITY_RATE = "severity_rate_per_minute"
+    private const val KEY_EXCURSION_DURATION = "excursion_duration_minutes"
     private const val NO_DELTA = Int.MIN_VALUE
+    private const val NO_EXCURSION_DURATION = -1L
 
     fun save(context: Context, reading: RawReading) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
@@ -276,6 +316,15 @@ object RawReadingStore {
             putInt(KEY_DELTA, reading.deltaFromPrevious ?: NO_DELTA)
             putBoolean(KEY_BROADCAST_SUPPLEMENTED, reading.wasBroadcastSupplemented)
             putBoolean(KEY_RECOVERING_FROM_LOW, reading.recoveringFromLow)
+            // Comma-joined - SharedPreferences has no native list-of-double
+            // type, and this list is always small (at most 3 entries).
+            putString(KEY_RECENT_RATES, reading.recentRates.joinToString(","))
+            putFloat(KEY_SEVERITY_RATE, reading.severityRatePerMinute?.toFloat() ?: Float.NaN)
+            // Excursion duration is a real, meaningful 0 (currently in-band,
+            // just not IN an excursion) - can't reuse Int.MIN_VALUE-style
+            // sentinel semantics the same way delta does, since 0 here is a
+            // valid answer, not "absent." -1 is never a real duration.
+            putLong(KEY_EXCURSION_DURATION, reading.excursionDurationMinutes ?: NO_EXCURSION_DURATION)
         }
     }
 
@@ -284,6 +333,13 @@ object RawReadingStore {
         if (!prefs.contains(KEY_TIME)) return null
         val rate = prefs.getFloat(KEY_RATE, Float.NaN)
         val delta = prefs.getInt(KEY_DELTA, NO_DELTA)
+        val severityRate = prefs.getFloat(KEY_SEVERITY_RATE, Float.NaN)
+        val excursionDuration = prefs.getLong(KEY_EXCURSION_DURATION, NO_EXCURSION_DURATION)
+        val recentRates = prefs.getString(KEY_RECENT_RATES, null)
+            ?.takeIf { it.isNotBlank() }
+            ?.split(",")
+            ?.mapNotNull { it.toDoubleOrNull() }
+            ?: emptyList()
         return RawReading(
             value = prefs.getInt(KEY_VALUE, 0),
             time = prefs.getLong(KEY_TIME, 0L),
@@ -292,7 +348,10 @@ object RawReadingStore {
             // getBoolean's default (false) is also the right answer for prefs
             // written before this key existed - not just a placeholder.
             wasBroadcastSupplemented = prefs.getBoolean(KEY_BROADCAST_SUPPLEMENTED, false),
-            recoveringFromLow = prefs.getBoolean(KEY_RECOVERING_FROM_LOW, false)
+            recoveringFromLow = prefs.getBoolean(KEY_RECOVERING_FROM_LOW, false),
+            recentRates = recentRates,
+            severityRatePerMinute = if (severityRate.isNaN()) null else severityRate.toDouble(),
+            excursionDurationMinutes = if (excursionDuration == NO_EXCURSION_DURATION) null else excursionDuration
         )
     }
 

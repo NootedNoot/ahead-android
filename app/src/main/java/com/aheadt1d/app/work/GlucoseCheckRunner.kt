@@ -129,6 +129,39 @@ object GlucoseCheckRunner {
                 p.sgv <= org.aheadt1d.ratemath.SeverityEngine.RECOVERING_FROM_LOW_TRIGGER_MGDL &&
                     java.time.Duration.between(p.time, latest.time).toMillis() <= org.aheadt1d.ratemath.SeverityEngine.POST_HYPO_RECOVERY_GRACE_WINDOW_MS
             }
+
+            // The "smarter math" wiring pass (2026-08-29) - same points
+            // window, converted once to ahead-rate-math's shared RatePoint
+            // shape and reused for all three new computations below.
+            val ratePoints = points.map { org.aheadt1d.ratemath.RatePoint(it.time.toEpochMilli(), it.sgv) }
+
+            // Up to the last 3 point-to-point rates - what
+            // SeverityEngine.assessRateTrajectory needs to classify
+            // DECELERATING/NOISY at all. See RawReading.recentRates' own
+            // doc for why this was the single most consequential gap found
+            // this session - without it, trajectory classification (and
+            // therefore decay-based projection AND noisy-spike RED
+            // suppression) has never actually run on a real device.
+            val recentRates = org.aheadt1d.ratemath.RateMath.recentRates(ratePoints, count = 3)
+
+            // RateConsensus's median of three independent rate estimates
+            // (2-point slope, Kalman filter, linear regression) - used ONLY
+            // to feed SeverityEngine's severity decision below, never the
+            // displayed rate/arrow (see RawReading.severityRatePerMinute's
+            // own doc).
+            val severityRatePerMinute = org.aheadt1d.ratemath.RateConsensus
+                .consensusRate(org.aheadt1d.ratemath.RateConsensus.vote(ratePoints))
+
+            // How long the CURRENT low/high excursion has actually been
+            // running - feeds TreatmentEffectWindow's asymmetric 30-min-low/
+            // 90-min-high treatment-effect trust window. 125 mg/dL matches
+            // AlertCoordinator's own YELLOW_MID_POINT ("roughly the middle
+            // of the 70-180 healthy band") - same concept, same number, not
+            // a new one invented here.
+            val isLowSide = latest.sgv < 125
+            val excursionDurationMinutes = org.aheadt1d.ratemath.TreatmentEffectWindow
+                .excursionDurationMinutes(ratePoints, isLow = isLowSide)
+
             LatestTrendRepository.updateRawReading(
                 context,
                 RawReading(
@@ -142,7 +175,10 @@ object GlucoseCheckRunner {
                     // given the consumeIfNewerThan gate above, but not assumed),
                     // this stays false rather than mislabeling a real HC point.
                     wasBroadcastSupplemented = usedBroadcastFallback && latest.time.toEpochMilli() == fallback?.timestampMillis,
-                    recoveringFromLow = recoveringFromLow
+                    recoveringFromLow = recoveringFromLow,
+                    recentRates = recentRates,
+                    severityRatePerMinute = severityRatePerMinute,
+                    excursionDurationMinutes = excursionDurationMinutes
                 )
             )
         }

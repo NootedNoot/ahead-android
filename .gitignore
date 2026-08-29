@@ -26,3 +26,4 @@ keystore.properties
 
 # Per-module build output
 **/build/
+hs_err_pid*.log

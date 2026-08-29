@@ -1,9 +1,15 @@
 package com.aheadt1d.app.health
 
 import android.content.Context
+import androidx.annotation.VisibleForTesting
+import com.aheadt1d.app.data.GlucoseVaultDatabase
 import com.aheadt1d.app.notifications.GlucoseDisplayState
 import java.time.LocalTime
 import java.time.ZoneId
+import org.aheadt1d.ratemath.HourlyStats
+import org.aheadt1d.ratemath.PersonalAnomalyTier
+import org.aheadt1d.ratemath.PersonalBaseline
+import org.aheadt1d.ratemath.RatePoint
 
 /**
  * On-Device Passive Context Engine for Ahead.
@@ -17,6 +23,65 @@ import java.time.ZoneId
  * 4. Mathematical Curvature: Evaluates 2nd-derivative acceleration (rounding peaks vs crashes).
  */
 object PassiveContextEngine {
+
+    // Item 3 of the "smarter math" additions (2026-08-29): how unusual the
+    // current reading is for THIS person specifically, at this hour -
+    // never touches severity/AlertCoordinator (see PersonalBaseline's own
+    // class doc on why that boundary matters), purely an extra insight
+    // alongside the ones already generated below.
+    //
+    // Building the hourly baseline means grouping ~2 weeks of archive data
+    // by hour-of-day - real work, not something to redo on every 20-second
+    // UI refresh (evaluateContext runs on the main thread, called from
+    // MainActivity's chart-refresh timer). Cached and only rebuilt once
+    // this long after the last build; a stale-by-a-few-hours baseline is a
+    // fine tradeoff for a purely informational insight, unlike anything
+    // safety-relevant which never gets this kind of caching treatment
+    // anywhere else in this app.
+    private const val BASELINE_HISTORY_DAYS = 14L
+    private const val BASELINE_CACHE_TTL_MS = 6 * 60 * 60_000L
+    private var cachedBaseline: Map<Int, HourlyStats?>? = null
+    private var cachedBaselineBuiltAtMs: Long = 0L
+
+    /** Test-only: this object's baseline cache otherwise outlives any
+     *  single test (it's a Kotlin `object`, one instance per test JVM/
+     *  classloader) - call this between tests that need a fresh build
+     *  against freshly-inserted vault data, not a stale cached one from
+     *  an earlier test. */
+    @VisibleForTesting
+    fun resetBaselineCacheForTesting() {
+        cachedBaseline = null
+        cachedBaselineBuiltAtMs = 0L
+    }
+
+    private fun hourlyBaseline(context: Context): Map<Int, HourlyStats?> {
+        val now = System.currentTimeMillis()
+        cachedBaseline?.let { if (now - cachedBaselineBuiltAtMs < BASELINE_CACHE_TTL_MS) return it }
+
+        val vault = GlucoseVaultDatabase.getInstance(context)
+        val since = now - BASELINE_HISTORY_DAYS * 24 * 60 * 60_000L
+        val points = vault.getReadingsBetween(since, now).map { RatePoint(it.epochMillis, it.sgv) }
+        val baseline = PersonalBaseline.buildHourlyBaseline(points)
+
+        cachedBaseline = baseline
+        cachedBaselineBuiltAtMs = now
+        return baseline
+    }
+
+    /** Null when there isn't enough personal history for this hour yet, or
+     *  when the reading is perfectly typical - callers should treat null
+     *  as "nothing to say," same as every other insight source here. */
+    private fun personalAnomalyInsight(context: Context, reading: GlucoseDisplayState.Reading): Pair<String?, String?>? {
+        val baseline = hourlyBaseline(context)
+        val zScore = PersonalBaseline.zScore(reading.value, reading.readingTime, baseline)
+        return when (PersonalBaseline.classify(zScore)) {
+            PersonalAnomalyTier.HIGHLY_UNUSUAL ->
+                "This is quite unusual for you at this time of day" to "Your own recent pattern at this hour usually looks different"
+            PersonalAnomalyTier.SOMEWHAT_UNUSUAL ->
+                "A bit outside your usual pattern for this time of day" to null
+            else -> null
+        }
+    }
 
     enum class CircadianPhase {
         DAWN_SURGE,
@@ -66,7 +131,11 @@ object PassiveContextEngine {
         val stepsToday = StepTracker.todaySteps(context) ?: 0
         val isExerciseDrop = reading.value <= 130 && rate <= -1.5 && stepsToday > 500
 
-        // Synthesize human-readable proactive insight
+        // Synthesize human-readable proactive insight - the more specific/
+        // actionable signals above all take priority; personal-baseline
+        // unusualness is deliberately the lowest-priority fallback (a
+        // softer, more general observation than "you're exercising" or
+        // "this peak is rounding off").
         val (insight, tip) = generateInsight(
             value = reading.value,
             rate = rate,
@@ -76,7 +145,9 @@ object PassiveContextEngine {
             isExerciseDrop = isExerciseDrop,
             curvature = curvature,
             dwellMinutes = dwellMinutes
-        )
+        ).let { primary ->
+            if (primary.first != null) primary else personalAnomalyInsight(context, reading) ?: primary
+        }
 
         return ContextSummary(
             circadianPhase = phase,

@@ -113,15 +113,28 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
     // Severity/projection: entirely local now, via SeverityEngine
     // (ahead-rate-math) - see the Reading.severity field doc above for why
     // this is a real architectural shift, not just a refactor.
-    // recoveringFromLow is computed once in GlucoseCheckRunner (where the
-    // reading-history window is already being read) and persisted onto
-    // RawReading - see that field's own doc for why this wiring was missing
-    // entirely until 2026-08-29, and why fixing it here (not re-deriving
-    // history in this function) is the right place.
+    // recoveringFromLow/recentRates/severityRatePerMinute/
+    // excursionDurationMinutes are all computed once in GlucoseCheckRunner
+    // (where the reading-history window is already being read) and
+    // persisted onto RawReading - see each field's own doc for why this
+    // wiring was missing entirely until 2026-08-29 (recentRates especially -
+    // without it, trajectory classification never engaged on-device at
+    // all), and why fixing it here (not re-deriving history in this
+    // function) is the right place.
+    //
+    // ratePerMinute below deliberately uses raw.severityRatePerMinute (the
+    // RateConsensus median of three independent estimates) when available,
+    // NOT `rate` (the plain 2-point number) - but only for the SEVERITY
+    // decision. The DISPLAYED rate/arrow further down this function still
+    // uses `rate` unchanged, so what someone sees on screen never differs
+    // from what their raw sensor data says; only the invisible alert logic
+    // benefits from the more robust estimate.
     val decision = SeverityEngine.classify(
         currentValue = raw.value,
-        ratePerMinute = rate,
+        ratePerMinute = raw.severityRatePerMinute ?: rate,
+        recentRates = raw.recentRates,
         recoveringFromLow = raw.recoveringFromLow,
+        excursionDurationMinutes = raw.excursionDurationMinutes,
     )
 
     // Hard safety floor: <= 60 is always RED immediately
