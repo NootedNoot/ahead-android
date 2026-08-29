@@ -104,17 +104,45 @@
                 android:textSize="11sp"
                 android:letterSpacing="0.1" />
 
-            <EditText
-                android:id="@+id/passwordInput"
+            <FrameLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:hint="At least 10 characters"
-                android:inputType="textPassword"
-                android:textColor="@color/text_primary"
-                android:textColorHint="@color/muted"
-                android:background="@drawable/input_background"
-                android:padding="10dp" />
+                android:layout_marginTop="6dp">
+
+                <EditText
+                    android:id="@+id/passwordInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="At least 10 characters"
+                    android:inputType="textPassword"
+                    android:textColor="@color/text_primary"
+                    android:textColorHint="@color/muted"
+                    android:background="@drawable/input_background"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="44dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp" />
+
+                <!-- Reveal/hide password toggle - a plain text link rather
+                     than an icon asset, matching this screen's existing
+                     text-link style (toggleModeLink) rather than adding a
+                     new drawable just for this. -->
+                <TextView
+                    android:id="@+id/togglePasswordVisibility"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical|end"
+                    android:layout_marginEnd="10dp"
+                    android:text="Show"
+                    android:textColor="@color/accent2"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:padding="6dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="?attr/selectableItemBackgroundBorderless" />
+
+            </FrameLayout>
 
         </LinearLayout>
 

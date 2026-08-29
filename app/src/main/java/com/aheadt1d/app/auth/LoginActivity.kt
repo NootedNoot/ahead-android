@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
 import android.util.Log
 import android.view.View
 import android.widget.Button
@@ -42,6 +43,8 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var submitButton: Button
     private lateinit var progressBar: ProgressBar
     private lateinit var toggleModeLink: TextView
+    private lateinit var togglePasswordVisibility: TextView
+    private var passwordVisible = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,13 +59,30 @@ class LoginActivity : AppCompatActivity() {
         submitButton = findViewById(R.id.submitButton)
         progressBar = findViewById(R.id.progressBar)
         toggleModeLink = findViewById(R.id.toggleModeLink)
+        togglePasswordVisibility = findViewById(R.id.togglePasswordVisibility)
 
         toggleModeLink.setOnClickListener {
             mode = if (mode == MODE_LOGIN) MODE_SIGNUP else MODE_LOGIN
             applyMode()
         }
+        togglePasswordVisibility.setOnClickListener { setPasswordVisible(!passwordVisible) }
         submitButton.setOnClickListener { submit() }
         applyMode()
+    }
+
+    /** Changing inputType resets the cursor to the start unless explicitly
+     *  restored - re-selecting the end after the swap keeps typing/editing
+     *  from feeling like it jumped somewhere unexpected. */
+    private fun setPasswordVisible(visible: Boolean) {
+        passwordVisible = visible
+        val selectionEnd = passwordInput.text?.length ?: 0
+        passwordInput.inputType = if (visible) {
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+        } else {
+            InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        passwordInput.setSelection(selectionEnd)
+        togglePasswordVisibility.text = if (visible) "Hide" else "Show"
     }
 
     private fun applyMode() {
