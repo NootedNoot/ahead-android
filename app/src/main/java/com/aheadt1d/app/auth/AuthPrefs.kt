@@ -31,6 +31,7 @@ object AuthPrefs {
     private const val KEY_DISPLAY_NAME = "display_name"
     private const val KEY_DEVICE_API_KEY = "device_api_key"
     private const val KEY_DEVICE_ID = "device_id"
+    private const val KEY_IS_OWNER = "is_owner"
 
     /** The one thing MainActivity's cold-start gate checks - see this
      *  object's class doc for why it's the device key, not the JWT. */
@@ -42,15 +43,25 @@ object AuthPrefs {
     fun deviceApiKey(context: Context): String? = prefs(context).getString(KEY_DEVICE_API_KEY, null)
     fun deviceId(context: Context): String? = prefs(context).getString(KEY_DEVICE_ID, null)
 
+    /** 2026-08-29: true only for the specific backend account
+     *  ahead-backend's admin panel has flagged as Ryan's own (see
+     *  users.is_owner's schema.sql comment) - gates the debug menu's
+     *  visibility ALONGSIDE BuildConfig.DEBUG (both required), not
+     *  instead of it. Defaults false, same as the server-side column, so
+     *  a real caregiver account logged into a debug build never sees
+     *  developer tooling meant only for Ryan. */
+    fun isOwner(context: Context): Boolean = prefs(context).getBoolean(KEY_IS_OWNER, false)
+
     /** Shown in the drawer header / Account Settings - display name if the
      *  user set one at signup, else falls back to their email. */
     fun displayLabel(context: Context): String? = displayName(context) ?: email(context)
 
-    fun saveSession(context: Context, jwt: String, email: String, displayName: String?) {
+    fun saveSession(context: Context, jwt: String, email: String, displayName: String?, isOwner: Boolean) {
         prefs(context).edit {
             putString(KEY_JWT, jwt)
             putString(KEY_EMAIL, email)
             putString(KEY_DISPLAY_NAME, displayName)
+            putBoolean(KEY_IS_OWNER, isOwner)
         }
     }
 

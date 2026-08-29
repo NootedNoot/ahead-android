@@ -159,6 +159,7 @@ object AuthClient {
             // the drawer header rendered the word "null" instead of the
             // email fallback. isNull() is the only reliable check here.
             displayName = if (user.isNull("displayName")) null else user.getString("displayName"),
+            isOwner = user.optBoolean("isOwner", false),
         )
     }
 }

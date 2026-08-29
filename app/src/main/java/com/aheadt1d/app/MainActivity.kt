@@ -232,7 +232,11 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.drawerUserLabel).text = AuthPrefs.displayLabel(this) ?: ""
         updateDrawerSilenceLabel()
 
-        if (BuildConfig.DEBUG) {
+        // Both conditions required, deliberately - see AuthPrefs.isOwner's
+        // doc: BuildConfig.DEBUG alone would show developer tooling to any
+        // caregiver/family account that happens to be logged into a debug
+        // build Ryan handed them for testing.
+        if (BuildConfig.DEBUG && AuthPrefs.isOwner(this)) {
             findViewById<View>(R.id.drawerDebugSectionLabel).visibility = View.VISIBLE
             findViewById<View>(R.id.drawerDebugMenuItem).visibility = View.VISIBLE
             findViewById<View>(R.id.drawerTuningItem).visibility = View.VISIBLE
