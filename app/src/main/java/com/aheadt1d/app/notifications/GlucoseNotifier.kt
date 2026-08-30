@@ -10,6 +10,7 @@ import android.widget.RemoteViews
 import androidx.core.content.ContextCompat
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
+import com.aheadt1d.app.alerts.AlertExplainer
 import com.aheadt1d.app.state.staleGuidance
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -58,7 +59,18 @@ object GlucoseNotifier {
             is GlucoseDisplayState.Reading -> Triple(
                 NotificationIconFactory.readingIcon(context, state.value, state.arrow),
                 "${severityPrefix(state.severity)}${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}",
-                "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
+                // Alert Transparency: during yellow/red, the collapsed line
+                // becomes the plain-language "why" (AlertExplainer) instead
+                // of the raw rate/projection numbers - those move to the
+                // expanded view below, which already exists as this
+                // notification's own "why am I seeing this" affordance
+                // (tap/swipe to expand). Severity "none" is unchanged - no
+                // alert to explain, so the technical line stays as-is.
+                if (state.severity == "red" || state.severity == "yellow") {
+                    "${AlertExplainer.oneLiner(state.value, state.ratePerMinute, state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
+                } else {
+                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
+                }
             )
             is GlucoseDisplayState.Stale -> Triple(
                 NotificationIconFactory.warningIcon(context),

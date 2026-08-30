@@ -470,7 +470,7 @@ object AlertCoordinator {
             // least that long since the last actual alert.
             val heldJustStopped = wasHeld && !held && now - lastRedFiredAt >= MIN_REALERT_GAP_MS
             if ((forceFire || heldJustStopped || now - lastRedFiredAt >= RED_LOW_REALERT_COOLDOWN_MS) && !suppressAlert) {
-                AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering)
+                AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering, projectedExtended = reading.projectedExtended)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
             }
             return
@@ -499,7 +499,7 @@ object AlertCoordinator {
         }
 
         if ((forceFire || now - lastRedFiredAt >= RED_HIGH_REALERT_COOLDOWN_MS) && !suppressAlert) {
-            AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false)
+            AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false, projectedExtended = reading.projectedExtended)
             prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
         }
     }
@@ -565,7 +565,7 @@ object AlertCoordinator {
             val shouldAudiblyAlert = (!isHighSide || isFastRise || isEscalatedHigh) && !improvingFromRed
 
             if (!suppressAlert && shouldAudiblyAlert) {
-                AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute)
+                AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute, projectedExtended = reading.projectedExtended)
             }
             if (projected != null) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
             return

@@ -59,11 +59,25 @@ object AlertNotifier {
      *   expected (see AlertCoordinator's low-recovery handling) - the person
      *   is already being warned and is trending back to safety, so this
      *   fires calmer copy ("recovering") instead of "URGENT check now".
+     * @param projectedExtended the 30-min projection, for AlertExplainer's
+     *   one-liner - see that class's own doc for when it picks this over
+     *   the 15-min [projected] window. Optional/nullable so existing debug
+     *   or test call sites that don't have it keep compiling unchanged.
      */
-    fun showRedAlert(context: Context, value: Int, projected: Int?, rate: Double?, recovering: Boolean = false) {
+    fun showRedAlert(context: Context, value: Int, projected: Int?, rate: Double?, recovering: Boolean = false, projectedExtended: Int? = null) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
+
+        // Alert Transparency: the plain-language "why" (AlertExplainer),
+        // read-only against the same numbers already driving this alert -
+        // see that class's own doc. The detail line backs the notification's
+        // native expand-to-see-more affordance (BigTextStyle) rather than a
+        // dedicated screen, since the full-screen takeover this alert used
+        // to have (RedAlertActivity) was removed 2026-08-20 at the owner's
+        // own request - this is the real "alert screen" now.
+        val explanation = AlertExplainer.oneLiner(value, rate, projected, projectedExtended)
+        val detail = AlertExplainer.detailLine(value, rate, projected, projectedExtended)
 
         val builder = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, arrow))
@@ -75,15 +89,16 @@ object AlertNotifier {
             // hiding the number behind "notification hidden" would
             // defeat the point.
             .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setStyle(Notification.BigTextStyle().bigText(detail))
 
         if (recovering) {
             builder
                 .setContentTitle("🟠 Still low: $value mg/dL, rising")
-                .setContentText("${projectionLine(projected)} — keep monitoring")
+                .setContentText("$explanation — keep monitoring")
         } else {
             builder
                 .setContentTitle("🔴 URGENT: $value mg/dL ${arrow.label}")
-                .setContentText("${projectionLine(projected)} — check now")
+                .setContentText("$explanation — check now")
         }
         builder.addAction(snoozeAction(context, 15))
 
@@ -118,16 +133,22 @@ object AlertNotifier {
      *  channel never sets it), default lock-screen privacy. Tone is a
      *  single directional sweep (deliberately calmer than red's three
      *  chirps) and, like the channel itself, respects DND rather than
-     *  piercing it. */
-    fun showYellowAlert(context: Context, value: Int, projected: Int?, rate: Double?) {
+     *  piercing it.
+     *
+     *  @param projectedExtended see [showRedAlert]'s matching doc. */
+    fun showYellowAlert(context: Context, value: Int, projected: Int?, rate: Double?, projectedExtended: Int? = null) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
 
+        val explanation = AlertExplainer.oneLiner(value, rate, projected, projectedExtended)
+        val detail = AlertExplainer.detailLine(value, rate, projected, projectedExtended)
+
         val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, arrow))
             .setContentTitle("⚠️ $value mg/dL ${arrow.label}")
-            .setContentText("${projectionLine(projected)} — keep an eye on it")
+            .setContentText("$explanation — keep an eye on it")
+            .setStyle(Notification.BigTextStyle().bigText(detail))
             .setCategory(Notification.CATEGORY_STATUS)
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.high))
