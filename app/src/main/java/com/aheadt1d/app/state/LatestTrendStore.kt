@@ -213,7 +213,15 @@ data class RawReading(
     // computation.
     val recentRates: List<Double> = emptyList(),
     val severityRatePerMinute: Double? = null,
-    val excursionDurationMinutes: Long? = null
+    val excursionDurationMinutes: Long? = null,
+    // ADDED 2026-08-30: whether RateConsensus's three independent rate
+    // estimates agreed with each other (see SeverityEngine.classify's
+    // ratesAgree param). Defaults true for the same reason severity RatePer
+    // Minute-adjacent fields do - a pre-existing persisted RawReading
+    // written before this field existed should degrade to "don't suppress
+    // RED on this basis," not silently gain a new suppression path it was
+    // never evaluated against.
+    val rateMethodsAgree: Boolean = true
 )
 
 /**
@@ -305,6 +313,7 @@ object RawReadingStore {
     private const val KEY_RECENT_RATES = "recent_rates"
     private const val KEY_SEVERITY_RATE = "severity_rate_per_minute"
     private const val KEY_EXCURSION_DURATION = "excursion_duration_minutes"
+    private const val KEY_RATE_METHODS_AGREE = "rate_methods_agree"
     private const val NO_DELTA = Int.MIN_VALUE
     private const val NO_EXCURSION_DURATION = -1L
 
@@ -325,6 +334,7 @@ object RawReadingStore {
             // sentinel semantics the same way delta does, since 0 here is a
             // valid answer, not "absent." -1 is never a real duration.
             putLong(KEY_EXCURSION_DURATION, reading.excursionDurationMinutes ?: NO_EXCURSION_DURATION)
+            putBoolean(KEY_RATE_METHODS_AGREE, reading.rateMethodsAgree)
         }
     }
 
@@ -351,7 +361,10 @@ object RawReadingStore {
             recoveringFromLow = prefs.getBoolean(KEY_RECOVERING_FROM_LOW, false),
             recentRates = recentRates,
             severityRatePerMinute = if (severityRate.isNaN()) null else severityRate.toDouble(),
-            excursionDurationMinutes = if (excursionDuration == NO_EXCURSION_DURATION) null else excursionDuration
+            excursionDurationMinutes = if (excursionDuration == NO_EXCURSION_DURATION) null else excursionDuration,
+            // Default true (permissive) for prefs written before this key
+            // existed - matches RawReading.rateMethodsAgree's own default.
+            rateMethodsAgree = prefs.getBoolean(KEY_RATE_METHODS_AGREE, true)
         )
     }
 

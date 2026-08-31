@@ -135,6 +135,7 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
         recentRates = raw.recentRates,
         recoveringFromLow = raw.recoveringFromLow,
         excursionDurationMinutes = raw.excursionDurationMinutes,
+        ratesAgree = raw.rateMethodsAgree,
     )
 
     // Hard safety floor: <= 60 is always RED immediately

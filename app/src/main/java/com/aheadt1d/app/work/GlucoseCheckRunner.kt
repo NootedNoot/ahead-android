@@ -148,9 +148,18 @@ object GlucoseCheckRunner {
             // (2-point slope, Kalman filter, linear regression) - used ONLY
             // to feed SeverityEngine's severity decision below, never the
             // displayed rate/arrow (see RawReading.severityRatePerMinute's
-            // own doc).
-            val severityRatePerMinute = org.aheadt1d.ratemath.RateConsensus
-                .consensusRate(org.aheadt1d.ratemath.RateConsensus.vote(ratePoints))
+            // own doc). Reuses one vote() call for both the median AND the
+            // agreement check below, rather than recomputing all three
+            // methods twice.
+            val rateVote = org.aheadt1d.ratemath.RateConsensus.vote(ratePoints)
+            val severityRatePerMinute = org.aheadt1d.ratemath.RateConsensus.consensusRate(rateVote)
+            // ADDED 2026-08-30: whether the three methods actually agree -
+            // built and tested since the "smarter math" pass but never
+            // actually read by anything until now (see RateConsensus.kt's
+            // own doc). Feeds SeverityEngine.classify's ratesAgree, which
+            // suppresses a RED escalation the same way a NOISY trajectory
+            // already does - see that param's own doc for the reasoning.
+            val rateMethodsAgree = org.aheadt1d.ratemath.RateConsensus.estimatesAgree(rateVote)
 
             // How long the CURRENT low/high excursion has actually been
             // running - feeds TreatmentEffectWindow's asymmetric 30-min-low/
@@ -178,7 +187,8 @@ object GlucoseCheckRunner {
                     recoveringFromLow = recoveringFromLow,
                     recentRates = recentRates,
                     severityRatePerMinute = severityRatePerMinute,
-                    excursionDurationMinutes = excursionDurationMinutes
+                    excursionDurationMinutes = excursionDurationMinutes,
+                    rateMethodsAgree = rateMethodsAgree
                 )
             )
         }
