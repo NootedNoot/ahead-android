@@ -19,7 +19,15 @@ import java.time.format.DateTimeFormatter
  * NEVER deletes or prunes readings, holding 10+ years of full glycemic history
  * in under 15 MB of storage.
  */
-class GlucoseVaultDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+class GlucoseVaultDatabase(
+    context: Context,
+    // Test-support only: every real caller (getInstance()) uses the
+    // default and gets the one real on-device vault file. Added so
+    // GlucoseVaultDatabaseTimezoneTest can open a fresh, isolated DB per
+    // test case instead of sharing the companion's cached singleton file
+    // across test methods.
+    dbName: String = DATABASE_NAME,
+) : SQLiteOpenHelper(context, dbName, null, DATABASE_VERSION) {
 
     companion object {
         private const val TAG = "GlucoseVault"
