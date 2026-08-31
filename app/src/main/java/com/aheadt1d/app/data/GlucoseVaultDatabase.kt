@@ -206,6 +206,17 @@ class GlucoseVaultDatabase(context: Context) : SQLiteOpenHelper(context, DATABAS
     }
 
     /**
+     * Every reading ever recorded, oldest -> newest, no bound - the "give me
+     * the whole vault" query [getReadingsBetween] doesn't offer directly.
+     * ADDED 2026-08-30 for FullHistoryExporter (a debug-only "export
+     * everything" feature, see that class's own doc) - the vault's own doc
+     * already promises "10+ years... under 15 MB," so pulling the entire
+     * table into memory at once is an accepted, deliberate tradeoff for a
+     * feature that's explicitly for dev/testing use, not a hot path.
+     */
+    fun getAllReadings(): List<VaultRecord> = getReadingsBetween(0L, Long.MAX_VALUE)
+
+    /**
      * Total lifetime count of unique readings safely stored in the vault.
      */
     fun totalRecordCount(): Long {

@@ -197,6 +197,17 @@
             <Button android:id="@+id/openDoctorReportButton" style="@style/DebugButton.Ghost" android:text="Open Doctor Report" />
         </LinearLayout>
 
+        <!-- ===================== Full history export (whole vault, not the doctor report) ===================== -->
+
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="FULL HISTORY EXPORT" />
+            <TextView
+                style="@style/DebugStatusText"
+                android:text="Exports every reading GlucoseVaultDatabase has ever recorded - the entire account history, not a doctor-facing report and not one calendar day. Writes a single JSON+CSV pair to Documents/Ahead_Archive/ and opens the share sheet. Dev/testing only." />
+
+            <Button android:id="@+id/exportFullHistoryButton" style="@style/DebugButton" android:text="Export entire history" />
+        </LinearLayout>
+
         <!-- ===================== Notes history stress test ===================== -->
 
         <LinearLayout style="@style/DebugCard">

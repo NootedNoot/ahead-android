@@ -218,6 +218,40 @@ class DebugMenuActivity : AppCompatActivity() {
         findViewById<Button>(R.id.openDoctorReportButton).setOnClickListener {
             startActivity(com.aheadt1d.app.report.ReportExportActivity.createIntent(this))
         }
+
+        findViewById<Button>(R.id.exportFullHistoryButton).setOnClickListener {
+            exportFullHistory()
+        }
+    }
+
+    /**
+     * "Export everything, ever" - the whole GlucoseVaultDatabase, not one day
+     * (ArchiveBrowserActivity) and not the doctor-facing AGP report. Same
+     * FileProvider/ACTION_SEND_MULTIPLE share pattern ArchiveBrowserActivity
+     * uses for its per-day export.
+     */
+    private fun exportFullHistory() {
+        lifecycleScope.launch {
+            val (jsonFile, csvFile) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.aheadt1d.app.data.FullHistoryExporter.exportAll(applicationContext)
+            }
+            if (jsonFile == null && csvFile == null) {
+                android.widget.Toast.makeText(this@DebugMenuActivity, "Vault is empty - nothing to export", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val authority = "${com.aheadt1d.app.BuildConfig.APPLICATION_ID}.fileprovider"
+            val uris = ArrayList<android.net.Uri>()
+            jsonFile?.let { uris.add(androidx.core.content.FileProvider.getUriForFile(this@DebugMenuActivity, authority, it)) }
+            csvFile?.let { uris.add(androidx.core.content.FileProvider.getUriForFile(this@DebugMenuActivity, authority, it)) }
+
+            val shareIntent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "application/octet-stream"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                putExtra(Intent.EXTRA_SUBJECT, "Ahead full history export")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(shareIntent, "Share full history export"))
+        }
     }
 
     // ===================== Notes history stress test =====================
