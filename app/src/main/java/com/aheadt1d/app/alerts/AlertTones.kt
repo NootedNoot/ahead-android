@@ -67,10 +67,14 @@ object AlertTones {
 
     /** Single-shot, non-looping - these are for the ordinary alert tiers,
      *  which fire once per alert. Self-releases on completion/error. */
-    fun play(context: Context, tone: Tone) {
+    fun play(context: Context, tone: Tone, ignoreSilence: Boolean = false) {
         val appContext = context.applicationContext
-        if (AlertSilenceManager.isSilenced(appContext)) {
+        if (!ignoreSilence && AlertSilenceManager.isSilenced(appContext)) {
             Log.d(TAG, "Skipping tone $tone - alerts silenced")
+            return
+        }
+        if (ignoreSilence && AlertSilenceManager.isDevKillSwitchActive(appContext)) {
+            Log.d(TAG, "Skipping tone $tone - dev kill switch active")
             return
         }
         // Urgent tones (red/signal-lost) force the alarm stream to max first
@@ -81,12 +85,12 @@ object AlertTones {
         // correct, DND-bypassing notification that nobody actually heard.
         if (tone.urgent) forceAlarmVolume(appContext)
         runCatching {
-            val player = MediaPlayer.create(appContext, tone.res)
+            val attrs = if (tone.urgent) alarmAttrs else notificationAttrs
+            val player = MediaPlayer.create(appContext, tone.res, attrs, 0)
             if (player == null) {
                 Log.w(TAG, "MediaPlayer.create returned null for $tone")
                 return
             }
-            player.setAudioAttributes(if (tone.urgent) alarmAttrs else notificationAttrs)
             player.setOnCompletionListener { it.release() }
             player.setOnErrorListener { mp, _, _ -> runCatching { mp.release() }; true }
             player.start()

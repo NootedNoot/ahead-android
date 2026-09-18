@@ -1,6 +1,7 @@
 package com.aheadt1d.app.alerts
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
@@ -13,10 +14,12 @@ import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
 import com.aheadt1d.app.notifications.NotificationIconFactory
+import com.aheadt1d.app.state.DebugGlucoseOverride
 import com.aheadt1d.app.state.ReadBlockedReason
 import com.aheadt1d.app.state.staleGuidance
 import com.aheadt1d.app.voice.VoiceAlertCategory
 import com.aheadt1d.app.voice.VoiceAlertEngine
+import java.util.Locale
 
 /**
  * Builds and posts the yellow/red ALERT notifications - the interrupting
@@ -24,6 +27,7 @@ import com.aheadt1d.app.voice.VoiceAlertEngine
  * GlucoseStatusService). AlertCoordinator owns *when* these fire; this
  * object only owns what they look like.
  */
+@SuppressLint("MissingPermission")
 object AlertNotifier {
     const val RED_ALERT_NOTIFICATION_ID = 2001
     const val YELLOW_ALERT_NOTIFICATION_ID = 2002
@@ -33,12 +37,23 @@ object AlertNotifier {
     // replacement for one - see the class doc on PlateauCoordinator.
     const val PLATEAU_ALERT_NOTIFICATION_ID = 2003
     const val CORRECTION_ALERT_NOTIFICATION_ID = 2004
+    // Custom thresholds get a RANGE, not one fixed id: unlike the tiers
+    // above (one active state at a time each), Ryan can have several
+    // independent thresholds crossed simultaneously (a value one AND a rate
+    // one), and each should keep its own notification rather than clobber
+    // the others. Derived deterministically from the threshold's own id so
+    // the SAME threshold's repeat "escalated" fire replaces its own prior
+    // notification instead of stacking duplicates - see
+    // customThresholdNotificationId below.
+    private const val CUSTOM_THRESHOLD_ID_BASE = 2500
+    private const val CUSTOM_THRESHOLD_ID_RANGE = 100000
 
     private const val REQ_RED_CONTENT = 2102
     private const val REQ_YELLOW_CONTENT = 2103
     private const val REQ_SIGNAL_LOST_CONTENT = 2104
     private const val REQ_PLATEAU_CONTENT = 2105
     private const val REQ_CORRECTION_CONTENT = 2106
+    private const val REQ_CUSTOM_THRESHOLD_CONTENT = 2107
 
     // Same 70 mg/dL split AlertCoordinator keeps its own copy of - decides
     // which direction's tone plays. Also considers
@@ -64,7 +79,15 @@ object AlertNotifier {
      *   the 15-min [projected] window. Optional/nullable so existing debug
      *   or test call sites that don't have it keep compiling unchanged.
      */
-    fun showRedAlert(context: Context, value: Int, projected: Int?, rate: Double?, recovering: Boolean = false, projectedExtended: Int? = null) {
+    fun showRedAlert(
+        context: Context,
+        value: Int,
+        projected: Int?,
+        rate: Double?,
+        recovering: Boolean = false,
+        projectedExtended: Int? = null,
+        isInjected: Boolean = DebugGlucoseOverride.isActive,
+    ) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
@@ -78,8 +101,13 @@ object AlertNotifier {
         // own request - this is the real "alert screen" now.
         val explanation = AlertExplainer.oneLiner(value, rate, projected, projectedExtended)
         val detail = AlertExplainer.detailLine(value, rate, projected, projectedExtended)
+        val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$detail" else detail
+
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
 
         val builder = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
+            .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, arrow))
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.low))
@@ -89,16 +117,20 @@ object AlertNotifier {
             // hiding the number behind "notification hidden" would
             // defeat the point.
             .setVisibility(Notification.VISIBILITY_PUBLIC)
-            .setStyle(Notification.BigTextStyle().bigText(detail))
+            .setStyle(Notification.BigTextStyle().bigText(fullDetail))
+
+        if (isInjected) {
+            builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        }
 
         if (recovering) {
             builder
-                .setContentTitle("🟠 Still low: $value mg/dL, rising")
-                .setContentText("$explanation — keep monitoring")
+                .setContentTitle("${prefix}🟠 Still low: $value mg/dL, rising")
+                .setContentText("$bodyPrefix$explanation — keep monitoring")
         } else {
             builder
-                .setContentTitle("🔴 URGENT: $value mg/dL ${arrow.label}")
-                .setContentText("$explanation — check now")
+                .setContentTitle("${prefix}🔴 URGENT: $value mg/dL ${arrow.label}")
+                .setContentText("$bodyPrefix$explanation — check now")
         }
         builder.addAction(snoozeAction(context, 15))
 
@@ -122,9 +154,9 @@ object AlertNotifier {
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
         val spokenText = if (recovering) {
-            "Still low at $value, but rising. ${spokenProjection(projected)} Keep monitoring."
+            "Still low at $value, but rising. ${spokenProjection(value, projected, projectedExtended)} Keep monitoring."
         } else {
-            "Urgent. Glucose $value ${spokenDirection(rate)}. ${spokenProjection(projected)} Check now."
+            "Urgent. Glucose $value ${spokenDirection(rate)}. ${spokenProjection(value, projected, projectedExtended)} Check now."
         }
         VoiceAlertEngine.speak(context, VoiceAlertCategory.RED, spokenText)
     }
@@ -136,34 +168,51 @@ object AlertNotifier {
      *  piercing it.
      *
      *  @param projectedExtended see [showRedAlert]'s matching doc. */
-    fun showYellowAlert(context: Context, value: Int, projected: Int?, rate: Double?, projectedExtended: Int? = null) {
+    fun showYellowAlert(
+        context: Context,
+        value: Int,
+        projected: Int?,
+        rate: Double?,
+        projectedExtended: Int? = null,
+        isInjected: Boolean = DebugGlucoseOverride.isActive,
+    ) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
 
         val explanation = AlertExplainer.oneLiner(value, rate, projected, projectedExtended)
         val detail = AlertExplainer.detailLine(value, rate, projected, projectedExtended)
+        val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$detail" else detail
 
-        val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
+
+        val builder = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+            .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, arrow))
-            .setContentTitle("⚠️ $value mg/dL ${arrow.label}")
-            .setContentText("$explanation — keep an eye on it")
-            .setStyle(Notification.BigTextStyle().bigText(detail))
+            .setContentTitle("${prefix}⚠️ $value mg/dL ${arrow.label}")
+            .setContentText("$bodyPrefix$explanation — keep an eye on it")
+            .setStyle(Notification.BigTextStyle().bigText(fullDetail))
             .setCategory(Notification.CATEGORY_STATUS)
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.high))
             .setContentIntent(mainActivityIntent(context, REQ_YELLOW_CONTENT))
             .addAction(snoozeAction(context, 15))
-            .build()
+
+        if (isInjected) {
+            builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        }
+
+        val notification = builder.build()
 
         notifyIfAllowed(context) { nm -> nm.notify(YELLOW_ALERT_NOTIFICATION_ID, notification) }
 
-        AlertTones.play(context, if (isLowSide(value, projected)) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH)
+        AlertTones.play(context, if (isLowSideYellow(value, projected)) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH)
 
         VoiceAlertEngine.speak(
             context,
             VoiceAlertCategory.YELLOW,
-            "Heads up. Glucose $value ${spokenDirection(rate)}. ${spokenProjection(projected)}"
+            "Heads up. Glucose $value ${spokenDirection(rate)}. ${spokenProjection(value, projected, projectedExtended)}"
         )
     }
 
@@ -191,14 +240,22 @@ object AlertNotifier {
         lastArrow: GlucoseTrendArrow,
         ageMinutes: Long,
         blockedReason: ReadBlockedReason? = null,
+        isInjected: Boolean = DebugGlucoseOverride.isActive,
     ) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
 
-        val notification = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
+        val baseText = "Last reading $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. ${staleGuidance(blockedReason)}"
+        val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$baseText" else baseText
+
+        val builder = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
+            .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
-            .setContentTitle("🔴 No new glucose data — ${ageMinutes}m")
-            .setContentText("Last reading $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. ${staleGuidance(blockedReason)}")
+            .setContentTitle("${prefix}🔴 No new glucose data — ${ageMinutes}m")
+            .setContentText("$bodyPrefix$baseText")
+            .setStyle(Notification.BigTextStyle().bigText(fullDetail))
             .setCategory(Notification.CATEGORY_STATUS)
             // Full content on the lock screen: hiding the last-known number
             // behind "notification hidden" would defeat the point.
@@ -207,7 +264,12 @@ object AlertNotifier {
             .setColor(ContextCompat.getColor(context, R.color.low))
             .setContentIntent(mainActivityIntent(context, REQ_SIGNAL_LOST_CONTENT))
             .addAction(snoozeAction(context, 15))
-            .build()
+
+        if (isInjected) {
+            builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        }
+
+        val notification = builder.build()
 
         // Shares RED_ALERT_NOTIFICATION_ID with showRedAlert - deliberately: a
         // live glucose-red notification left over from before the blackout
@@ -248,6 +310,7 @@ object AlertNotifier {
         tier: Int,
         highThreshold: Int,
         highDurationMinutes: Int,
+        isInjected: Boolean = DebugGlucoseOverride.isActive,
     ) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
@@ -260,15 +323,27 @@ object AlertNotifier {
                 "$value mg/dL — now over $durationMinutes minutes at or above $highThreshold mg/dL, longer than before. Still hasn't started trending down."
         }
 
-        val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
+        val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$text" else text
+
+        val builder = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+            .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, GlucoseTrendArrow.FLAT))
-            .setContentTitle(title)
-            .setContentText(text)
+            .setContentTitle("$prefix$title")
+            .setContentText("$bodyPrefix$text")
+            .setStyle(Notification.BigTextStyle().bigText(fullDetail))
             .setCategory(Notification.CATEGORY_STATUS)
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, R.color.high))
             .setContentIntent(mainActivityIntent(context, REQ_PLATEAU_CONTENT))
-            .build()
+            .addAction(snoozeAction(context, 15))
+
+        if (isInjected) {
+            builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        }
+
+        val notification = builder.build()
 
         notifyIfAllowed(context) { nm -> nm.notify(PLATEAU_ALERT_NOTIFICATION_ID, notification) }
 
@@ -308,6 +383,7 @@ object AlertNotifier {
         minutesSinceCorrection: Long,
         plateauActive: Boolean,
         isLow: Boolean = false,
+        isInjected: Boolean = DebugGlucoseOverride.isActive,
     ) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
@@ -323,15 +399,27 @@ object AlertNotifier {
         // of range this is about.
         val colorRes = if (isLow) R.color.low else R.color.high
 
-        val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
+        val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$text" else text
+
+        val builder = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+            .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, GlucoseTrendArrow.FLAT))
-            .setContentTitle("⚠️ Correction logged ${minutesSinceCorrection}m ago")
-            .setContentText(text)
+            .setContentTitle("${prefix}⚠️ Correction logged ${minutesSinceCorrection}m ago")
+            .setContentText("$bodyPrefix$text")
+            .setStyle(Notification.BigTextStyle().bigText(fullDetail))
             .setCategory(Notification.CATEGORY_STATUS)
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, colorRes))
             .setContentIntent(mainActivityIntent(context, REQ_CORRECTION_CONTENT))
-            .build()
+            .addAction(snoozeAction(context, 15))
+
+        if (isInjected) {
+            builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        }
+
+        val notification = builder.build()
 
         notifyIfAllowed(context) { nm -> nm.notify(CORRECTION_ALERT_NOTIFICATION_ID, notification) }
 
@@ -351,7 +439,12 @@ object AlertNotifier {
      * with the not-responding message - most-recent-state-wins in one slot,
      * same pattern as the red/yellow/plateau alerts.
      */
-    fun showRepeatCorrectionAlert(context: Context, minutesSinceFirstCorrection: Long, isLow: Boolean = false) {
+    fun showRepeatCorrectionAlert(
+        context: Context,
+        minutesSinceFirstCorrection: Long,
+        isLow: Boolean = false,
+        isInjected: Boolean = DebugGlucoseOverride.isActive,
+    ) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
 
@@ -359,15 +452,26 @@ object AlertNotifier {
         val text = "A second correction was logged $minutesSinceFirstCorrection minutes after the first, while glucose was still $direction."
         val colorRes = if (isLow) R.color.low else R.color.high
 
-        val notification = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
+        val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$text" else text
+
+        val builder = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+            .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
-            .setContentTitle("📝 Another correction logged")
-            .setContentText(text)
+            .setContentTitle("${prefix}📝 Another correction logged")
+            .setContentText("$bodyPrefix$text")
+            .setStyle(Notification.BigTextStyle().bigText(fullDetail))
             .setCategory(Notification.CATEGORY_STATUS)
             .setAutoCancel(true)
             .setColor(ContextCompat.getColor(context, colorRes))
             .setContentIntent(mainActivityIntent(context, REQ_CORRECTION_CONTENT))
-            .build()
+
+        if (isInjected) {
+            builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        }
+
+        val notification = builder.build()
 
         notifyIfAllowed(context) { nm -> nm.notify(CORRECTION_ALERT_NOTIFICATION_ID, notification) }
 
@@ -380,6 +484,111 @@ object AlertNotifier {
     fun cancelCorrection(context: Context) {
         NotificationManagerCompat.from(context).cancel(CORRECTION_ALERT_NOTIFICATION_ID)
     }
+
+    /**
+     * The one deliberate override-silence tier in this file: a user-defined
+     * [CustomThreshold] the owner explicitly set up to punch through both
+     * Android's Do Not Disturb (the channel bypasses it, same mechanism red
+     * already uses safely) AND Ahead's own in-app silence killswitch - see
+     * the MISSING `AlertSilenceManager.isSilenced(context)` check every other
+     * function in this file starts with. That's not an oversight: the whole
+     * point of this feature (per the owner's own spec) is "this specific
+     * limit is important enough to punch through silent mode when and only
+     * when it's crossed" - not a general "ignore silence" bit. What keeps
+     * this from becoming the same "stuck loud" failure the 2026-08-20
+     * siren removal was about: CustomThresholdCoordinator only ever calls
+     * this on a FRESH_CROSS or ESCALATED outcome (see CustomThresholdMath) -
+     * never on "still crossed, nothing new," never repeating on its own, and
+     * never louder than one ordinary notification-volume sound + vibration
+     * pattern - no forced alarm stream, no lock-screen takeover, dismissible
+     * exactly like any other notification.
+     *
+     * Deliberately no voice-alert call here (unlike the other tiers above) -
+     * VoiceAlertEngine.speak() itself checks isSilenced() internally, so
+     * wiring voice in here today would either silently no-op during silence
+     * (defeating the point) or need its own separate bypass path. Left out
+     * of this first pass rather than half-wiring it; the channel's own sound
+     * + distinct vibration pattern already satisfies "force an audible
+     * alert."
+     *
+     * No snooze action (unlike red/yellow/plateau/correction above) -
+     * deliberately removed 2026-09-13: AlertSnoozeReceiver's snooze action
+     * unconditionally calls AlertSilenceManager.silence(), the ordinary
+     * silence layer this exact notification tier exists specifically to
+     * bypass. Tapping "Snooze" here would have quietly wired this
+     * override-silence alert back into the very mechanism it's designed to
+     * ignore - confusing at best. This notification already auto-cancels on
+     * tap/dismiss and won't repeat until a genuinely new crossing/escalation,
+     * so no snooze affordance is actually needed.
+     *
+     * Returns whether the notification was actually posted (false when
+     * POST_NOTIFICATIONS isn't granted, or the dev kill switch blocked it) -
+     * CustomThresholdCoordinator only persists "fired" state when this
+     * returns true, so a permission gap can't silently mark a threshold as
+     * having alerted when nobody was actually told anything.
+     */
+    fun showCustomThresholdAlert(
+        context: Context,
+        threshold: CustomThreshold,
+        currentValue: Int,
+        currentRate: Double?,
+        metric: Double?,
+        isInjected: Boolean = DebugGlucoseOverride.isActive,
+    ): Boolean {
+        // The ONE check this function needs despite skipping isSilenced() -
+        // the dev kill switch outranks even a custom threshold's own
+        // override power. See AlertSilenceManager's class doc.
+        if (AlertSilenceManager.isDevKillSwitchActive(context)) return false
+        AlertChannels.ensure(context)
+        val arrow = GlucoseTrendArrow.fromRatePerMinute(currentRate)
+        val id = customThresholdNotificationId(threshold.id)
+
+        val metricText = when (threshold.kind) {
+            CustomThreshold.Kind.VALUE -> "$currentValue mg/dL"
+            CustomThreshold.Kind.RATE -> "${if ((metric ?: 0.0) > 0) "+" else ""}${"%.1f".format(Locale.US, metric ?: 0.0)} mg/dL/min"
+        }
+
+        val text = "Now $metricText — this alert can sound even during Silence/DND"
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
+        val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$text" else text
+
+        val builder = Notification.Builder(context, AlertChannels.currentCustomChannelId(context))
+            .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
+            .setSmallIcon(NotificationIconFactory.readingIcon(context, currentValue, arrow))
+            .setContentTitle("${prefix}🔔 ${threshold.displayLabel()}")
+            .setContentText("$bodyPrefix$text")
+            .setStyle(Notification.BigTextStyle().bigText(fullDetail))
+            .setCategory(Notification.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setColor(ContextCompat.getColor(context, if (threshold.direction == CustomThreshold.Direction.FALLING) R.color.low else R.color.high))
+            .setContentIntent(mainActivityIntent(context, REQ_CUSTOM_THRESHOLD_CONTENT))
+
+        if (isInjected) {
+            builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        }
+
+        val notification = builder.build()
+
+        val posted = notifyIfAllowed(context) { nm -> nm.notify(id, notification) }
+        if (posted) {
+            val tone = if (threshold.direction == CustomThreshold.Direction.FALLING) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH
+            AlertTones.play(context, tone, ignoreSilence = true)
+        }
+        return posted
+    }
+
+    fun cancelCustomThreshold(context: Context, thresholdId: String) {
+        NotificationManagerCompat.from(context).cancel(customThresholdNotificationId(thresholdId))
+    }
+
+    // Widened 2026-09-13 from 1000 to 100000 (ids now span 2500-102499,
+    // still clear of every other fixed notification id in the app - the
+    // ongoing status notification is 1001, red/yellow/plateau/correction are
+    // 2001-2004) - shrinks the odds two distinct threshold UUIDs land on the
+    // same hash-bucket and silently clobber each other's tray notification.
+    private fun customThresholdNotificationId(thresholdId: String): Int =
+        CUSTOM_THRESHOLD_ID_BASE + (Math.floorMod(thresholdId.hashCode(), CUSTOM_THRESHOLD_ID_RANGE))
 
     fun cancelRed(context: Context) {
         NotificationManagerCompat.from(context).cancel(RED_ALERT_NOTIFICATION_ID)
@@ -410,8 +619,12 @@ object AlertNotifier {
         else -> "and holding steady"
     }
 
-    private fun spokenProjection(projected: Int?): String =
-        if (projected != null) "Projected $projected in fifteen minutes." else ""
+    private fun spokenProjection(currentValue: Int, projected: Int?, projectedExtended: Int? = null): String {
+        val (window, value) = AlertExplainer.pickProjectionWindow(currentValue, projected, projectedExtended)
+        if (value == null) return ""
+        val minWord = if (window == 30) "thirty" else "fifteen"
+        return "Projected $value in $minWord minutes."
+    }
 
     private fun mainActivityIntent(context: Context, requestCode: Int): PendingIntent =
         PendingIntent.getActivity(
@@ -437,11 +650,18 @@ object AlertNotifier {
         ).build()
     }
 
-    private inline fun notifyIfAllowed(context: Context, block: (NotificationManagerCompat) -> Unit) {
+    // Returns whether block() actually ran (permission granted) - only
+    // showCustomThresholdAlert reads this return value today (it needs to
+    // know whether to persist "fired" state - see that function's own doc);
+    // every other caller here already ignored it and keeps ignoring it,
+    // unaffected by the signature change.
+    private inline fun notifyIfAllowed(context: Context, block: (NotificationManagerCompat) -> Unit): Boolean {
         if (ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
             PackageManager.PERMISSION_GRANTED
         ) {
             block(NotificationManagerCompat.from(context))
+            return true
         }
+        return false
     }
 }

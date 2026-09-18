@@ -13,6 +13,13 @@ import com.aheadt1d.app.health.GlucosePoint
  * fully reversible (gone on process death, invisible to any other app).
  */
 object DebugGlucoseOverride {
+    const val DISCLAIMER = "🚨 * INJECTED TEST DATA ACTIVE * (NOT REAL CGM DATA) 🚨"
+    const val DISCLAIMER_SHORT = "🚨 INJECTED TEST DATA (NOT REAL)"
+    const val TITLE_PREFIX = "[INJECTED] "
+    const val BODY_PREFIX = "[INJECTED TEST DATA] "
+
+    const val ACTION_DEBUG_STATE_CHANGED = "com.aheadt1d.app.DEBUG_STATE_CHANGED"
+
     @Volatile
     var points: List<GlucosePoint>? = null
         private set
@@ -26,4 +33,13 @@ object DebugGlucoseOverride {
     }
 
     val isActive: Boolean get() = points != null
+
+    fun notifyStateChanged(context: android.content.Context) {
+        val intent = android.content.Intent(ACTION_DEBUG_STATE_CHANGED).apply {
+            putExtra("isActive", isActive)
+            putExtra("disclaimer", DISCLAIMER)
+            putExtra("disclaimerShort", DISCLAIMER_SHORT)
+        }
+        context.sendBroadcast(intent)
+    }
 }

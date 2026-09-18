@@ -7,6 +7,7 @@ import android.util.Log
 import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.state.DebugGlucoseOverride
 import com.aheadt1d.app.state.LatestTrendRepository
+import kotlinx.coroutines.launch
 
 /**
  * Debug-only. Injects a synthetic reading + matching-timestamp trend into the
@@ -43,6 +44,11 @@ class DebugTrendInjector : BroadcastReceiver() {
             com.aheadt1d.app.alerts.AlertNotifier.cancelCorrection(ctx)
             ctx.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit().clear().apply()
             DebugGlucoseOverride.clear()
+            DebugGlucoseOverride.notifyStateChanged(ctx)
+            // Best-effort: clear any test readings from ahead-backend so Ahead Lite doesn't show them
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.aheadt1d.app.network.BackendClient.deleteRecentReadings(ctx)
+            }
             LatestTrendRepository.clear(ctx)
             com.aheadt1d.app.work.WorkScheduler.runOnce(ctx)
             Log.d(TAG, "Reset all debug test state and queued live check")
@@ -63,6 +69,7 @@ class DebugTrendInjector : BroadcastReceiver() {
             com.aheadt1d.app.health.GlucosePoint(readingTime, value)
         )
         DebugGlucoseOverride.setPoints(points)
+        DebugGlucoseOverride.notifyStateChanged(ctx)
 
         DebugInjection.apply(ctx, severity, value, projected, projectedExtended, rate, ageMin)
     }

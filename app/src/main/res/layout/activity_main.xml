@@ -119,6 +119,24 @@
                 android:textStyle="bold"
                 android:visibility="gone" />
 
+            <!-- Shown whenever all alerts are silenced (either timed or permanent/indefinite).
+                 Tapping opens the silence manager dialog to adjust or cancel. -->
+            <TextView
+                android:id="@+id/silenceActiveBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/border"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="8dp"
+                android:layout_marginBottom="6dp"
+                android:text="🔕 Alerts are silenced — Tap to manage"
+                android:textAlignment="center"
+                android:textColor="@color/low"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -387,10 +405,15 @@
 
             <LinearLayout android:id="@+id/drawerSilenceItem" style="@style/DrawerItem">
                 <TextView android:id="@+id/drawerSilenceLabel" style="@style/DrawerItemLabel" android:text="🔕 Silence Alerts" />
+                <TextView android:id="@+id/drawerSilenceBadge" style="@style/DrawerBadge" android:text="MUTED" android:visibility="gone" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerVoiceItem" style="@style/DrawerItem">
                 <TextView style="@style/DrawerItemLabel" android:text="Voice Alerts" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerCustomThresholdsItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="Alarm Thresholds" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerCgmSyncItem" style="@style/DrawerItem">

@@ -126,6 +126,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".alerts.CustomThresholdsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".GraphActivity"
             android:exported="false" />
 
@@ -228,6 +232,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Debug-state provider: allows companion apps (Ahead Lite) on this device
+             to query whether synthetic/debug test data is currently active. -->
+        <provider
+            android:name=".state.DebugStateProvider"
+            android:authorities="com.aheadt1d.app.debug.provider"
+            android:exported="true" />
 
     </application>
 </manifest>

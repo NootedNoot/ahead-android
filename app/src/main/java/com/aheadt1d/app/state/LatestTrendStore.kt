@@ -222,7 +222,41 @@ data class RawReading(
     // RED on this basis," not silently gain a new suppression path it was
     // never evaluated against.
     val rateMethodsAgree: Boolean = true
-)
+) {
+    companion object {
+        fun fromPoints(
+            points: List<com.aheadt1d.app.health.GlucosePoint>,
+            wasBroadcastSupplemented: Boolean = false
+        ): RawReading? {
+            val latest = points.lastOrNull() ?: return null
+            val recoveringFromLow = points.any { p ->
+                p.sgv <= org.aheadt1d.ratemath.SeverityEngine.RECOVERING_FROM_LOW_TRIGGER_MGDL &&
+                    java.time.Duration.between(p.time, latest.time).toMillis() <= org.aheadt1d.ratemath.SeverityEngine.POST_HYPO_RECOVERY_GRACE_WINDOW_MS
+            }
+            val ratePoints = points.map { org.aheadt1d.ratemath.RatePoint(it.time.toEpochMilli(), it.sgv) }
+            val recentRates = org.aheadt1d.ratemath.RateMath.recentRates(ratePoints, count = 3)
+            val rateVote = org.aheadt1d.ratemath.RateConsensus.vote(ratePoints)
+            val severityRatePerMinute = org.aheadt1d.ratemath.RateConsensus.consensusRate(rateVote)
+            val rateMethodsAgree = org.aheadt1d.ratemath.RateConsensus.estimatesAgree(rateVote)
+            val isLowSide = latest.sgv < 125
+            val excursionDurationMinutes = org.aheadt1d.ratemath.TreatmentEffectWindow
+                .excursionDurationMinutes(ratePoints, isLow = isLowSide)
+
+            return RawReading(
+                value = latest.sgv,
+                time = latest.time.toEpochMilli(),
+                ratePerMinute = com.aheadt1d.app.health.HealthConnectManager.calculateRatePerMinute(points),
+                deltaFromPrevious = com.aheadt1d.app.health.HealthConnectManager.calculateDelta(points),
+                wasBroadcastSupplemented = wasBroadcastSupplemented,
+                recoveringFromLow = recoveringFromLow,
+                recentRates = recentRates,
+                severityRatePerMinute = severityRatePerMinute,
+                excursionDurationMinutes = excursionDurationMinutes,
+                rateMethodsAgree = rateMethodsAgree
+            )
+        }
+    }
+}
 
 /**
  * SharedPreferences-backed persistence for the latest trend result, so it

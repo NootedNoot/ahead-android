@@ -16,6 +16,7 @@ import androidx.lifecycle.lifecycleScope
 import com.aheadt1d.app.GraphActivity
 import com.aheadt1d.app.R
 import com.aheadt1d.app.alerts.AlertNotifier
+import com.aheadt1d.app.alerts.AlertTones
 import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
 import com.aheadt1d.app.state.DebugGlucoseOverride
@@ -118,19 +119,30 @@ class DebugMenuActivity : AppCompatActivity() {
     }
 
     private fun updateSilenceStatus() {
-        if (AlertSilenceManager.isSilenced(this)) {
-            val rem = AlertSilenceManager.getRemainingMinutes(this)
-            silenceStatusText.text = "Status: 🔕 SILENCED (${rem}m remaining)"
+        val killSwitchOn = AlertSilenceManager.isDevKillSwitchActive(this)
+        if (killSwitchOn) {
+            silenceStatusText.text = "Status: 🛑 DEV KILL SWITCH ACTIVE — everything blocked, including Alarm Thresholds"
+            silenceStatusText.setTextColor(ContextCompat.getColor(this, R.color.low))
+        } else if (AlertSilenceManager.isSilenced(this)) {
+            val desc = AlertSilenceManager.getSilenceDescription(this)
+            silenceStatusText.text = "Status: 🔕 $desc"
             silenceStatusText.setTextColor(ContextCompat.getColor(this, R.color.low))
         } else {
             silenceStatusText.text = "Status: Alerts Active (Normal)"
             silenceStatusText.setTextColor(ContextCompat.getColor(this, R.color.ok))
         }
+
+        findViewById<Button>(R.id.devKillSwitchButton).text =
+            if (killSwitchOn) "✅ Disable Dev Kill Switch" else "🛑 Enable Dev Kill Switch"
     }
 
     private fun setupSilenceKillswitch() {
         updateSilenceStatus()
 
+        findViewById<Button>(R.id.silencePermanentButton).setOnClickListener {
+            AlertSilenceManager.silenceIndefinitely(this)
+            updateSilenceStatus()
+        }
         findViewById<Button>(R.id.silence10mButton).setOnClickListener {
             AlertSilenceManager.silence(this, 10)
             updateSilenceStatus()
@@ -149,6 +161,10 @@ class DebugMenuActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.cancelSilenceButton).setOnClickListener {
             AlertSilenceManager.cancelSilence(this)
+            updateSilenceStatus()
+        }
+        findViewById<Button>(R.id.devKillSwitchButton).setOnClickListener {
+            AlertSilenceManager.setDevKillSwitch(this, !AlertSilenceManager.isDevKillSwitchActive(this))
             updateSilenceStatus()
         }
     }
@@ -173,10 +189,26 @@ class DebugMenuActivity : AppCompatActivity() {
         findViewById<Button>(R.id.resetAllTestStateButton).setOnClickListener {
             stopScenario(null)
             DebugGlucoseOverride.clear()
+            DebugGlucoseOverride.notifyStateChanged(this)
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                com.aheadt1d.app.network.BackendClient.deleteRecentReadings(applicationContext)
+            }
 
             AlertNotifier.cancelAlerts(this)
             AlertNotifier.cancelPlateau(this)
             AlertNotifier.cancelCorrection(this)
+            // Same reasoning as the ahead_alert_state/ahead_plateau_state
+            // clears right below: leftover fired-state from a debug
+            // injection would otherwise quietly skew how the NEXT real
+            // reading gets evaluated. Clears only currentlyCrossed/
+            // lastFiredAtMs/lastFiredAtMetric - actual threshold
+            // configuration (kind/direction/amount/label/enabled) is real
+            // user data and is left untouched, matching how this same
+            // button already leaves Voice Alert settings alone.
+            com.aheadt1d.app.alerts.CustomThresholdStore.load(this).forEach {
+                com.aheadt1d.app.alerts.AlertNotifier.cancelCustomThreshold(this, it.id)
+            }
+            com.aheadt1d.app.alerts.CustomThresholdStore.resetFiredState(this)
 
             getSharedPreferences("ahead_alert_state", MODE_PRIVATE).edit { clear() }
             getSharedPreferences("ahead_plateau_state", MODE_PRIVATE).edit { clear() }
@@ -204,6 +236,10 @@ class DebugMenuActivity : AppCompatActivity() {
         findViewById<Button>(R.id.clearInjectionButton).setOnClickListener {
             stopScenario(null)
             DebugGlucoseOverride.clear()
+            DebugGlucoseOverride.notifyStateChanged(this)
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                com.aheadt1d.app.network.BackendClient.deleteRecentReadings(applicationContext)
+            }
             refreshSystemState()
             scenarioProgressText.text = "Injected data cleared - chart now reads real Health Connect."
         }
@@ -211,6 +247,7 @@ class DebugMenuActivity : AppCompatActivity() {
             stopScenario(null)
             val points = twoWeekReportTestPoints()
             DebugGlucoseOverride.setPoints(points)
+            DebugGlucoseOverride.notifyStateChanged(this)
             refreshSystemState()
             scenarioProgressText.text =
                 "Injected ${points.size} points across 14 days (6-day gap in the middle). Open Doctor Report and generate for the last 14 days to test."
@@ -290,6 +327,7 @@ class DebugMenuActivity : AppCompatActivity() {
             val minutes = maxOf(DebugScenario.SUSTAINED_HIGH_PLATEAU.durationMinutes(), tuning.lookbackMinutes())
             val points = flatPlateauPoints(minutes)
             DebugGlucoseOverride.setPoints(points)
+            DebugGlucoseOverride.notifyStateChanged(this)
             refreshSystemState()
             scenarioProgressText.text = "Injected ${points.size} flat-high point(s) across ${minutes}m - queuing a Check now cycle..."
             com.aheadt1d.app.work.WorkScheduler.runOnce(applicationContext)
@@ -331,6 +369,7 @@ class DebugMenuActivity : AppCompatActivity() {
             com.aheadt1d.app.health.GlucosePoint(now, value)
         )
         DebugGlucoseOverride.setPoints(points)
+        DebugGlucoseOverride.notifyStateChanged(this)
 
         val severity = simpleSeverityFor(value)
         DebugInjection.apply(this, severity, value, projected = null, projectedExtended = null, rate = rate, ageMin = ageMin)
@@ -348,6 +387,7 @@ class DebugMenuActivity : AppCompatActivity() {
             for (i in fullSeries.indices) {
                 val visible = fullSeries.subList(0, i + 1)
                 DebugGlucoseOverride.setPoints(visible)
+                DebugGlucoseOverride.notifyStateChanged(this@DebugMenuActivity)
                 val latest = visible.last()
                 val rate = HealthConnectManager.calculateRatePerMinute(visible) ?: 0.0
                 val severity = simpleSeverityFor(latest.sgv)
@@ -398,14 +438,39 @@ class DebugMenuActivity : AppCompatActivity() {
     // ===================== Notification testing =====================
 
     private fun setupNotificationTesting() {
-        findViewById<Button>(R.id.forceYellowButton).setOnClickListener {
-            AlertNotifier.showYellowAlert(this, value = 150, projected = 172, rate = 1.2)
+        findViewById<Button>(R.id.forceYellowLowButton).setOnClickListener {
+            AlertNotifier.showYellowAlert(this, value = 85, projected = 75, rate = -1.5, projectedExtended = 65, isInjected = true)
             afterForcedAlert()
+        }
+        findViewById<Button>(R.id.forceYellowHighButton).setOnClickListener {
+            AlertNotifier.showYellowAlert(this, value = 150, projected = 172, rate = 1.2, projectedExtended = 195, isInjected = true)
+            afterForcedAlert()
+        }
+        findViewById<Button>(R.id.playWarnLowButton).setOnClickListener {
+            AlertTones.play(this, AlertTones.Tone.WARN_LOW)
+        }
+        findViewById<Button>(R.id.playWarnHighButton).setOnClickListener {
+            AlertTones.play(this, AlertTones.Tone.WARN_HIGH)
+        }
+        findViewById<Button>(R.id.playCalmLowButton).setOnClickListener {
+            AlertTones.play(this, AlertTones.Tone.CALM_LOW)
+        }
+        findViewById<Button>(R.id.playCalmHighButton).setOnClickListener {
+            AlertTones.play(this, AlertTones.Tone.CALM_HIGH)
+        }
+        findViewById<Button>(R.id.playUrgentLowButton).setOnClickListener {
+            AlertTones.play(this, AlertTones.Tone.URGENT_LOW)
+        }
+        findViewById<Button>(R.id.playUrgentHighButton).setOnClickListener {
+            AlertTones.play(this, AlertTones.Tone.URGENT_HIGH)
+        }
+        findViewById<Button>(R.id.playSignalLostButton).setOnClickListener {
+            AlertTones.play(this, AlertTones.Tone.SIGNAL_LOST)
         }
         findViewById<Button>(R.id.forceRedButton).setOnClickListener {
             // Unconditional post first - this button's whole point is to
             // force-fire regardless of AlertCoordinator's dedup/cooldown.
-            AlertNotifier.showRedAlert(this, value = 58, projected = 48, rate = -2.5)
+            AlertNotifier.showRedAlert(this, value = 58, projected = 48, rate = -2.5, isInjected = true)
             // Also sync the dashboard/chart to the same value (via the normal
             // DebugGlucoseOverride + repo path), so this button posts a
             // notification whose number also appears on the dashboard.
@@ -423,12 +488,18 @@ class DebugMenuActivity : AppCompatActivity() {
                 this,
                 lastValue = 65,
                 lastArrow = GlucoseTrendArrow.fromRatePerMinute(-2.0),
-                ageMinutes = 20
+                ageMinutes = 20,
+                isInjected = true
             )
             afterForcedAlert()
         }
         findViewById<Button>(R.id.cancelAlertsButton).setOnClickListener {
             AlertNotifier.cancelAlerts(this)
+            AlertNotifier.cancelPlateau(this)
+            AlertNotifier.cancelCorrection(this)
+            com.aheadt1d.app.alerts.CustomThresholdStore.load(this).forEach {
+                com.aheadt1d.app.alerts.AlertNotifier.cancelCustomThreshold(this, it.id)
+            }
         }
 
         voiceMasterSwitch.isChecked = VoiceAlertPrefs.isMasterEnabled(this)

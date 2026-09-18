@@ -22,6 +22,10 @@ object UploadCoordinator {
     private const val TAG = "UploadCoordinator"
 
     suspend fun maybeUpload(context: Context, points: List<GlucosePoint>) {
+        if (com.aheadt1d.app.state.DebugGlucoseOverride.isActive) {
+            Log.d(TAG, "DebugGlucoseOverride is active - skipping external upload")
+            return
+        }
         try {
             val method = UploadPrefs.method(context)
             if (method == UploadMethod.NONE || points.isEmpty()) return

@@ -9,6 +9,7 @@ import java.time.ZoneId
 import org.aheadt1d.ratemath.HourlyStats
 import org.aheadt1d.ratemath.PersonalAnomalyTier
 import org.aheadt1d.ratemath.PersonalBaseline
+import org.aheadt1d.ratemath.RateMath
 import org.aheadt1d.ratemath.RatePoint
 
 /**
@@ -112,12 +113,22 @@ object PassiveContextEngine {
     /**
      * Evaluates full passive context from the current reading, history, and on-device step sensors.
      */
+    private fun dedupHistory(history: List<GlucosePoint>): List<GlucosePoint> {
+        if (history.isEmpty()) return emptyList()
+        val ratePoints = history.map { RatePoint(it.time.toEpochMilli(), it.sgv) }
+        val deduped = RateMath.collapseDuplicates(ratePoints.sortedBy { it.epochMillis })
+        return deduped.map { GlucosePoint(java.time.Instant.ofEpochMilli(it.epochMillis), it.sgv) }
+    }
+
+    /**
+     * Evaluates full passive context from the current reading, history, and on-device step sensors.
+     */
     fun evaluateContext(
         context: Context,
         reading: GlucoseDisplayState.Reading,
         history: List<GlucosePoint>,
+        now: LocalTime = LocalTime.now(ZoneId.systemDefault())
     ): ContextSummary {
-        val now = LocalTime.now(ZoneId.systemDefault())
         val phase = classifyCircadian(now)
         val dwellMinutes = computeDwellMinutes(reading.value, history)
         
@@ -144,7 +155,8 @@ object PassiveContextEngine {
             isStickyLow = isStickyLow,
             isExerciseDrop = isExerciseDrop,
             curvature = curvature,
-            dwellMinutes = dwellMinutes
+            dwellMinutes = dwellMinutes,
+            time = now
         ).let { primary ->
             if (primary.first != null) primary else personalAnomalyInsight(context, reading) ?: primary
         }
@@ -161,47 +173,53 @@ object PassiveContextEngine {
         )
     }
 
-    private fun classifyCircadian(time: LocalTime): CircadianPhase {
+    internal fun classifyCircadian(time: LocalTime): CircadianPhase {
         val hour = time.hour
         val minute = time.minute
         val totalMinutes = hour * 60 + minute
 
         return when {
-            totalMinutes in (4 * 60)..(7 * 60 + 30) -> CircadianPhase.DAWN_SURGE
             totalMinutes in (0..5 * 60 + 59) || totalMinutes >= (23 * 60) -> CircadianPhase.NOCTURNAL_SLEEP
+            totalMinutes in (6 * 60)..(8 * 60) -> CircadianPhase.DAWN_SURGE
             hour in 7..9 || hour in 11..13 || hour in 17..20 -> CircadianPhase.MEAL_WINDOW
             hour in 20..22 -> CircadianPhase.EVENING_WIND_DOWN
             else -> CircadianPhase.DAYTIME_ACTIVE
         }
     }
 
-    private fun computeDwellMinutes(currentValue: Int, history: List<GlucosePoint>): Long? {
-        if (history.isEmpty()) return null
-        val sorted = history.sortedBy { it.time }
+    internal fun computeDwellMinutes(currentValue: Int, history: List<GlucosePoint>, maxGapMinutes: Long = 20): Long? {
+        val deduped = dedupHistory(history)
+        if (deduped.isEmpty()) return null
         val isHigh = currentValue >= 180
         val isLow = currentValue <= 70
         if (!isHigh && !isLow) return null
 
-        var start = sorted.last().time
-        for (i in sorted.lastIndex downTo 0) {
-            val pt = sorted[i]
-            val inBand = if (isHigh) pt.sgv >= 170 else pt.sgv <= 75
-            if (!inBand) break
-            start = pt.time
+        val latest = deduped.last()
+        val inLatestBand = if (isHigh) latest.sgv >= 170 else latest.sgv <= 75
+        if (!inLatestBand) return null
+
+        val maxGap = java.time.Duration.ofMinutes(maxGapMinutes)
+        var start = latest.time
+        for (i in deduped.lastIndex downTo 1) {
+            val current = deduped[i]
+            val prev = deduped[i - 1]
+            val inBand = if (isHigh) prev.sgv >= 170 else prev.sgv <= 75
+            if (!inBand || java.time.Duration.between(prev.time, current.time) > maxGap) break
+            start = prev.time
         }
-        return java.time.Duration.between(start, sorted.last().time).toMinutes()
+        return java.time.Duration.between(start, latest.time).toMinutes()
     }
 
-    private fun classifyCurvature(history: List<GlucosePoint>, currentRate: Double): CurvatureState {
-        if (history.size < 3) return CurvatureState.FLAT_PLATEAU
-        val sorted = history.sortedBy { it.time }
-        val p0 = sorted[sorted.size - 3]
-        val p1 = sorted[sorted.size - 2]
-        val p2 = sorted[sorted.size - 1]
+    internal fun classifyCurvature(history: List<GlucosePoint>, currentRate: Double): CurvatureState {
+        val deduped = dedupHistory(history)
+        if (deduped.size < 3) return CurvatureState.FLAT_PLATEAU
+        val p0 = deduped[deduped.size - 3]
+        val p1 = deduped[deduped.size - 2]
+        val p2 = deduped[deduped.size - 1]
 
         val m1 = (p1.time.toEpochMilli() - p0.time.toEpochMilli()) / 60_000.0
         val m2 = (p2.time.toEpochMilli() - p1.time.toEpochMilli()) / 60_000.0
-        if (m1 <= 0 || m2 <= 0) return CurvatureState.FLAT_PLATEAU
+        if (m1 <= 0 || m2 <= 0 || m1 > 20.0 || m2 > 20.0) return CurvatureState.FLAT_PLATEAU
 
         val r1 = (p1.sgv - p0.sgv) / m1
         val r2 = (p2.sgv - p1.sgv) / m2
@@ -223,8 +241,13 @@ object PassiveContextEngine {
         isStickyLow: Boolean,
         isExerciseDrop: Boolean,
         curvature: CurvatureState,
-        dwellMinutes: Long?
+        dwellMinutes: Long?,
+        time: LocalTime = LocalTime.now(ZoneId.systemDefault())
     ): Pair<String?, String?> {
+        val totalMinutes = time.hour * 60 + time.minute
+        val isSleepHours = totalMinutes in (0..6 * 60 + 30) || totalMinutes >= (22 * 60 + 30)
+        val isDawnHours = totalMinutes in (4 * 60)..(8 * 60 + 30)
+
         return when {
             isExerciseDrop -> 
                 "Active exertion pulling glucose down" to "Consider 10-15g fast fuel to buffer muscle uptake"
@@ -236,9 +259,9 @@ object PassiveContextEngine {
                 "Peak is rounding off" to "Rate easing toward flat; insulin is taking effect"
             curvature == CurvatureState.BOTTOMING_OUT -> 
                 "Drop is bottoming out" to "Descent slowing; approaching stable baseline"
-            phase == CircadianPhase.DAWN_SURGE && value >= 130 && rate > 0.5 -> 
+            (phase == CircadianPhase.DAWN_SURGE || isDawnHours) && value >= 130 && rate > 0.5 -> 
                 "Dawn cortisol surge active" to "Morning baseline rising naturally"
-            phase == CircadianPhase.NOCTURNAL_SLEEP && rate <= -2.0 && value <= 70 -> 
+            (phase == CircadianPhase.NOCTURNAL_SLEEP || isSleepHours) && rate <= -2.0 && value <= 70 -> 
                 "Possible compression low" to "Check if laying directly on sensor site"
             else -> null to null
         }

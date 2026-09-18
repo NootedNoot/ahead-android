@@ -61,6 +61,13 @@
                 android:textColor="@color/ok"
                 android:text="Status: Alerts Active" />
 
+            <Button
+                android:id="@+id/silencePermanentButton"
+                style="@style/DebugButton"
+                android:layout_marginTop="6dp"
+                android:textColor="@color/low"
+                android:text="♾️ Silence Until Cancelled (Permanent)" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -77,6 +84,24 @@
                 style="@style/DebugButton.Danger"
                 android:layout_marginTop="6dp"
                 android:text="Cancel Silence / Re-enable Alerts" />
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="14dp"
+                android:layout_marginBottom="10dp"
+                android:background="@color/low" />
+
+            <TextView style="@style/DebugSubheading" android:text="DEV KILL SWITCH" />
+            <TextView
+                style="@style/DebugLabel"
+                android:text="A stronger override than the silence above. Blocks EVERYTHING, including a custom threshold's DND/silence override (Alarm Thresholds). No auto-expiry — you turn it back off yourself." />
+
+            <Button
+                android:id="@+id/devKillSwitchButton"
+                style="@style/DebugButton.Danger"
+                android:layout_marginTop="6dp"
+                android:text="🛑 Enable Dev Kill Switch" />
         </LinearLayout>
 
         <!-- ===================== Reset everything ===================== -->
@@ -268,10 +293,46 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:layout_marginTop="10dp">
-                <Button android:id="@+id/forceYellowButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="8dp" android:text="Force YELLOW" android:background="@drawable/number_fill_bg" android:textColor="@color/amber" />
+                <Button android:id="@+id/forceYellowLowButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" android:text="Yellow LOW (Drop)" android:background="@drawable/number_fill_bg" android:textColor="@color/amber" />
+                <Button android:id="@+id/forceYellowHighButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" android:text="Yellow HIGH (Rise)" android:background="@drawable/number_fill_bg" android:textColor="@color/amber" />
                 <Button android:id="@+id/forceRedButton" style="@style/DebugButton.Danger" android:layout_width="0dp" android:layout_weight="1" android:text="Force RED" />
             </LinearLayout>
-            <Button android:id="@+id/forceSignalLostButton" style="@style/DebugButton" android:text="Force signal-lost alert" />
+
+            <TextView
+                style="@style/DebugStatusText"
+                android:layout_marginTop="10dp"
+                android:text="Tone Preview (Tap to listen):" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
+                <Button android:id="@+id/playWarnLowButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" android:text="Warn Low (Drop)" />
+                <Button android:id="@+id/playWarnHighButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:text="Warn High (Rise)" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
+                <Button android:id="@+id/playCalmLowButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" android:text="Calm Low" />
+                <Button android:id="@+id/playCalmHighButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:text="Calm High" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp">
+                <Button android:id="@+id/playUrgentLowButton" style="@style/DebugButton.Danger" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" android:text="Urgent Low" />
+                <Button android:id="@+id/playUrgentHighButton" style="@style/DebugButton.Danger" android:layout_width="0dp" android:layout_weight="1" android:text="Urgent High" />
+            </LinearLayout>
+
+            <Button android:id="@+id/playSignalLostButton" style="@style/DebugButton" android:layout_marginTop="4dp" android:text="Tone: Signal Lost" />
+
+            <Button android:id="@+id/forceSignalLostButton" style="@style/DebugButton" android:layout_marginTop="8dp" android:text="Force signal-lost alert" />
             <Button android:id="@+id/cancelAlertsButton" style="@style/DebugButton.Ghost" android:text="Cancel all alerts" />
 
             <LinearLayout style="@style/DebugToggleRow">

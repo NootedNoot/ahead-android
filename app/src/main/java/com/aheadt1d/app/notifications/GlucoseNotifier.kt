@@ -6,11 +6,14 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.view.View
 import android.widget.RemoteViews
 import androidx.core.content.ContextCompat
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
+import com.aheadt1d.app.alerts.AlertChannels
 import com.aheadt1d.app.alerts.AlertExplainer
+import com.aheadt1d.app.state.DebugGlucoseOverride
 import com.aheadt1d.app.state.staleGuidance
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -43,7 +46,11 @@ object GlucoseNotifier {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    fun buildNotification(context: Context, state: GlucoseDisplayState): Notification {
+    fun buildNotification(
+        context: Context,
+        state: GlucoseDisplayState,
+        isInjected: Boolean = DebugGlucoseOverride.isActive,
+    ): Notification {
         val contentIntent = PendingIntent.getActivity(
             context,
             0,
@@ -58,7 +65,7 @@ object GlucoseNotifier {
             // units to distinguish it from the per-minute rate on line two.
             is GlucoseDisplayState.Reading -> Triple(
                 NotificationIconFactory.readingIcon(context, state.value, state.arrow),
-                "${severityPrefix(state.severity)}${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}",
+                "$ONGOING_MARKER${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}",
                 // Alert Transparency: during yellow/red, the collapsed line
                 // becomes the plain-language "why" (AlertExplainer) instead
                 // of the raw rate/projection numbers - those move to the
@@ -96,16 +103,26 @@ object GlucoseNotifier {
             Notification.VISIBILITY_PRIVATE
         }
 
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
+
         val builder = Notification.Builder(context, CHANNEL_ID)
             .setSmallIcon(icon)
-            .setContentTitle(title)
-            .setContentText(text)
+            .setContentTitle("$prefix$title")
+            .setContentText("$bodyPrefix$text")
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setVisibility(visibility)
-            .setCustomBigContentView(buildExpandedView(context, state))
+            .setCustomBigContentView(buildExpandedView(context, state, isInjected))
             .setStyle(Notification.DecoratedCustomViewStyle())
+            // Clusters with every AlertNotifier tier under one Ahead group in
+            // the shade - see AlertChannels.NOTIFICATION_GROUP_KEY's own doc.
+            .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
+
+        if (isInjected) {
+            builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        }
 
         // Accent color tracks the same severity tier the title's 🔴/⚠️ prefix
         // already shows (LatestTrend.severity, i.e. trend-detector.js's
@@ -133,8 +150,13 @@ object GlucoseNotifier {
         }
     }
 
-    private fun buildExpandedView(context: Context, state: GlucoseDisplayState): RemoteViews {
+    private fun buildExpandedView(context: Context, state: GlucoseDisplayState, isInjected: Boolean = false): RemoteViews {
         val views = RemoteViews(context.packageName, R.layout.notification_glucose_expanded)
+        val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
+        views.setViewVisibility(
+            R.id.tv_injected_disclaimer,
+            if (isInjected) View.VISIBLE else View.GONE
+        )
         when (state) {
             is GlucoseDisplayState.Reading -> {
                 views.setImageViewIcon(
@@ -143,7 +165,7 @@ object GlucoseNotifier {
                 )
                 views.setTextViewText(
                     R.id.tv_value,
-                    "${severityPrefix(state.severity)}${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}"
+                    "$prefix$ONGOING_MARKER${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}"
                 )
                 views.setTextViewText(R.id.tv_time, "As of ${timeFormatter.format(state.readingTime)}")
                 views.setTextViewText(
@@ -156,7 +178,7 @@ object GlucoseNotifier {
                     R.id.iv_arrow,
                     NotificationIconFactory.warningIcon(context, NotificationIconFactory.EXPANDED_ICON_SIZE_PX)
                 )
-                views.setTextViewText(R.id.tv_value, "⚠️ No new data — ${formatAge(state.ageMinutes)} ago")
+                views.setTextViewText(R.id.tv_value, "${prefix}⚠️ No new data — ${formatAge(state.ageMinutes)} ago")
                 views.setTextViewText(
                     R.id.tv_time,
                     "Last: ${state.lastValue} mg/dL ${state.lastArrow.label} at ${timeFormatter.format(state.lastReadingTime)}"
@@ -195,11 +217,20 @@ object GlucoseNotifier {
 
     /** 🔴 matches the backend's own red-alert push convention
      *  (buildNotificationMessage in trend-detector.js); ⚠️ marks yellow. */
-    private fun severityPrefix(severity: String?): String = when (severity) {
-        "red" -> "🔴 "
-        "yellow" -> "⚠️ "
-        else -> ""
-    }
+    // A constant marker, deliberately NEVER varying by severity (2026-09-13
+    // fix, at the owner's request) - this used to be severityPrefix(),
+    // showing "🔴 "/"⚠️ " exactly like AlertNotifier's red/yellow alert
+    // titles do. That's precisely backwards for an ongoing notification:
+    // the moment severity actually matters (you're high or low and getting
+    // real alerts) was exactly when the always-there status line and a
+    // fresh interrupting alert looked almost identical in the shade,
+    // reported directly as "I get confused... have to swipe them away to
+    // get to the real notification." 🩸 never appears on any alert tier
+    // (those use 🔴/🟠/⚠️/🔔/📝), so this line is now recognizable at a
+    // glance regardless of what's going on - severity still shows up via
+    // severityAccentRes's color below, a subtler signal appropriate for a
+    // notification that's always present rather than a fresh interruption.
+    private const val ONGOING_MARKER = "🩸 "
 
     // Both windows explicitly - the alert tier can be decided off the 15-min or
     // the 30-min projection, so the text must never imply just one.

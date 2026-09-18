@@ -40,4 +40,25 @@ object BackendClient {
             return JSONObject(responseBody)
         }
     }
+
+    /**
+     * Best-effort: deletes recent readings from ahead-backend (e.g. wiping
+     * any test data that may have been sent) so Ahead Lite doesn't show them.
+     */
+    fun deleteRecentReadings(context: Context, sinceEpochMs: Long? = null) {
+        val apiKey = AuthPrefs.deviceApiKey(context) ?: return
+        val url = if (sinceEpochMs != null) {
+            "${BuildConfig.BACKEND_BASE_URL}/api/readings?since=$sinceEpochMs"
+        } else {
+            "${BuildConfig.BACKEND_BASE_URL}/api/readings"
+        }
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("X-Ahead-Api-Key", apiKey)
+            .delete()
+            .build()
+        runCatching {
+            client.newCall(request).execute().close()
+        }
+    }
 }

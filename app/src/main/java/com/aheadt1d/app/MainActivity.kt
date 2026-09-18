@@ -12,6 +12,7 @@ import android.util.Log
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,6 +29,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.aheadt1d.app.alerts.AlertChannels
 import com.aheadt1d.app.alerts.AlertSilenceManager
+import com.aheadt1d.app.alerts.CustomThresholdsActivity
 import com.aheadt1d.app.auth.AuthPrefs
 import com.aheadt1d.app.auth.LoginActivity
 import org.aheadt1d.ratemath.RateMath
@@ -36,6 +38,7 @@ import org.aheadt1d.ratemath.TrajectoryKind
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.notifications.GlucoseStatusService
+import kotlin.math.roundToInt
 import com.aheadt1d.app.setup.SetupPrefs
 import com.aheadt1d.app.setup.SetupWizardActivity
 import com.aheadt1d.app.state.DebugGlucoseOverride
@@ -144,6 +147,7 @@ class MainActivity : AppCompatActivity() {
         setupVersionText()
 
         observeLatestTrend()
+        observeLatestRawReading()
         observeWorkerRuns()
         autoRefreshChart()
 
@@ -213,6 +217,10 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(VoiceAlertsActivity.createIntent(this))
         }
+        findViewById<View>(R.id.drawerCustomThresholdsItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(CustomThresholdsActivity.createIntent(this))
+        }
         findViewById<View>(R.id.drawerCgmSyncItem).setOnClickListener {
             drawerLayout.closeDrawer(GravityCompat.START)
             showCgmPathDialog()
@@ -230,7 +238,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(com.aheadt1d.app.account.AccountSettingsActivity.createIntent(this))
         }
         findViewById<TextView>(R.id.drawerUserLabel).text = AuthPrefs.displayLabel(this) ?: ""
-        updateDrawerSilenceLabel()
+        updateSilenceUI()
 
         // Both conditions required, deliberately - see AuthPrefs.isOwner's
         // doc: BuildConfig.DEBUG alone would show developer tooling to any
@@ -282,14 +290,42 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton("Close", null)
             .create()
 
+        val killSwitchOn = AlertSilenceManager.isDevKillSwitchActive(this)
         val isSilenced = AlertSilenceManager.isSilenced(this)
+        val isPermanent = AlertSilenceManager.isPermanentlySilenced(this)
         val remaining = AlertSilenceManager.getRemainingMinutes(this)
         val titleView = view.findViewById<TextView>(R.id.silenceDialogTitle)
         val statusView = view.findViewById<TextView>(R.id.silenceDialogStatus)
 
+        // Kill-switch-aware (2026-09-13 fix): without this branch, the dev
+        // kill switch made isPermanentlySilenced()/getRemainingMinutes()
+        // read as ordinary "Silenced (Permanent)" (those two now fold the
+        // kill switch in too, see AlertSilenceManager's own doc) - which
+        // would offer "Cancel Silence" as a fix, but that button only clears
+        // ORDINARY silence and does nothing to the kill switch, so tapping
+        // it would silently fail to actually restore alerts. Every button in
+        // this dialog is disabled while the kill switch is on, since none of
+        // them can touch it - it's debug-menu-only, at the owner's own request.
+        if (killSwitchOn) {
+            titleView.text = "🛑 Alerts Blocked (Dev Override)"
+            statusView.text = "Status: 🛑 Dev kill switch active — disable it from the Debug Menu"
+            statusView.setTextColor(ContextCompat.getColor(this, R.color.low))
+            listOf(
+                R.id.btnSilencePermanent, R.id.btnSilence15, R.id.btnSilence30, R.id.btnSilence60,
+                R.id.btnSilence120, R.id.btnSilence240, R.id.btnSilenceCustom, R.id.btnCancelSilence,
+            ).forEach { view.findViewById<Button>(it).isEnabled = false }
+            dialog.show()
+            return
+        }
+
         if (isSilenced) {
-            titleView.text = "🔕 Alerts Silenced (${remaining}m left)"
-            statusView.text = "Status: 🔕 SILENCED (${remaining}m remaining)"
+            if (isPermanent) {
+                titleView.text = "🔕 Alerts Silenced (Permanent)"
+                statusView.text = "Status: 🔕 SILENCED (Until cancelled)"
+            } else {
+                titleView.text = "🔕 Alerts Silenced (${remaining}m left)"
+                statusView.text = "Status: 🔕 SILENCED (${remaining}m remaining)"
+            }
             statusView.setTextColor(ContextCompat.getColor(this, R.color.low))
         } else {
             titleView.text = "🔕 Silence All Alerts"
@@ -297,44 +333,113 @@ class MainActivity : AppCompatActivity() {
             statusView.setTextColor(ContextCompat.getColor(this, R.color.ok))
         }
 
-        view.findViewById<Button>(R.id.btnSilence10).setOnClickListener {
-            AlertSilenceManager.silence(this, 10)
-            updateDrawerSilenceLabel()
+        view.findViewById<Button>(R.id.btnSilencePermanent).setOnClickListener {
+            AlertSilenceManager.silenceIndefinitely(this)
+            updateSilenceUI()
             dialog.dismiss()
         }
         view.findViewById<Button>(R.id.btnSilence15).setOnClickListener {
             AlertSilenceManager.silence(this, 15)
-            updateDrawerSilenceLabel()
+            updateSilenceUI()
             dialog.dismiss()
         }
         view.findViewById<Button>(R.id.btnSilence30).setOnClickListener {
             AlertSilenceManager.silence(this, 30)
-            updateDrawerSilenceLabel()
+            updateSilenceUI()
             dialog.dismiss()
         }
         view.findViewById<Button>(R.id.btnSilence60).setOnClickListener {
             AlertSilenceManager.silence(this, 60)
-            updateDrawerSilenceLabel()
+            updateSilenceUI()
             dialog.dismiss()
+        }
+        view.findViewById<Button>(R.id.btnSilence120).setOnClickListener {
+            AlertSilenceManager.silence(this, 120)
+            updateSilenceUI()
+            dialog.dismiss()
+        }
+        view.findViewById<Button>(R.id.btnSilence240).setOnClickListener {
+            AlertSilenceManager.silence(this, 240)
+            updateSilenceUI()
+            dialog.dismiss()
+        }
+        view.findViewById<Button>(R.id.btnSilenceCustom).setOnClickListener {
+            dialog.dismiss()
+            showCustomDurationDialog()
         }
         view.findViewById<Button>(R.id.btnCancelSilence).setOnClickListener {
             AlertSilenceManager.cancelSilence(this)
-            updateDrawerSilenceLabel()
+            updateSilenceUI()
             dialog.dismiss()
         }
 
         dialog.show()
     }
 
-    private fun updateDrawerSilenceLabel() {
-        val labelView = findViewById<TextView>(R.id.drawerSilenceLabel) ?: return
-        if (AlertSilenceManager.isSilenced(this)) {
-            val rem = AlertSilenceManager.getRemainingMinutes(this)
-            labelView.text = "🔕 Silenced (${rem}m left)"
-            labelView.setTextColor(ContextCompat.getColor(this, R.color.low))
+    private fun showCustomDurationDialog() {
+        val input = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            hint = "Minutes (e.g. 45, 90, 180, 480)"
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@MainActivity, R.color.muted))
+            setPadding(48, 32, 48, 32)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Custom Silence Duration")
+            .setMessage("Enter duration to silence alerts in minutes (enter 0 to silence until cancelled):")
+            .setView(input)
+            .setPositiveButton("Silence") { _, _ ->
+                val text = input.text.toString().trim()
+                val minutes = text.toIntOrNull()
+                if (minutes != null) {
+                    if (minutes <= 0) {
+                        AlertSilenceManager.silenceIndefinitely(this)
+                    } else {
+                        AlertSilenceManager.silence(this, minutes)
+                    }
+                    updateSilenceUI()
+                } else {
+                    android.widget.Toast.makeText(this, "Please enter a valid number of minutes", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun updateSilenceUI() {
+        val isSilenced = AlertSilenceManager.isSilenced(this)
+        val isPermanent = AlertSilenceManager.isPermanentlySilenced(this)
+        val rem = AlertSilenceManager.getRemainingMinutes(this)
+
+        // 1. Navigation drawer label & badge
+        val silenceLabel = findViewById<TextView>(R.id.drawerSilenceLabel)
+        val silenceBadge = findViewById<TextView>(R.id.drawerSilenceBadge)
+        if (isSilenced) {
+            silenceLabel?.text = "🔕 Silence Alerts"
+            silenceLabel?.setTextColor(ContextCompat.getColor(this, R.color.low))
+            silenceBadge?.visibility = View.VISIBLE
+            silenceBadge?.text = if (isPermanent) "MUTED ♾️" else "${rem}m"
         } else {
-            labelView.text = "🔕 Silence Alerts"
-            labelView.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
+            silenceLabel?.text = "🔕 Silence Alerts"
+            silenceLabel?.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
+            silenceBadge?.visibility = View.GONE
+        }
+
+        // 2. Main dashboard banner
+        findViewById<TextView>(R.id.silenceActiveBanner)?.let { bannerView ->
+            if (isSilenced) {
+                val text = if (isPermanent) {
+                    "🔕 Alerts are silenced (Until cancelled) — Tap to manage"
+                } else {
+                    "🔕 Alerts are silenced (${rem}m left) — Tap to manage"
+                }
+                bannerView.text = text
+                bannerView.visibility = View.VISIBLE
+                bannerView.setOnClickListener { showSilenceDialog() }
+            } else {
+                bannerView.visibility = View.GONE
+            }
         }
     }
 
@@ -385,7 +490,7 @@ class MainActivity : AppCompatActivity() {
     // resume would be obnoxious.
     override fun onResume() {
         super.onResume()
-        updateDrawerSilenceLabel()
+        updateSilenceUI()
         // Catches a DND-access revocation that happened while the app wasn't
         // in the foreground (system "clean up permissions" prompt, an OEM
         // auto-revoke, the user toggling it off in Settings) - the wizard
@@ -421,6 +526,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun observeLatestRawReading() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                LatestTrendRepository.latestRawReading.collect {
+                    renderCurrentValue()
+                    renderTrendState(LatestTrendRepository.latestTrend.value)
+                }
+            }
+        }
+    }
+
     // This is the reliable trigger for "Check now" and every periodic run:
     // it fires whenever the Worker successfully reads Health Connect, even if
     // the backend never returns a usable trend (dedup'd it away, was slow,
@@ -451,6 +567,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun refreshChart() {
         updateDebugOverrideBanner()
+        updateSilenceUI()
         lifecycleScope.launch {
             val canReadHealthConnect = HealthConnectManager.canReadGlucose(applicationContext)
             // 2026-08-01: no longer falls back to NightscoutFallbackClient
@@ -499,6 +616,20 @@ class MainActivity : AppCompatActivity() {
      */
     private fun refreshPassiveContext() {
         val cardView = findViewById<View>(R.id.contextCard)
+
+        // DISABLED 2026-09-13 at the owner's explicit request: the generated
+        // insights/tips ("Stubborn high (45m over 180)" -> "hydration
+        // helps") read as generic, situation-blind copy rather than
+        // anything actually tailored to what's really going on - "bullshit"
+        // in his own words. Not deleted - PassiveContextEngine itself is
+        // untouched and may come back in a reworked form later. Flip this
+        // back to false to re-enable; everything below is otherwise
+        // unchanged.
+        if (PASSIVE_CONTEXT_CARD_DISABLED) {
+            cardView.visibility = View.GONE
+            return
+        }
+
         val insightView = findViewById<TextView>(R.id.contextInsightText)
         val tipView = findViewById<TextView>(R.id.contextTipText)
 
@@ -545,15 +676,8 @@ class MainActivity : AppCompatActivity() {
         val current = LatestTrendRepository.latestRawReading.value
         if (current != null && latest.time.toEpochMilli() <= current.time) return
 
-        LatestTrendRepository.updateRawReading(
-            applicationContext,
-            RawReading(
-                value = latest.sgv,
-                time = latest.time.toEpochMilli(),
-                ratePerMinute = HealthConnectManager.calculateRatePerMinute(cachedPoints),
-                deltaFromPrevious = HealthConnectManager.calculateDelta(cachedPoints)
-            )
-        )
+        val reading = RawReading.fromPoints(cachedPoints) ?: return
+        LatestTrendRepository.updateRawReading(applicationContext, reading)
         GlucoseStatusService.refreshNotification(applicationContext)
     }
 
@@ -567,27 +691,30 @@ class MainActivity : AppCompatActivity() {
     private fun renderCurrentValue() {
         val valueView = findViewById<TextView>(R.id.latestValueText)
         val statusView = findViewById<TextView>(R.id.statusText)
-        val latest = cachedPoints.lastOrNull()
-        val fresh = latest != null && isFresh(latest.time)
+        val latestPoint = cachedPoints.lastOrNull()
+        val rawReading = LatestTrendRepository.latestRawReading.value
+        val latestTime = rawReading?.time?.let { Instant.ofEpochMilli(it) } ?: latestPoint?.time
+        val latestValue = rawReading?.value ?: latestPoint?.sgv
+        val fresh = latestTime != null && isFresh(latestTime)
 
-        updateLiveIndicator(fresh, latest?.sgv)
+        updateLiveIndicator(fresh, latestValue)
 
-        if (!fresh) {
+        if (!fresh || latestValue == null) {
             valueView.text = getString(R.string.no_reading_yet)
             valueView.setTextColor(ContextCompat.getColor(this, R.color.muted))
-            statusView.text = if (latest == null) {
+            statusView.text = if (latestTime == null) {
                 getString(R.string.status_no_data)
             } else {
                 // Same cause-aware guidance the notification shows (shared
                 // staleGuidance) - the two surfaces must never disagree about
                 // whether to blame the sensor or the app's own access.
-                "${getString(R.string.status_stale, formatAge(latest.time))} ${staleGuidance(LatestTrendRepository.readBlocked.value)}"
+                "${getString(R.string.status_stale, formatAge(latestTime))} ${staleGuidance(LatestTrendRepository.readBlocked.value)}"
             }
             return
         }
 
-        valueView.text = "${latest!!.sgv}"
-        applySeverityToNumber(valueView, latest.sgv)
+        valueView.text = "$latestValue"
+        applySeverityToNumber(valueView, latestValue)
         statusView.setText(R.string.status_running)
     }
 
@@ -925,8 +1052,8 @@ class MainActivity : AppCompatActivity() {
             projectionContainer.visibility = View.GONE
             return
         }
-        projectionView.text = "${reading.projected} in ${PROJECTION_15_MIN}m" +
-            (reading.projectedExtended?.let { " · $it in ${PROJECTION_30_MIN}m" } ?: "")
+        val ext = reading.projectedExtended ?: (reading.value + rate * PROJECTION_30_MIN).roundToInt()
+        projectionView.text = "${reading.projected} in ${PROJECTION_15_MIN}m · $ext in ${PROJECTION_30_MIN}m"
         projectionContainer.visibility = View.VISIBLE
     }
 
@@ -962,6 +1089,9 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+        // See refreshPassiveContext()'s own doc - flip to false to bring the
+        // context/insight card back.
+        private const val PASSIVE_CONTEXT_CARD_DISABLED = true
         private const val WINDOW_1H = 60L
         private const val WINDOW_6H = 360L
         // 2026-08-04: was 5 min, the same cadence as the CGM's own HC sync

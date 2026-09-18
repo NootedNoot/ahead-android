@@ -31,3 +31,14 @@ val LOW_HIGH_SPLIT = SeverityEngine.DEFAULT_RED_LOW
 
 fun isLowSide(value: Int, projected: Int?): Boolean =
     value <= LOW_HIGH_SPLIT || (projected != null && projected <= LOW_HIGH_SPLIT)
+
+/**
+ * Midpoint for yellow-tier alerts (roughly the middle of the 70-180 target range).
+ * Used by AlertCoordinator and AlertNotifier to cleanly distinguish yellow-low caution
+ * (e.g. 71-80 mg/dL or falling toward 75) from yellow-high caution (e.g. >= 180 or climbing).
+ */
+const val YELLOW_MID_POINT = 125
+
+fun isLowSideYellow(value: Int, projected: Int?): Boolean =
+    (projected ?: value) < YELLOW_MID_POINT
+

@@ -48,10 +48,12 @@ import org.json.JSONObject
 object GlucoseCheckRunner {
     private const val TAG = "GlucoseCheckRunner"
 
-    // The backend's trend detector expects the full recent readings array, so we
-    // re-read a trailing window each cycle rather than "just what's new" - a wider
-    // window costs nothing and covers CGM syncs that land between runs.
-    private const val WINDOW_MINUTES = 45L
+    // The backend's trend detector expects recent readings, and
+    // TreatmentEffectWindow's high-side treatment-effect trust window looks back
+    // up to 90 minutes (RECOVERING_HIGH_WINDOW_MINUTES = 90). We read a 120-minute
+    // trailing window so high excursion duration is never prematurely truncated at 45m,
+    // allowing full physiological confidence to be evaluated.
+    private const val WINDOW_MINUTES = 120L
 
     /** Mirrors WorkManager's three outcomes so GlucoseCheckWorker can map straight
      *  onto Result; the foreground-service loop just ignores it and runs again on
@@ -78,6 +80,11 @@ object GlucoseCheckRunner {
     }
 
     private suspend fun runInternal(context: Context): Outcome {
+        if (com.aheadt1d.app.state.DebugGlucoseOverride.isActive) {
+            Log.d(TAG, "DebugGlucoseOverride is active - skipping background upload and backend trend check to prevent fake test data leaking to cloud backend or Ahead Lite")
+            return Outcome.SUCCESS
+        }
+
         var points = readPoints(context) ?: return Outcome.FAILURE
 
         // ADDED 2026-08-20: AheadBLE V3's direct-broadcast redundancy path
@@ -125,72 +132,13 @@ object GlucoseCheckRunner {
             // needed. Found during a fragmentation audit that this was never
             // actually computed anywhere on the on-device path - the grace
             // period existed and was tested but silently inert.
-            val recoveringFromLow = points.any { p ->
-                p.sgv <= org.aheadt1d.ratemath.SeverityEngine.RECOVERING_FROM_LOW_TRIGGER_MGDL &&
-                    java.time.Duration.between(p.time, latest.time).toMillis() <= org.aheadt1d.ratemath.SeverityEngine.POST_HYPO_RECOVERY_GRACE_WINDOW_MS
-            }
-
-            // The "smarter math" wiring pass (2026-08-29) - same points
-            // window, converted once to ahead-rate-math's shared RatePoint
-            // shape and reused for all three new computations below.
-            val ratePoints = points.map { org.aheadt1d.ratemath.RatePoint(it.time.toEpochMilli(), it.sgv) }
-
-            // Up to the last 3 point-to-point rates - what
-            // SeverityEngine.assessRateTrajectory needs to classify
-            // DECELERATING/NOISY at all. See RawReading.recentRates' own
-            // doc for why this was the single most consequential gap found
-            // this session - without it, trajectory classification (and
-            // therefore decay-based projection AND noisy-spike RED
-            // suppression) has never actually run on a real device.
-            val recentRates = org.aheadt1d.ratemath.RateMath.recentRates(ratePoints, count = 3)
-
-            // RateConsensus's median of three independent rate estimates
-            // (2-point slope, Kalman filter, linear regression) - used ONLY
-            // to feed SeverityEngine's severity decision below, never the
-            // displayed rate/arrow (see RawReading.severityRatePerMinute's
-            // own doc). Reuses one vote() call for both the median AND the
-            // agreement check below, rather than recomputing all three
-            // methods twice.
-            val rateVote = org.aheadt1d.ratemath.RateConsensus.vote(ratePoints)
-            val severityRatePerMinute = org.aheadt1d.ratemath.RateConsensus.consensusRate(rateVote)
-            // ADDED 2026-08-30: whether the three methods actually agree -
-            // built and tested since the "smarter math" pass but never
-            // actually read by anything until now (see RateConsensus.kt's
-            // own doc). Feeds SeverityEngine.classify's ratesAgree, which
-            // suppresses a RED escalation the same way a NOISY trajectory
-            // already does - see that param's own doc for the reasoning.
-            val rateMethodsAgree = org.aheadt1d.ratemath.RateConsensus.estimatesAgree(rateVote)
-
-            // How long the CURRENT low/high excursion has actually been
-            // running - feeds TreatmentEffectWindow's asymmetric 30-min-low/
-            // 90-min-high treatment-effect trust window. 125 mg/dL matches
-            // AlertCoordinator's own YELLOW_MID_POINT ("roughly the middle
-            // of the 70-180 healthy band") - same concept, same number, not
-            // a new one invented here.
-            val isLowSide = latest.sgv < 125
-            val excursionDurationMinutes = org.aheadt1d.ratemath.TreatmentEffectWindow
-                .excursionDurationMinutes(ratePoints, isLow = isLowSide)
-
-            LatestTrendRepository.updateRawReading(
-                context,
-                RawReading(
-                    value = latest.sgv,
-                    time = latest.time.toEpochMilli(),
-                    ratePerMinute = HealthConnectManager.calculateRatePerMinute(points),
-                    deltaFromPrevious = HealthConnectManager.calculateDelta(points),
-                    // Only true when THIS specific latest point is the one the
-                    // fallback supplied - if Health Connect's own read already
-                    // had something newer than the fallback (shouldn't happen
-                    // given the consumeIfNewerThan gate above, but not assumed),
-                    // this stays false rather than mislabeling a real HC point.
-                    wasBroadcastSupplemented = usedBroadcastFallback && latest.time.toEpochMilli() == fallback?.timestampMillis,
-                    recoveringFromLow = recoveringFromLow,
-                    recentRates = recentRates,
-                    severityRatePerMinute = severityRatePerMinute,
-                    excursionDurationMinutes = excursionDurationMinutes,
-                    rateMethodsAgree = rateMethodsAgree
-                )
+            val reading = RawReading.fromPoints(
+                points,
+                wasBroadcastSupplemented = usedBroadcastFallback && latest.time.toEpochMilli() == fallback?.timestampMillis
             )
+            if (reading != null) {
+                LatestTrendRepository.updateRawReading(context, reading)
+            }
         }
 
         // Best-effort, fully isolated from everything below (see

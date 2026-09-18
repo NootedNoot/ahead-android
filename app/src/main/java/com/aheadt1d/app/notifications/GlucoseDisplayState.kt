@@ -8,6 +8,7 @@ import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.isStale
 import com.aheadt1d.app.state.minutesSinceReading
 import org.aheadt1d.ratemath.SeverityEngine
+import kotlin.math.roundToInt
 
 /**
  * What the ongoing notification should show right now. Kept separate from
@@ -146,7 +147,7 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
     }
 
     val finalProjected = decision.projected15m
-    val finalExtended = decision.projectedExtended
+    val finalExtended = decision.projectedExtended ?: rate?.let { (raw.value + it * 30).roundToInt() }
 
     return GlucoseDisplayState.Reading(
         value = raw.value,

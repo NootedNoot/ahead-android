@@ -51,13 +51,26 @@ import androidx.core.content.edit
  * surfacing to the user.
  */
 object AlertChannels {
+    // Shared by GlucoseNotifier (the persistent status notification) and
+    // every AlertNotifier tier (red/yellow/plateau/correction/custom
+    // threshold/signal-lost) - 2026-09-13, at the owner's request, so
+    // several Ahead notifications sitting in the shade at once visually
+    // cluster together (a single expandable group) instead of interleaving
+    // with other apps' notifications, one-by-one, with no indication
+    // they're related. See GlucoseNotifier's own doc for the other half of
+    // this fix (a constant, non-severity-varying marker so the ongoing
+    // notification's title can never visually match an alert's).
+    const val NOTIFICATION_GROUP_KEY = "ahead_notifications"
+
     private const val PREFS_NAME = "ahead_alert_channels"
     private const val KEY_RED_CHANNEL_ID = "red_channel_id"
     private const val KEY_YELLOW_CHANNEL_ID = "yellow_channel_id"
+    private const val KEY_CUSTOM_CHANNEL_ID = "custom_threshold_channel_id"
     private const val KEY_DND_EVER_GRANTED = "dnd_ever_granted"
     private const val KEY_SOUND_SCHEME_VERSION = "sound_scheme_version"
     private const val DEFAULT_RED_CHANNEL_ID = "glucose_alerts_active"
     private const val DEFAULT_YELLOW_CHANNEL_ID = "glucose_alerts_yellow"
+    private const val DEFAULT_CUSTOM_CHANNEL_ID = "glucose_alerts_custom_threshold"
     private const val TAG = "AlertChannels"
 
     // 2026-07-31: bumped when alert sound moved from each channel's own
@@ -93,6 +106,14 @@ object AlertChannels {
     fun currentYellowChannelId(context: Context): String =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_YELLOW_CHANNEL_ID, DEFAULT_YELLOW_CHANNEL_ID) ?: DEFAULT_YELLOW_CHANNEL_ID
+
+    /** Custom-threshold overrides (2026-09-13): bypasses DND like red, but
+     *  carries a real sound like yellow - see buildCustomThresholdChannel's
+     *  own doc for why this is a third, distinct tier rather than reusing
+     *  either existing channel. */
+    fun currentCustomChannelId(context: Context): String =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_CUSTOM_CHANNEL_ID, DEFAULT_CUSTOM_CHANNEL_ID) ?: DEFAULT_CUSTOM_CHANNEL_ID
 
     /** Idempotent and cheap - safe to call from Application.onCreate, before
      *  every alert post, and after returning from the DND-access settings
@@ -141,6 +162,23 @@ object AlertChannels {
         if (needsSoundMigration) {
             prefs.edit { putInt(KEY_SOUND_SCHEME_VERSION, SOUND_SCHEME_VERSION) }
         }
+
+        // Custom-threshold channel: same DND-bypass-granted-late migration
+        // red needs, on its own id/version track (not folded into
+        // SOUND_SCHEME_VERSION - that scheme is specifically red/yellow's
+        // historical sound changes, and doesn't apply to a brand-new channel).
+        val customId = currentCustomChannelId(context)
+        if (nm.getNotificationChannel(customId) == null) {
+            nm.createNotificationChannel(buildCustomThresholdChannel(customId))
+        } else {
+            val customChannel = nm.getNotificationChannel(customId)
+            if (customChannel != null && !customChannel.canBypassDnd() && nm.isNotificationPolicyAccessGranted) {
+                val newId = nextVersionedId(customId, DEFAULT_CUSTOM_CHANNEL_ID)
+                nm.createNotificationChannel(buildCustomThresholdChannel(newId))
+                nm.deleteNotificationChannel(customId)
+                prefs.edit { putString(KEY_CUSTOM_CHANNEL_ID, newId) }
+            }
+        }
     }
 
     private fun buildYellowChannel(id: String): NotificationChannel =
@@ -184,6 +222,42 @@ object AlertChannels {
             // critical case was removed 2026-08-20, at the owner's request -
             // there's nothing left standing in for it.)
             setSound(null, null)
+        }
+
+    /**
+     * Custom user-defined thresholds (2026-09-13, see CustomThresholdCoordinator):
+     * bypasses DND like red, but - unlike red - carries a real, distinct
+     * sound, because the whole point of this tier is "punch through silence
+     * for the one thing I specifically asked to be told about," and a silent
+     * vibrate-only alert wouldn't reliably do that. Deliberately NOT the old
+     * CriticalLowSiren's forced-ALARM-stream approach (removed 2026-08-20,
+     * "an alarm that couldn't be dismissed") - this plays through the
+     * ordinary notification volume/stream via the channel's own sound
+     * attribute, same mechanism yellow already uses safely. It overrides
+     * Android's Do Not Disturb (setBypassDnd) and Ahead's own in-app silence
+     * killswitch (see AlertNotifier.showCustomThresholdAlert, which
+     * deliberately skips the AlertSilenceManager.isSilenced() gate every
+     * other alert function checks first) - but ONLY the one notification
+     * CustomThresholdCoordinator actually decides to post (a fresh crossing
+     * or a further escalation), never a standing "always loud" state. If the
+     * phone's own physical volume is at zero, this still won't force sound -
+     * that's a deliberate line short of what the old siren did.
+     */
+    private fun buildCustomThresholdChannel(id: String): NotificationChannel =
+        NotificationChannel(id, "Custom glucose thresholds", NotificationManager.IMPORTANCE_HIGH).apply {
+            description = "Your own rate/value tripwires - can sound even during Silence or Do Not Disturb"
+            setBypassDnd(true)
+            enableVibration(true)
+            // A third, distinct pattern from yellow's two-pulse and red's
+            // three-pulse, so this tier is tellable by feel alone too.
+            vibrationPattern = longArrayOf(0, 200, 100, 200, 100, 200, 100, 200)
+            setSound(
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
         }
 
     private fun nextVersionedId(currentId: String, baseId: String): String {

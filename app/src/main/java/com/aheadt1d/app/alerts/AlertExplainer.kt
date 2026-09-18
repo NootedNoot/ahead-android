@@ -123,7 +123,7 @@ object AlertExplainer {
      * "192 mg/dL, rising slowly → projected 205 in 30 min" example, where
      * the near-term number alone wouldn't be worth citing.
      */
-    private fun pickProjectionWindow(currentValue: Int, projected: Int?, projectedExtended: Int?): Pair<Int, Int?> {
+    internal fun pickProjectionWindow(currentValue: Int, projected: Int?, projectedExtended: Int?): Pair<Int, Int?> {
         if (projected == null) return EXTENDED_WINDOW_MINUTES to projectedExtended
         val nearMoveIsSmall = abs(projected - currentValue) < NEAR_TERM_UNREMARKABLE_DELTA
         val extendedMovesFurther = projectedExtended != null &&

@@ -245,7 +245,7 @@ object AlertCoordinator {
         trend: LatestTrend?,
     ) {
         val severity = reading.severity ?: "none"
-        val date = trend?.date ?: 0L
+        val date = if (reading.readingTime > 0L) reading.readingTime else (trend?.date ?: 0L)
 
         val prevSeverity = prefs.getString(KEY_LAST_SEVERITY, "none") ?: "none"
         val prevDate = prefs.getLong(KEY_LAST_DATE, 0L)
@@ -578,7 +578,7 @@ object AlertCoordinator {
         val worsenedBy = if (isLowSide) lastAlertedProjected - projected else projected - lastAlertedProjected
 
         if (worsenedBy >= YELLOW_MATERIAL_WORSENING_MGDL) {
-            AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute)
+            AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute, projectedExtended = reading.projectedExtended)
             prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
         }
     }
