@@ -153,11 +153,7 @@ object AlertNotifier {
 
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
-        val spokenText = if (recovering) {
-            "Still low at $value, but rising. ${spokenProjection(value, projected, projectedExtended)} Keep monitoring."
-        } else {
-            "Urgent. Glucose $value ${spokenDirection(rate)}. ${spokenProjection(value, projected, projectedExtended)} Check now."
-        }
+        val spokenText = SpokenAlertText.red(value, rate, projected, projectedExtended, recovering)
         VoiceAlertEngine.speak(context, VoiceAlertCategory.RED, spokenText)
     }
 
@@ -212,7 +208,7 @@ object AlertNotifier {
         VoiceAlertEngine.speak(
             context,
             VoiceAlertCategory.YELLOW,
-            "Heads up. Glucose $value ${spokenDirection(rate)}. ${spokenProjection(value, projected, projectedExtended)}"
+            SpokenAlertText.yellow(value, rate, projected, projectedExtended)
         )
     }
 
@@ -609,22 +605,8 @@ object AlertNotifier {
     private fun projectionLine(projected: Int?): String =
         if (projected != null) "Projected $projected mg/dL in 15 min" else "Glucose trending out of range"
 
-    /** Spoken-word direction (no "↓" glyphs), with an urgency cue for steep moves. */
-    private fun spokenDirection(rate: Double?): String = when {
-        rate == null -> "trend unknown"
-        rate <= -2.0 -> "and falling fast"
-        rate < 0 -> "and falling"
-        rate >= 2.0 -> "and rising fast"
-        rate > 0 -> "and rising"
-        else -> "and holding steady"
-    }
-
-    private fun spokenProjection(currentValue: Int, projected: Int?, projectedExtended: Int? = null): String {
-        val (window, value) = AlertExplainer.pickProjectionWindow(currentValue, projected, projectedExtended)
-        if (value == null) return ""
-        val minWord = if (window == 30) "thirty" else "fifteen"
-        return "Projected $value in $minWord minutes."
-    }
+    // Spoken wording for red/yellow glucose alerts (direction, signed rate, projection) lives in
+    // SpokenAlertText - one tested place - rather than being built inline here.
 
     private fun mainActivityIntent(context: Context, requestCode: Int): PendingIntent =
         PendingIntent.getActivity(
