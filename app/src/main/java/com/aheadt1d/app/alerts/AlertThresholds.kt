@@ -29,8 +29,23 @@ import org.aheadt1d.ratemath.SeverityEngine
  */
 val LOW_HIGH_SPLIT = SeverityEngine.DEFAULT_RED_LOW
 
+/**
+ * 2026-09-20: also treats any value at or under the yellow-low band (80) as low-side, not just
+ * the 70 split. Two reasons, one theoretical and one measured.
+ *
+ * Theoretical: a red alert at a value of 71-80 can only ever BE a low-side episode. Reaching
+ * red-high from 80 inside 15 minutes would take roughly +11 mg/dL/min, which is not physiology.
+ *
+ * Measured: SeverityEngine.classify's turn-correction rewrites the 15-min projection, and that
+ * rewritten number is what gets passed here. A red at 71 mg/dL whose projection was corrected to
+ * 101 evaluated as HIGH side, which routed a genuine low into AlertCoordinator's high-side branch
+ * - a 45-minute re-alert cooldown instead of 15, no low clear-hysteresis latch, the rolling 90-min
+ * high correction grace instead of the fixed 30-min low one, and no "recovery stalled" re-fire.
+ */
 fun isLowSide(value: Int, projected: Int?): Boolean =
-    value <= LOW_HIGH_SPLIT || (projected != null && projected <= LOW_HIGH_SPLIT)
+    value <= SeverityEngine.DEFAULT_YELLOW_LOW ||
+        value <= LOW_HIGH_SPLIT ||
+        (projected != null && projected <= LOW_HIGH_SPLIT)
 
 /**
  * Midpoint for yellow-tier alerts (roughly the middle of the 70-180 target range).
