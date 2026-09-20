@@ -92,6 +92,12 @@ object AlertCoordinator {
     private const val KEY_RED_LOW_SIDE = "red_low_side"
     private const val KEY_YELLOW_LAST_ALERTED_PROJECTED = "yellow_last_alerted_projected"
     private const val KEY_LAST_LOW_EVENT_AT = "last_low_event_at_ms"
+    private const val KEY_LAST_YELLOW_FIRED_AT = "last_yellow_fired_at_ms"
+    // Set the first time a real reading is ever handled, so the NoData branch can tell a fresh
+    // install (nothing to say) from an app that HAD a reading and has since lost it entirely.
+    private const val KEY_HAS_EVER_HAD_READING = "has_ever_had_reading"
+    private const val KEY_LAST_KNOWN_VALUE = "last_known_value"
+    private const val KEY_LAST_KNOWN_TIME = "last_known_time_ms"
 
     private const val RED_LOW_REALERT_COOLDOWN_MS = 15 * 60_000L
     // High-side red re-alert cooldown: set to 45 minutes to give insulin time
@@ -148,19 +154,41 @@ object AlertCoordinator {
     // episode" full stop, regardless of how much worse it got - this mirrors
     // fireRedIfWarranted's direction-awareness one tier down.
     private const val YELLOW_MATERIAL_WORSENING_MGDL = 20
+    // Minimum gap between two AUDIBLE yellow alerts, mirroring MIN_REALERT_GAP_MS one tier down.
+    // 2026-09-20: yellow had no time-based cooldown of any kind. Entry into yellow
+    // (forceFire = prevSeverity != "yellow") always posted, and the "none" branch wipes
+    // KEY_YELLOW_LAST_ALERTED_PROJECTED on the way past, so the material-worsening gate never
+    // applied to a flap. A value parked on the boundary - the 15-min projection crossing 80 back
+    // and forth, which is ordinary CGM noise - therefore alarmed on EVERY re-entry: measured 6
+    // alerts in one simulated hour. Same alarm-fatigue shape as the 2026-08-01 red
+    // "recovery just stopped" bug that MIN_REALERT_GAP_MS was added to fix.
+    // Deliberately does NOT gate the material-worsening path below - that one is real new
+    // information and still fires regardless of this floor.
+    private const val MIN_YELLOW_REALERT_GAP_MS = 15 * 60_000L
 
     /** Synchronized: the read-decide-persist sequence below must be atomic.
      *  Two concurrent callers both seeing the pre-alert state would each fire
      *  the alarm for the same episode. */
     @Synchronized
     fun evaluate(context: Context, state: GlucoseDisplayState, trend: LatestTrend?) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (AlertSilenceManager.isSilenced(context)) {
             AlertNotifier.cancelAlerts(context)
             AlertNotifier.cancelPlateau(context)
             AlertNotifier.cancelCorrection(context)
+            // 2026-09-20: a total data blackout is the ONE thing silence must not hide. This
+            // gate used to sit above the `when (state)` below, so silencing glucose alerts also
+            // disabled "I cannot see your glucose" - and silenceIndefinitely() never expires and
+            // is reachable from the main screen, while the ongoing notification carried no
+            // indication that anything was muted. The phone could sit there showing a last-known
+            // number, looking like it was monitoring, for hours. handleStale's own doc already
+            // argues a blackout "is dangerous on its own, regardless of what the last confirmed
+            // severity was"; silence was quietly overriding that.
+            // The alert is posted MUTED (see showSignalLostAlert's allowWhileSilenced) - visible
+            // and honest, but it never overrides the quiet the person actually asked for.
+            if (state is GlucoseDisplayState.Stale) handleStale(context, prefs, state, silenced = true)
             return
         }
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         when (state) {
             is GlucoseDisplayState.Reading -> {
                 // Fresh data after a dark period: clear the signal-lost latch
@@ -197,7 +225,26 @@ object AlertCoordinator {
                 handleReading(context, prefs, state, trend)
             }
             is GlucoseDisplayState.Stale -> handleStale(context, prefs, state)
-            GlucoseDisplayState.NoData -> { /* never had data - nothing to alert on */ }
+            GlucoseDisplayState.NoData -> {
+                // A fresh install genuinely has nothing to say. But "no reading at all" is only
+                // harmless when we never had one: if a reading was handled at some point and the
+                // stored reading has since vanished, that is a blackout wearing a different
+                // costume, and returning silently here would be the app's only completely quiet
+                // failure mode. Reuses the same stale path (and the same 15-min re-alert
+                // heartbeat) off the last value we did see.
+                if (prefs.getBoolean(KEY_HAS_EVER_HAD_READING, false)) {
+                    val lastTime = prefs.getLong(KEY_LAST_KNOWN_TIME, 0L)
+                    handleStale(
+                        context, prefs,
+                        GlucoseDisplayState.Stale(
+                            lastValue = prefs.getInt(KEY_LAST_KNOWN_VALUE, 0),
+                            lastReadingTime = lastTime,
+                            ageMinutes = if (lastTime > 0L) (System.currentTimeMillis() - lastTime) / 60_000 else 0L,
+                            lastArrow = com.aheadt1d.app.notifications.GlucoseTrendArrow.FLAT,
+                        ),
+                    )
+                }
+            }
         }
     }
 
@@ -221,7 +268,12 @@ object AlertCoordinator {
      * evaluate() for how the latch clears and forces a fresh announcement
      * when data resumes.
      */
-    private fun handleStale(context: Context, prefs: android.content.SharedPreferences, stale: GlucoseDisplayState.Stale) {
+    private fun handleStale(
+        context: Context,
+        prefs: android.content.SharedPreferences,
+        stale: GlucoseDisplayState.Stale,
+        silenced: Boolean = false,
+    ) {
         val alreadyFired = prefs.getBoolean(KEY_SIGNAL_LOST_FIRED, false)
         val lastFiredAt = prefs.getLong(KEY_SIGNAL_LOST_LAST_FIRED_AT, 0L)
         val now = System.currentTimeMillis()
@@ -230,7 +282,8 @@ object AlertCoordinator {
 
         AlertNotifier.showSignalLostAlert(
             context, stale.lastValue, stale.lastArrow, stale.ageMinutes,
-            blockedReason = stale.blockedReason
+            blockedReason = stale.blockedReason,
+            allowWhileSilenced = silenced
         )
         prefs.edit {
             putBoolean(KEY_SIGNAL_LOST_FIRED, true)
@@ -266,6 +319,14 @@ object AlertCoordinator {
             prefs.edit { putLong(KEY_LAST_LOW_EVENT_AT, now) }
         }
 
+        // Lets the NoData branch of evaluate() distinguish a fresh install (silent, correctly)
+        // from an app that had a reading and has since lost it entirely (a blackout).
+        prefs.edit {
+            putBoolean(KEY_HAS_EVER_HAD_READING, true)
+            putInt(KEY_LAST_KNOWN_VALUE, reading.value)
+            putLong(KEY_LAST_KNOWN_TIME, if (reading.readingTime > 0L) reading.readingTime else now)
+        }
+
         // Exact same scored reading already handled (same severity AND date):
         // process-restart replay, the 60s tick, or a re-emission. Nothing new
         // to do except the re-alert heartbeats (which may still re-fire via
@@ -296,6 +357,23 @@ object AlertCoordinator {
         ) {
             if (BuildConfig.DEBUG) {
                 Log.d("AlertCoordinator", "low red held: value ${reading.value} < $LOW_RED_CLEAR_HYSTERESIS clear buffer")
+            }
+            // 2026-09-20: this hold assumes the red notification is still sitting in the tray -
+            // "leave the alert posted" was the whole mechanism. But red is built with
+            // setAutoCancel(true), so TAPPING it removes it, and it can be swiped away. Once it
+            // was gone this branch kept returning early and nothing ever re-posted: still
+            // 71-79 mg/dL after a real low, and a completely blank phone until the value either
+            // dropped back under the red line or climbed clear of 80.
+            // Re-post it if it has been dismissed - SILENTLY, since the person already heard
+            // this alert and chose to dismiss it. Restoring the visible indicator is the point;
+            // re-sounding it would be the undismissable nag that got the takeover removed.
+            if (!isNotificationPosted(context, AlertNotifier.RED_ALERT_NOTIFICATION_ID) && !suppressAlert) {
+                AlertNotifier.showRedAlert(
+                    context, reading.value, reading.projected, reading.ratePerMinute,
+                    recovering = (reading.ratePerMinute ?: 0.0) > 0,
+                    projectedExtended = reading.projectedExtended,
+                    silent = true,
+                )
             }
             return
         }
@@ -342,13 +420,25 @@ object AlertCoordinator {
      *  because it's projected to crash through the low band within 15 min
      *  (fast negative rate). Classifying that as high-side would route it
      *  through the never-suppressed high-side heartbeat instead of the
-     *  low-side recovery logic, AND - more importantly - would schedule the
-     *  wrong EmergencyAlertType if it goes unacknowledged, texting an
-     *  emergency contact that the person is HIGH while they're actually
-     *  crashing low. 2026-08-01: found via a real episode that scored red
+     *  low-side recovery logic. (The original 2026-08-01 note here also said
+     *  a misclassification would "schedule the wrong EmergencyAlertType...
+     *  texting an emergency contact that the person is HIGH while they're
+     *  actually crashing low." That consequence no longer exists - the whole
+     *  emergency/ package and SEND_SMS went on 2026-08-20; the app has no SMS
+     *  capability at all. Corrected 2026-09-20 because the sentence read as
+     *  live behaviour. What misrouting still costs is real but smaller: the
+     *  45-min high cooldown instead of 15, no low clear-hysteresis, and the
+     *  rolling 90-min high correction grace.) Found via a real episode that scored red
      *  at value=79/projected=67 and was misclassified high-side. See
      *  AlertThresholds.kt - this now delegates to the one shared copy of the
      *  same formula that AlertNotifier also uses. */
+
+    /** Whether [id] is currently sitting in the notification tray. Fails SAFE toward "yes":
+     *  if the platform won't tell us, we must not treat that as licence to re-post. */
+    private fun isNotificationPosted(context: Context, id: Int): Boolean = runCatching {
+        context.getSystemService(android.app.NotificationManager::class.java)
+            .activeNotifications.any { it.id == id }
+    }.getOrDefault(true)
 
     /** Wipes per-episode state when a red episode ends, so the next one
      *  (low or high) starts from a clean slate instead of inheriting stale
@@ -564,8 +654,14 @@ object AlertCoordinator {
                 reading.ratePerMinute != null && reading.ratePerMinute < 0
             val shouldAudiblyAlert = (!isHighSide || isFastRise || isEscalatedHigh) && !improvingFromRed
 
-            if (!suppressAlert && shouldAudiblyAlert) {
+            // Minimum gap between audible yellows - see MIN_YELLOW_REALERT_GAP_MS. Without it a
+            // value wobbling across the boundary re-entered yellow (and so force-fired) every
+            // single cycle. The state bookkeeping below still runs either way, so a genuinely
+            // worsening episode is never mis-tracked, it just doesn't re-interrupt.
+            val floorCleared = now - prefs.getLong(KEY_LAST_YELLOW_FIRED_AT, 0L) >= MIN_YELLOW_REALERT_GAP_MS
+            if (!suppressAlert && shouldAudiblyAlert && floorCleared) {
                 AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute, projectedExtended = reading.projectedExtended)
+                prefs.edit { putLong(KEY_LAST_YELLOW_FIRED_AT, now) }
             }
             if (projected != null) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
             return
@@ -578,8 +674,13 @@ object AlertCoordinator {
         val worsenedBy = if (isLowSide) lastAlertedProjected - projected else projected - lastAlertedProjected
 
         if (worsenedBy >= YELLOW_MATERIAL_WORSENING_MGDL) {
+            // Deliberately NOT gated by MIN_YELLOW_REALERT_GAP_MS: the projection moving 20+
+            // further into danger is real new information, not a flap.
             AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute, projectedExtended = reading.projectedExtended)
-            prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
+            prefs.edit {
+                putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected)
+                putLong(KEY_LAST_YELLOW_FIRED_AT, now)
+            }
         }
     }
 

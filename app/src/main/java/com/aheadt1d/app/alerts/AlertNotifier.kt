@@ -87,6 +87,12 @@ object AlertNotifier {
         recovering: Boolean = false,
         projectedExtended: Int? = null,
         isInjected: Boolean = DebugGlucoseOverride.isActive,
+        // 2026-09-20: a RE-POST of an alert the person already heard and then dismissed, while
+        // they are still held inside the low band (see AlertCoordinator's clear-hysteresis).
+        // Restores the visible indicator without re-interrupting - re-sounding something they
+        // deliberately swiped away is exactly the undismissable-alarm behaviour that got the
+        // full-screen takeover removed on 2026-08-20.
+        silent: Boolean = false,
     ) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
@@ -106,7 +112,12 @@ object AlertNotifier {
         val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
         val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
 
-        val builder = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
+        // A silent re-post uses the quiet channel: from API 26 the channel owns sound and
+        // vibration, so this is the only way to restore the visible alert without re-buzzing.
+        val builder = Notification.Builder(
+            context,
+            if (silent) AlertChannels.QUIET_CHANNEL_ID else AlertChannels.currentRedChannelId(context),
+        )
             .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, arrow))
             .setAutoCancel(true)
@@ -138,6 +149,10 @@ object AlertNotifier {
             nm.notify(RED_ALERT_NOTIFICATION_ID, builder.build())
             nm.cancel(YELLOW_ALERT_NOTIFICATION_ID)
         }
+
+        // A silent re-post restores the visible indicator only - the person already heard this
+        // alert and dismissed it; speaking it again would be the nag this deliberately avoids.
+        if (silent) return
 
         // 2026-08-01: red-tier alerts play NO tone at all, in either branch.
         // First cut only silenced the takeover (non-recovering) path and left
@@ -230,6 +245,15 @@ object AlertNotifier {
      * fix instead of sending the user to their sensor. Defaults to null so
      * debug force-fire callers keep the generic copy.
      */
+    /**
+     * [allowWhileSilenced] (2026-09-20): a data blackout is not a glucose alert. Silencing says
+     * "stop telling me about my glucose"; it cannot sensibly also mean "and stop telling me you
+     * have gone blind" - especially since silenceIndefinitely() never expires and is reachable
+     * from the main screen. When this is true the notification is still POSTED while silenced,
+     * but muted: no tone, no voice, and setSilent so the red channel's own vibration pattern
+     * doesn't fire either. The person keeps an honest, visible "no data" indicator without the
+     * silence they asked for being overridden by noise.
+     */
     fun showSignalLostAlert(
         context: Context,
         lastValue: Int,
@@ -237,8 +261,10 @@ object AlertNotifier {
         ageMinutes: Long,
         blockedReason: ReadBlockedReason? = null,
         isInjected: Boolean = DebugGlucoseOverride.isActive,
+        allowWhileSilenced: Boolean = false,
     ) {
-        if (AlertSilenceManager.isSilenced(context)) return
+        val silenced = AlertSilenceManager.isSilenced(context)
+        if (silenced && !allowWhileSilenced) return
         AlertChannels.ensure(context)
 
         val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
@@ -246,7 +272,10 @@ object AlertNotifier {
         val baseText = "Last reading $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. ${staleGuidance(blockedReason)}"
         val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$baseText" else baseText
 
-        val builder = Notification.Builder(context, AlertChannels.currentRedChannelId(context))
+        // Visible but mute while silenced - the channel owns sound/vibration from API 26, so
+        // this is the only way to post without interrupting. See AlertChannels.QUIET_CHANNEL_ID.
+        val channelId = if (silenced) AlertChannels.QUIET_CHANNEL_ID else AlertChannels.currentRedChannelId(context)
+        val builder = Notification.Builder(context, channelId)
             .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
             .setContentTitle("${prefix}🔴 No new glucose data — ${ageMinutes}m")
@@ -264,6 +293,9 @@ object AlertNotifier {
         if (isInjected) {
             builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
         }
+        if (silenced) {
+            builder.setSubText("Alerts are silenced — showing this anyway")
+        }
 
         val notification = builder.build()
 
@@ -275,6 +307,9 @@ object AlertNotifier {
         // precedent as yellow/signal-lost sharing YELLOW_ALERT_NOTIFICATION_ID
         // before this change).
         notifyIfAllowed(context) { nm -> nm.notify(RED_ALERT_NOTIFICATION_ID, notification) }
+
+        // Muted while silenced: the notification above is the whole point, the noise is not.
+        if (silenced) return
 
         AlertTones.play(context, AlertTones.Tone.SIGNAL_LOST)
 

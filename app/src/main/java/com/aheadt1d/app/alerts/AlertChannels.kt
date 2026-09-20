@@ -119,6 +119,11 @@ object AlertChannels {
      *  every alert post, and after returning from the DND-access settings
      *  screen (that last one is what actually triggers the DND migration). */
     fun ensure(context: Context) {
+        context.getSystemService(NotificationManager::class.java).let { quietNm ->
+            if (quietNm.getNotificationChannel(QUIET_CHANNEL_ID) == null) {
+                quietNm.createNotificationChannel(buildQuietChannel())
+            }
+        }
         val nm = context.getSystemService(NotificationManager::class.java)
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -180,6 +185,26 @@ object AlertChannels {
             }
         }
     }
+
+    /**
+     * Silent channel for notifications that must be VISIBLE without interrupting - added
+     * 2026-09-20 for two cases: a data-blackout notice shown while the person has alerts
+     * silenced, and re-posting a red the person dismissed while still held inside the low band.
+     *
+     * It has to be a separate channel rather than a builder flag: from API 26 the CHANNEL owns
+     * sound and vibration, so Notification.Builder cannot mute a post made on the high-importance
+     * red channel. IMPORTANCE_LOW means no sound, no vibration, no heads-up - the notification
+     * simply appears in the shade, which is exactly the intent.
+     */
+    const val QUIET_CHANNEL_ID = "glucose_quiet_notice"
+
+    private fun buildQuietChannel(): NotificationChannel =
+        NotificationChannel(QUIET_CHANNEL_ID, "Silent notices", NotificationManager.IMPORTANCE_LOW).apply {
+            description = "Visible-but-silent notices, e.g. no-data while alerts are silenced"
+            enableVibration(false)
+            setSound(null, null)
+            setBypassDnd(false)
+        }
 
     private fun buildYellowChannel(id: String): NotificationChannel =
         NotificationChannel(id, "Glucose warnings", NotificationManager.IMPORTANCE_HIGH).apply {

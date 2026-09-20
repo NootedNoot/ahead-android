@@ -122,6 +122,20 @@ object GlucoseNotifier {
 
         if (isInjected) {
             builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
+        } else if (com.aheadt1d.app.alerts.AlertSilenceManager.isSilenced(context)) {
+            // 2026-09-20: this notification carried NO indication that alerts were muted, so a
+            // silenced phone looked exactly like a monitoring one - last number, trend arrow,
+            // everything. Combined with silenceIndefinitely() (reachable from the main screen,
+            // never expires), silence could look like "all clear" indefinitely. The ongoing
+            // notification is the surface people actually glance at, so it has to say so.
+            val mins = com.aheadt1d.app.alerts.AlertSilenceManager.getRemainingMinutes(context)
+            builder.setSubText(
+                if (com.aheadt1d.app.alerts.AlertSilenceManager.isPermanentlySilenced(context)) {
+                    "🔕 Alerts silenced until you turn them back on"
+                } else {
+                    "🔕 Alerts silenced for ${mins}m"
+                }
+            )
         }
 
         // Accent color tracks the same severity tier the title's 🔴/⚠️ prefix
