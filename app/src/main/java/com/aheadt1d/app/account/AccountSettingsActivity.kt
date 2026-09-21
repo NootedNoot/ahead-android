@@ -81,9 +81,9 @@ class AccountSettingsActivity : AppCompatActivity() {
             val isThisDevice = deviceId == thisDeviceId
 
             row.findViewById<TextView>(R.id.deviceLabel).text =
-                (device.optString("label", null) ?: "Unnamed device") + if (isThisDevice) " (this device)" else ""
+                ((if (device.isNull("label")) null else device.getString("label")) ?: "Unnamed device") + if (isThisDevice) " (this device)" else ""
 
-            val lastUsed = device.optString("lastUsedAt", null)
+            val lastUsed = if (device.isNull("lastUsedAt")) null else device.getString("lastUsedAt")
             val revoked = device.optBoolean("revoked", false)
             row.findViewById<TextView>(R.id.deviceMeta).text = when {
                 revoked -> "Revoked"

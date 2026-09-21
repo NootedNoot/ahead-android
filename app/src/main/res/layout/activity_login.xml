@@ -187,13 +187,18 @@
             android:padding="8dp" />
 
         <TextView
+            android:id="@+id/forgotPasswordLink"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Forgot your password? There's no reset flow yet — contact Ryan directly."
-            android:textColor="@color/muted"
-            android:textSize="11sp"
-            android:gravity="center" />
+            android:text="Forgot password?"
+            android:textColor="@color/accent2"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:padding="8dp"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackgroundBorderless" />
 
     </LinearLayout>
 </ScrollView>

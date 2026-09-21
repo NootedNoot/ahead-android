@@ -22,6 +22,8 @@ object BackendClient {
      *  this should only actually happen if AuthPrefs was cleared (e.g. a
      *  logout/delete-account) without MainActivity's login gate catching it
      *  first, which shouldn't be reachable in normal use. */
+    class AuthRevokedException : IOException("Device upload authorization revoked (401)")
+
     fun postCheckTrend(context: Context, body: JSONObject): JSONObject {
         val apiKey = AuthPrefs.deviceApiKey(context)
             ?: throw IOException("No device key stored - not logged in")
@@ -33,6 +35,9 @@ object BackendClient {
             .build()
 
         client.newCall(request).execute().use { response ->
+            if (response.code == 401) {
+                throw AuthRevokedException()
+            }
             val responseBody = response.body?.string()
             if (!response.isSuccessful || responseBody == null) {
                 throw IOException("check-trend request failed: ${response.code}")

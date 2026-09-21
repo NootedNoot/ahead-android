@@ -32,6 +32,7 @@ object AuthPrefs {
     private const val KEY_DEVICE_API_KEY = "device_api_key"
     private const val KEY_DEVICE_ID = "device_id"
     private const val KEY_IS_OWNER = "is_owner"
+    private const val KEY_UPLOAD_REVOKED = "upload_revoked"
 
     /** The one thing MainActivity's cold-start gate checks - see this
      *  object's class doc for why it's the device key, not the JWT. */
@@ -42,6 +43,15 @@ object AuthPrefs {
     fun displayName(context: Context): String? = prefs(context).getString(KEY_DISPLAY_NAME, null)
     fun deviceApiKey(context: Context): String? = prefs(context).getString(KEY_DEVICE_API_KEY, null)
     fun deviceId(context: Context): String? = prefs(context).getString(KEY_DEVICE_ID, null)
+
+    /** Set when check-trend encounters a 401, indicating the device API key
+     *  was revoked on the backend (e.g. after a password reset). Drives the
+     *  warning banner on MainActivity. */
+    fun isUploadRevoked(context: Context): Boolean = prefs(context).getBoolean(KEY_UPLOAD_REVOKED, false)
+
+    fun setUploadRevoked(context: Context, revoked: Boolean) {
+        prefs(context).edit { putBoolean(KEY_UPLOAD_REVOKED, revoked) }
+    }
 
     /** 2026-08-29: true only for the specific backend account
      *  ahead-backend's admin panel has flagged as Ryan's own (see
@@ -69,6 +79,7 @@ object AuthPrefs {
         prefs(context).edit {
             putString(KEY_DEVICE_ID, deviceId)
             putString(KEY_DEVICE_API_KEY, apiKey)
+            putBoolean(KEY_UPLOAD_REVOKED, false)
         }
     }
 

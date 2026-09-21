@@ -5,6 +5,7 @@ import android.os.RemoteException
 import android.util.Log
 import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.alerts.PlateauCoordinator
+import com.aheadt1d.app.auth.AuthPrefs
 import com.aheadt1d.app.bridge.BroadcastGlucoseBuffer
 import com.aheadt1d.app.events.UserEventRepository
 import com.aheadt1d.app.health.GlucosePoint
@@ -203,12 +204,17 @@ object GlucoseCheckRunner {
 
         return try {
             val responseJson = BackendClient.postCheckTrend(context, body)
+            AuthPrefs.setUploadRevoked(context, false)
             // Dumps the full payload (glucose value, severity, rate, guesses) -
             // never in release, where a bugreport/logcat pull would otherwise
             // expose real health data.
             if (BuildConfig.DEBUG) Log.d(TAG, "check-trend response: $responseJson")
             updateLatestTrend(context, responseJson)
             Outcome.SUCCESS
+        } catch (e: BackendClient.AuthRevokedException) {
+            Log.w(TAG, "check-trend 401: device upload authorization was revoked", e)
+            AuthPrefs.setUploadRevoked(context, true)
+            Outcome.FAILURE
         } catch (e: IOException) {
             Log.w(TAG, "check-trend POST failed, will retry", e)
             Outcome.RETRY

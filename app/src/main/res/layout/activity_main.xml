@@ -137,6 +137,23 @@
                 android:textStyle="bold"
                 android:visibility="gone" />
 
+            <!-- Shown when upload device key was revoked (e.g. after password reset) -->
+            <TextView
+                android:id="@+id/uploadRevokedBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#2A1A4A"
+                android:clickable="true"
+                android:focusable="true"
+                android:padding="8dp"
+                android:layout_marginBottom="6dp"
+                android:text="⚠️ Uploads paused: Session ended or password changed. Tap to log in."
+                android:textAlignment="center"
+                android:textColor="#F3E8FF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

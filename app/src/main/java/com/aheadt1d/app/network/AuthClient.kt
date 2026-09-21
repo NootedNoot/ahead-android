@@ -145,6 +145,13 @@ object AuthClient {
         deleteBlocking("/api/auth/account", body, authHeader = requireJwt(context))
     }
 
+    /** Requests a password-reset email from the backend for the given address.
+     *  Deliberately unauthenticated - can be called before login. */
+    suspend fun requestPasswordReset(email: String): JSONObject = withContext(Dispatchers.IO) {
+        val body = JSONObject().apply { put("email", email) }
+        postBlocking("/api/auth/password-reset/request", body)
+    }
+
     private fun persistSession(context: Context, result: JSONObject) {
         val user = result.getJSONObject("user")
         AuthPrefs.saveSession(

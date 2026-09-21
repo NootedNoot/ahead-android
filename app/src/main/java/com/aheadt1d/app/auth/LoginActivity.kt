@@ -11,7 +11,9 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.aheadt1d.app.MainActivity
 import com.aheadt1d.app.R
@@ -44,6 +46,7 @@ class LoginActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var toggleModeLink: TextView
     private lateinit var togglePasswordVisibility: TextView
+    private lateinit var forgotPasswordLink: TextView
     private var passwordVisible = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,12 +63,14 @@ class LoginActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progressBar)
         toggleModeLink = findViewById(R.id.toggleModeLink)
         togglePasswordVisibility = findViewById(R.id.togglePasswordVisibility)
+        forgotPasswordLink = findViewById(R.id.forgotPasswordLink)
 
         toggleModeLink.setOnClickListener {
             mode = if (mode == MODE_LOGIN) MODE_SIGNUP else MODE_LOGIN
             applyMode()
         }
         togglePasswordVisibility.setOnClickListener { setPasswordVisible(!passwordVisible) }
+        forgotPasswordLink.setOnClickListener { showForgotPasswordDialog() }
         submitButton.setOnClickListener { submit() }
         applyMode()
     }
@@ -92,11 +97,13 @@ class LoginActivity : AppCompatActivity() {
             displayNameGroup.visibility = View.GONE
             submitButton.text = "Log in"
             toggleModeLink.text = "New here? Create an account"
+            forgotPasswordLink.visibility = View.VISIBLE
         } else {
             modeSubtitle.text = "Create your account"
             displayNameGroup.visibility = View.VISIBLE
             submitButton.text = "Sign up"
             toggleModeLink.text = "Already have an account? Log in"
+            forgotPasswordLink.visibility = View.GONE
         }
     }
 
@@ -144,10 +151,60 @@ class LoginActivity : AppCompatActivity() {
         }
     }
 
+    private fun showForgotPasswordDialog() {
+        val currentEmail = emailInput.text.toString().trim()
+        val input = EditText(this).apply {
+            hint = "you@example.com"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            if (currentEmail.isNotBlank()) setText(currentEmail)
+            setTextColor(ContextCompat.getColor(this@LoginActivity, R.color.text_primary))
+            setHintTextColor(ContextCompat.getColor(this@LoginActivity, R.color.muted))
+            background = ContextCompat.getDrawable(this@LoginActivity, R.drawable.input_background)
+            setPadding(32, 24, 32, 24)
+        }
+        val container = android.widget.FrameLayout(this).apply {
+            setPadding(48, 24, 48, 12)
+            addView(input)
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Reset Password")
+            .setMessage("Enter your email address and we'll send you a link to reset your password.")
+            .setView(container)
+            .setPositiveButton("Send reset link") { _, _ ->
+                val targetEmail = input.text.toString().trim()
+                if (targetEmail.isNotBlank()) {
+                    requestPasswordReset(targetEmail)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun requestPasswordReset(email: String) {
+        setLoading(true)
+        lifecycleScope.launch {
+            try {
+                AuthClient.requestPasswordReset(email)
+                setLoading(false)
+                AlertDialog.Builder(this@LoginActivity)
+                    .setTitle("Check your email")
+                    .setMessage("If an account exists for $email, a password reset link has been sent. Check your inbox and follow the link to set a new password.")
+                    .setPositiveButton("OK", null)
+                    .show()
+            } catch (e: Exception) {
+                Log.w(TAG, "Password reset request failed", e)
+                setLoading(false)
+                showError("Couldn't request password reset - check your connection and try again")
+            }
+        }
+    }
+
     private fun setLoading(loading: Boolean) {
         progressBar.visibility = if (loading) View.VISIBLE else View.GONE
         submitButton.isEnabled = !loading
         toggleModeLink.isEnabled = !loading
+        forgotPasswordLink.isEnabled = !loading
     }
 
     private fun showError(message: String) {

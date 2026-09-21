@@ -138,6 +138,10 @@ class MainActivity : AppCompatActivity() {
             runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
         }
 
+        findViewById<View>(R.id.uploadRevokedBanner).setOnClickListener {
+            startActivity(LoginActivity.createIntent(this))
+        }
+
         // No manual "Check now" control by design: the foreground service's own
         // 5-min loop is the single source of fresh data, backed by the exact-alarm
         // + WorkManager watchdogs. If a manual refresh ever felt necessary, that
@@ -496,6 +500,7 @@ class MainActivity : AppCompatActivity() {
         // auto-revoke, the user toggling it off in Settings) - the wizard
         // only ever surfaces this once, during first-run setup.
         updateDndRegressionBanner()
+        updateUploadRevokedBanner()
         if (!HealthConnectManager.isAvailable(this)) return
         lifecycleScope.launch {
             val client = HealthConnectClient.getOrCreate(this@MainActivity)
@@ -510,6 +515,11 @@ class MainActivity : AppCompatActivity() {
     private fun updateDndRegressionBanner() {
         findViewById<View>(R.id.dndRegressionBanner).visibility =
             if (AlertChannels.dndAccessRegressed(this)) View.VISIBLE else View.GONE
+    }
+
+    private fun updateUploadRevokedBanner() {
+        findViewById<View>(R.id.uploadRevokedBanner)?.visibility =
+            if (AuthPrefs.isUploadRevoked(this)) View.VISIBLE else View.GONE
     }
 
     // GlucoseCheckWorker runs in this same process and publishes to
