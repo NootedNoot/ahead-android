@@ -139,9 +139,19 @@ object AlertCoordinator {
     // instant it nudges back over the floor - so a BG hovering near the cutoff
     // can't flicker the red alert on and off. Set to 80 mg/dL (updated 2026-08-20
     // at owner request) so recovery is clear and unambiguous.
-    // High-side reds are deliberately NOT held this way (a fast fall from a high
-    // is its own hazard, not something to latch).
     private const val LOW_RED_CLEAR_HYSTERESIS = 80
+
+    // High-side red clear hysteresis. Once a critical HIGH has fired red (projected >= 250),
+    // hold the red state while projection remains >= 235 (or value >= 200) unless the rate
+    // is actively falling (<= -0.5 mg/dL/min). Hovering near 235-245 with rate wobbling
+    // (+0.3 to +1.0) would otherwise flap red->yellow->red every 5 minutes, causing severe
+    // alert fatigue while insulin is already working. Holding red preserves the 45-min high
+    // cooldown so the user is not pestered while already treating.
+    private const val HIGH_RED_CLEAR_HYSTERESIS_PROJECTED = 235
+    private const val HIGH_RED_CLEAR_HYSTERESIS_VALUE = 200
+    internal const val HIGH_RED_HOLD_MAX_DURATION_MS = 60 * 60_000L
+    internal const val KEY_HIGH_RED_HELD_SINCE = "high_red_held_since_ms"
+
     // Roughly the middle of the 70-180 healthy band. Only used to infer which
     // direction counts as "worse" for the current yellow episode (lower vs
     // higher) - never to decide severity itself. (2026-08-28: that severity
@@ -370,40 +380,62 @@ object AlertCoordinator {
             return
         }
 
-        // Low-side red clear hysteresis. A critical low that has fired red must
-        // not clear the instant severity drops below the floor - a BG hovering
-        // around the cutoff (e.g. 58 -> 62 -> 57) would otherwise cancel and
-        // re-fire the red alert on every wobble. Hold the alert (leave it posted,
-        // don't advance last-severity/date) until the value has climbed solidly
-        // past the danger band. Only applies to LOW reds; a high red is never
-        // latched. Deliberately does NOT route through fireRedIfWarranted: a hold
-        // value can sit in the 70-75 band where that function's low/high split
-        // would misclassify it - here we simply keep the existing red up.
-        if (prevSeverity == "red" && severity != "red" &&
-            prefs.getBoolean(KEY_RED_LOW_SIDE, false) &&
-            reading.value < LOW_RED_CLEAR_HYSTERESIS
-        ) {
-            if (BuildConfig.DEBUG) {
-                Log.d("AlertCoordinator", "low red held: value ${reading.value} < $LOW_RED_CLEAR_HYSTERESIS clear buffer")
+        // Red clear hysteresis (Low and High).
+        // A critical episode that has fired red must not clear the instant severity drops below
+        // the boundary - a BG hovering around the cutoff would otherwise cancel and re-fire on
+        // every wobble (severe alert fatigue). Hold the alert (leave it posted, don't advance
+        // last-severity/date) until the reading has solidly exited the danger band.
+        val isLowRed = prefs.getBoolean(KEY_RED_LOW_SIDE, false)
+        if (prevSeverity == "red" && severity != "red") {
+            if (isLowRed && reading.value < LOW_RED_CLEAR_HYSTERESIS) {
+                if (BuildConfig.DEBUG) {
+                    Log.d("AlertCoordinator", "low red held: value ${reading.value} < $LOW_RED_CLEAR_HYSTERESIS clear buffer")
+                }
+                if (!isNotificationPosted(context, AlertNotifier.RED_ALERT_NOTIFICATION_ID) && !suppressAlert) {
+                    AlertNotifier.showRedAlert(
+                        context, reading.value, reading.projected, reading.ratePerMinute,
+                        recovering = (reading.ratePerMinute ?: 0.0) > 0,
+                        projectedExtended = reading.projectedExtended,
+                        silent = true,
+                    )
+                }
+                recordAlertAction(context, date, "held_low_red")
+                return
+            } else if (!isLowRed) {
+                val proj = reading.projected ?: reading.value
+                val isActivelyFalling = reading.ratePerMinute != null && reading.ratePerMinute <= -0.5
+                val heldSince = prefs.getLong(KEY_HIGH_RED_HELD_SINCE, 0L)
+                val holdDurationExceeded = heldSince > 0L && (now - heldSince >= HIGH_RED_HOLD_MAX_DURATION_MS)
+
+                val shouldHoldHighRed = !holdDurationExceeded &&
+                    reading.value >= HIGH_RED_CLEAR_HYSTERESIS_VALUE &&
+                    proj >= HIGH_RED_CLEAR_HYSTERESIS_PROJECTED &&
+                    !isActivelyFalling
+
+                if (shouldHoldHighRed) {
+                    if (heldSince == 0L) {
+                        prefs.edit { putLong(KEY_HIGH_RED_HELD_SINCE, now) }
+                    }
+                    if (BuildConfig.DEBUG) {
+                        Log.d("AlertCoordinator", "high red held: value ${reading.value}, proj $proj >= $HIGH_RED_CLEAR_HYSTERESIS_PROJECTED")
+                    }
+                    if (!isNotificationPosted(context, AlertNotifier.RED_ALERT_NOTIFICATION_ID) && !suppressAlert) {
+                        AlertNotifier.showRedAlert(
+                            context, reading.value, reading.projected, reading.ratePerMinute,
+                            recovering = false,
+                            projectedExtended = reading.projectedExtended,
+                            silent = true,
+                        )
+                    }
+                    recordAlertAction(context, date, "held_high_red")
+                    return
+                } else if (holdDurationExceeded) {
+                    prefs.edit { remove(KEY_HIGH_RED_HELD_SINCE) }
+                    if (BuildConfig.DEBUG) {
+                        Log.d("AlertCoordinator", "high red hold duration expired (60m cap reached); releasing hold")
+                    }
+                }
             }
-            // 2026-09-20: this hold assumes the red notification is still sitting in the tray -
-            // "leave the alert posted" was the whole mechanism. But red is built with
-            // setAutoCancel(true), so TAPPING it removes it, and it can be swiped away. Once it
-            // was gone this branch kept returning early and nothing ever re-posted: still
-            // 71-79 mg/dL after a real low, and a completely blank phone until the value either
-            // dropped back under the red line or climbed clear of 80.
-            // Re-post it if it has been dismissed - SILENTLY, since the person already heard
-            // this alert and chose to dismiss it. Restoring the visible indicator is the point;
-            // re-sounding it would be the undismissable nag that got the takeover removed.
-            if (!isNotificationPosted(context, AlertNotifier.RED_ALERT_NOTIFICATION_ID) && !suppressAlert) {
-                AlertNotifier.showRedAlert(
-                    context, reading.value, reading.projected, reading.ratePerMinute,
-                    recovering = (reading.ratePerMinute ?: 0.0) > 0,
-                    projectedExtended = reading.projectedExtended,
-                    silent = true,
-                )
-            }
-            return
         }
 
         // A new scored reading (new date). Note a persisting red (or yellow)
@@ -412,7 +444,7 @@ object AlertCoordinator {
         // otherwise every cycle would re-alarm and the cooldown/threshold
         // would never apply.
         when (severity) {
-            "red" -> handleRedTransition(context, prefs, reading, prevSeverity, now, lastRedFiredAt, suppressAlert)
+            "red" -> handleRedTransition(context, prefs, reading, prevSeverity, now, lastRedFiredAt, suppressAlert, date)
             "yellow" -> {
                 // Downgrade from red cancels the red first.
                 if (prevSeverity == "red") {
@@ -428,12 +460,14 @@ object AlertCoordinator {
                     forceFire = prevSeverity != "yellow",
                     downgradedFromRed = prevSeverity == "red",
                     suppressAlert, now,
+                    readingDate = date,
                 )
             }
             else -> {
                 AlertNotifier.cancelAlerts(context)
                 if (prevSeverity == "red") clearRedEpisodeState(prefs)
                 prefs.edit { remove(KEY_YELLOW_LAST_ALERTED_PROJECTED) }
+                recordAlertAction(context, date, "none")
             }
         }
 
@@ -476,6 +510,7 @@ object AlertCoordinator {
             remove(KEY_LOW_WAS_RECOVERING)
             remove(KEY_LOW_WAS_HELD)
             remove(KEY_RED_LOW_SIDE)
+            remove(KEY_HIGH_RED_HELD_SINCE)
         }
     }
 
@@ -490,6 +525,7 @@ object AlertCoordinator {
         now: Long,
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
+        readingDate: Long = 0L,
     ) {
         // "Entering red" (structural bookkeeping - reseed the side-tracking
         // state that clearRedEpisodeState wipes on any red->yellow downgrade)
@@ -502,7 +538,10 @@ object AlertCoordinator {
                 // Remember which side this episode is, so the clear-hysteresis
                 // below only ever holds a LOW red (never a high one).
                 putBoolean(KEY_RED_LOW_SIDE, isLowSide(reading.value, reading.projected))
+                remove(KEY_HIGH_RED_HELD_SINCE)
             }
+        } else {
+            prefs.edit { remove(KEY_HIGH_RED_HELD_SINCE) }
         }
         val forceFire = if (isLowSide(reading.value, reading.projected)) {
             enteringRed
@@ -514,7 +553,7 @@ object AlertCoordinator {
             // force-fires.
             prevSeverity == "none"
         }
-        fireRedIfWarranted(context, prefs, reading, forceFire, now, lastRedFiredAt, suppressAlert)
+        fireRedIfWarranted(context, prefs, reading, forceFire, now, lastRedFiredAt, suppressAlert, readingDate)
     }
 
     /** Same (severity="red", date) as last handled - a 60s-tick re-emission
@@ -544,6 +583,7 @@ object AlertCoordinator {
         now: Long,
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
+        readingDate: Long = 0L,
     ) {
         val value = reading.value
         val rate = reading.ratePerMinute
@@ -578,6 +618,7 @@ object AlertCoordinator {
                 // here wouldn't change what they do next. A brand-new episode
                 // still always fires once even if already rising at first
                 // detection.
+                recordAlertAction(context, readingDate, "held_low_red")
                 return
             }
             // Held-state just stalled/reversed is new information worth an
@@ -590,6 +631,9 @@ object AlertCoordinator {
             if ((forceFire || heldJustStopped || now - lastRedFiredAt >= RED_LOW_REALERT_COOLDOWN_MS) && !suppressAlert) {
                 AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering, projectedExtended = reading.projectedExtended)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
+                recordAlertAction(context, readingDate, "audible_red")
+            } else {
+                recordAlertAction(context, readingDate, "suppressed_cooldown")
             }
             return
         }
@@ -613,12 +657,16 @@ object AlertCoordinator {
         val correctionHolding = inCorrectionGrace && !stillClimbing
 
         if (correctionHolding && !forceFire) {
+            recordAlertAction(context, readingDate, "suppressed_cooldown")
             return
         }
 
         if ((forceFire || now - lastRedFiredAt >= RED_HIGH_REALERT_COOLDOWN_MS) && !suppressAlert) {
             AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false, projectedExtended = reading.projectedExtended)
             prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
+            recordAlertAction(context, readingDate, "audible_red")
+        } else {
+            recordAlertAction(context, readingDate, "suppressed_cooldown")
         }
     }
 
@@ -644,6 +692,7 @@ object AlertCoordinator {
         downgradedFromRed: Boolean,
         suppressAlert: Boolean,
         now: Long = System.currentTimeMillis(),
+        readingDate: Long = 0L,
     ) {
         val projected = reading.projected
 
@@ -659,6 +708,7 @@ object AlertCoordinator {
                 Log.d("AlertCoordinator", "Yellow alert suppressed: in 40m post-hypo recovery grace window (value=${reading.value}, rate=${reading.ratePerMinute})")
             }
             if (projected != null) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
+            recordAlertAction(context, readingDate, "suppressed_cooldown")
             return
         }
 
@@ -666,36 +716,50 @@ object AlertCoordinator {
             val isHighSide = (reading.projected ?: reading.value) >= YELLOW_MID_POINT
             val isFastRise = reading.ratePerMinute != null && reading.ratePerMinute >= 1.5
             val isEscalatedHigh = (reading.projected ?: reading.value) >= 240 || reading.value >= 240
-            // 2026-08-26, real reported case: 298 red -> 283 yellow, falling
-            // -3.1 mg/dL/min, still forced an audible ping purely because 283
-            // is numerically >=240 - with zero regard for the fact that this
-            // was an already-tracked, already-alerted episode actively
-            // improving on its own (IOB working), not a fresh escalation. A
-            // red episode resolving down into yellow while still falling is
-            // improvement in progress - don't let isEscalatedHigh override
-            // that just because the number is still big. Only applies to a
-            // genuine downgrade-from-red; a brand-new episode (prevSeverity
-            // "none") that happens to already be falling still alerts
-            // normally, since there's no prior red episode it could be
-            // "improving" from.
-            val improvingFromRed = downgradedFromRed && isHighSide &&
-                reading.ratePerMinute != null && reading.ratePerMinute < 0
-            val shouldAudiblyAlert = (!isHighSide || isFastRise || isEscalatedHigh) && !improvingFromRed
+            // Any downgrade from red on the high side is an improvement or leveling off from a
+            // prior critical alert. Never blast an audible tone or TTS speech on a high-side downgrade!
+            val shouldAudiblyAlert = if (downgradedFromRed && isHighSide) {
+                false
+            } else {
+                !isHighSide || isFastRise || isEscalatedHigh
+            }
 
             // Minimum gap between audible yellows - see MIN_YELLOW_REALERT_GAP_MS. Without it a
             // value wobbling across the boundary re-entered yellow (and so force-fired) every
             // single cycle. The state bookkeeping below still runs either way, so a genuinely
             // worsening episode is never mis-tracked, it just doesn't re-interrupt.
             val floorCleared = now - prefs.getLong(KEY_LAST_YELLOW_FIRED_AT, 0L) >= MIN_YELLOW_REALERT_GAP_MS
-            if (!suppressAlert && shouldAudiblyAlert && floorCleared) {
-                AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute, projectedExtended = reading.projectedExtended)
-                prefs.edit { putLong(KEY_LAST_YELLOW_FIRED_AT, now) }
+            if (!suppressAlert) {
+                if (shouldAudiblyAlert && floorCleared) {
+                    AlertNotifier.showYellowAlert(
+                        context, reading.value, reading.projected, reading.ratePerMinute,
+                        projectedExtended = reading.projectedExtended,
+                        silent = false,
+                    )
+                    prefs.edit { putLong(KEY_LAST_YELLOW_FIRED_AT, now) }
+                    recordAlertAction(context, readingDate, "audible_yellow")
+                } else if (downgradedFromRed && isHighSide) {
+                    // Update tray notification quietly on downgrade from red so the status bar and drawer stay accurate without audio/TTS fatigue
+                    AlertNotifier.showYellowAlert(
+                        context, reading.value, reading.projected, reading.ratePerMinute,
+                        projectedExtended = reading.projectedExtended,
+                        silent = true,
+                    )
+                    recordAlertAction(context, readingDate, "silent_yellow_update")
+                } else {
+                    recordAlertAction(context, readingDate, "suppressed_cooldown")
+                }
+            } else {
+                recordAlertAction(context, readingDate, "suppressed_cooldown")
             }
             if (projected != null) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
             return
         }
 
-        if (projected == null || suppressAlert) return
+        if (projected == null || suppressAlert) {
+            recordAlertAction(context, readingDate, "none")
+            return
+        }
 
         val lastAlertedProjected = prefs.getInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected)
         val isLowSide = projected < YELLOW_MID_POINT
@@ -709,7 +773,17 @@ object AlertCoordinator {
                 putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected)
                 putLong(KEY_LAST_YELLOW_FIRED_AT, now)
             }
+            recordAlertAction(context, readingDate, "audible_yellow")
+        } else {
+            recordAlertAction(context, readingDate, "suppressed_cooldown")
         }
     }
 
+    private fun recordAlertAction(context: Context, readingTimeMs: Long, action: String) {
+        if (readingTimeMs > 0L) {
+            runCatching {
+                com.aheadt1d.app.network.BackendClient.postAlertAction(context, readingTimeMs, action)
+            }
+        }
+    }
 }

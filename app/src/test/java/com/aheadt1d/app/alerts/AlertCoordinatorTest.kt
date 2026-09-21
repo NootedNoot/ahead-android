@@ -415,11 +415,9 @@ class AlertCoordinatorTest {
     }
 
     @Test
-    fun `yellow downgrade from red while falling fast does not audibly alert even above 240`() {
+    fun `yellow downgrade from red while falling fast updates silently on quiet channel`() {
         // 2026-08-26, real reported case: 298 red -> 283 yellow, falling
-        // -3.1 mg/dL/min - previously force-alerted purely because 283 is
-        // still numerically >=240, with no regard for the fact that this was
-        // an already-tracked episode improving on its own.
+        // -3.1 mg/dL/min. Clears red hold and updates tray silently on quiet channel.
         AlertCoordinator.evaluate(context, reading(value = 298, severity = "red"), trend(1L, 298, "red"))
         val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
         context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
@@ -430,29 +428,73 @@ class AlertCoordinatorTest {
             trend(2L, 283, "yellow"),
         )
 
+        val notif = shadowNm.getNotification(yellowNotificationId)
+        assertTrue("a red episode improving into yellow should update notification silently in tray", notif != null)
+        assertEquals(AlertChannels.QUIET_CHANNEL_ID, notif?.channelId)
+    }
+
+    @Test
+    fun `high red clear hysteresis holds red alert when hovering near boundary without falling fast`() {
+        AlertCoordinator.evaluate(context, reading(value = 250, severity = "red"), trend(1L, 250, "red"))
+        val firstTitle = redTitle()
+        assertTrue("initial high red should fire", firstTitle?.contains("250") == true)
+
+        // Flat at 245 with projected 245 (backend scored yellow):
+        // Value >= 200, projected >= 235, rate is 0.0 (not actively falling <= -0.5).
+        // High red hysteresis holds the red alert instead of flapping to yellow!
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 245, severity = "yellow", ratePerMinute = 0.0, projected = 245),
+            trend(2L, 245, "yellow"),
+        )
+
+        val heldTitle = redTitle()
+        assertTrue("high red alert should be held while hovering near high boundary", heldTitle != null)
         assertNull(
-            "a red episode improving into yellow while falling fast must not force an audible alert",
-            shadowNm.getNotification(yellowNotificationId),
+            "yellow alert should not post while high red is held",
+            shadowNm.getNotification(AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID),
         )
     }
 
     @Test
-    fun `yellow downgrade from red still alerts if not actually falling`() {
-        AlertCoordinator.evaluate(context, reading(value = 298, severity = "red"), trend(1L, 298, "red"))
-        val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
-        context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
-
-        // Flat, not falling - the "improving" exception must not apply.
+    fun `hovering at 235 with minor rate fluctuations does not flap or re-alert`() {
+        // Cycle 1: 235 climbing +1.0 mg/dL/min (projected 250) -> RED fires
         AlertCoordinator.evaluate(
             context,
-            reading(value = 283, severity = "yellow", ratePerMinute = 0.0, projected = 283),
-            trend(2L, 283, "yellow"),
+            reading(value = 235, severity = "red", ratePerMinute = 1.0, projected = 250),
+            trend(1L, 235, "red"),
         )
+        val initialRed = redTitle()
+        assertTrue("initial red alert fires at 235 with +1.0 rate", initialRed?.contains("235") == true)
 
-        assertTrue(
-            "a red->yellow downgrade that isn't actually falling should still alert (still >=240)",
-            shadowNm.getNotification(yellowNotificationId) != null,
+        // Cycle 2 (5m later): 235 rate eases to +0.8 mg/dL/min (projected 247 -> severity yellow)
+        // High red clear hysteresis holds the red alert; no yellow flap!
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 235, severity = "yellow", ratePerMinute = 0.8, projected = 247),
+            trend(2L, 235, "yellow"),
         )
+        assertTrue("red alert remains held", redTitle() != null)
+        assertNull("no yellow alert posted", shadowNm.getNotification(AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID))
+
+        // Cycle 3 (10m later): 236 rate wobbles to +1.1 mg/dL/min (projected 252 -> severity red)
+        // Cooldown has not elapsed; red alert is still held silently without audible re-alert
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 236, severity = "red", ratePerMinute = 1.1, projected = 252),
+            trend(3L, 236, "red"),
+        )
+        assertTrue("red alert still active", redTitle() != null)
+
+        // Cycle 4 (15m later): 235 rate +0.5 mg/dL/min (projected 242 -> severity yellow)
+        // Still held; absolutely no pings
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 235, severity = "yellow", ratePerMinute = 0.5, projected = 242),
+            trend(4L, 235, "yellow"),
+        )
+        assertTrue("red alert still active", redTitle() != null)
+        assertNull("no yellow alert posted", shadowNm.getNotification(AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID))
     }
 
     @Test
@@ -502,5 +544,131 @@ class AlertCoordinatorTest {
         )
         val ceilingNotif = shadowNm.getNotification(yellowNotificationId)
         assertTrue("expected alert once crossing the 240 mg/dL recovery ceiling", ceilingNotif != null)
+    }
+
+    @Test
+    fun `60-minute max hold time releases high red and re-alerts if still in danger`() {
+        val prefs = context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+
+        // Step 1: Red alert fires
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 240, severity = "red", ratePerMinute = 1.0, projected = 255),
+            trend(1L, 240, "red"),
+        )
+        assertTrue("initial red alert posted", redTitle() != null)
+
+        // Simulate that 65 minutes have passed since it was held and since last red fired
+        val sixtyFiveMinutesAgo = now - 65 * 60_000L
+        prefs.edit()
+            .putLong(AlertCoordinator.KEY_HIGH_RED_HELD_SINCE, sixtyFiveMinutesAgo)
+            .putLong("last_red_fired_at_ms", sixtyFiveMinutesAgo)
+            .putString("last_handled_severity", "red")
+            .commit()
+
+        // Step 2: Reading comes in still at danger (severity yellow, hovering at 235, projected 242)
+        // Since hold expired (> 60 min cap), the hold is released.
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 235, severity = "yellow", ratePerMinute = 0.5, projected = 242),
+            trend(2L, 235, "yellow"),
+        )
+        // Red alert was cancelled / cleared because hold released to yellow
+        assertNull("red alert cleared once 60m hold cap expires", redTitle())
+        // Hold timer key cleared
+        assertEquals(0L, prefs.getLong(AlertCoordinator.KEY_HIGH_RED_HELD_SINCE, 0L))
+
+        // Step 3: Now glucose spikes back to projected 255 (red)
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 238, severity = "red", ratePerMinute = 1.3, projected = 255),
+            trend(3L, 238, "red"),
+        )
+        // Red alert fires!
+        assertTrue("red alert fires when re-entering danger after hold release", redTitle() != null)
+    }
+
+    @Test
+    fun `low-side red at raw 75 projected 60 fires RED immediately and is never held by high-side logic`() {
+        val prefs = context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE)
+
+        // Raw 75, projected 60, rate -1.0 mg/dL/min
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 75, severity = "red", ratePerMinute = -1.0, projected = 60),
+            trend(1L, 75, "red"),
+        )
+
+        val title = redTitle()
+        assertTrue("raw 75 projected 60 fires RED immediately", title != null)
+        assertTrue("classified as low-side", prefs.getBoolean("red_low_side", false))
+
+        // When rising out of danger to 82 mg/dL (projected 85, yellow):
+        // Exits LOW_RED_CLEAR_HYSTERESIS (80). High-side logic must NOT hold this (isLowRed is true, so high-side hysteresis never runs).
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 82, severity = "yellow", ratePerMinute = 0.7, projected = 85),
+            trend(2L, 82, "yellow"),
+        )
+        // Red alert was cancelled!
+        assertNull("red alert cancelled when exiting low-side danger band", redTitle())
+    }
+
+    @Test
+    fun `Jul 31 incident at raw 79 projected 67 is classified low-side and fires RED immediately`() {
+        val prefs = context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE)
+
+        // Real July 31 incident values: value=79, projected=67, rate=-0.8 mg/dL/min, scored red
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 79, severity = "red", ratePerMinute = -0.8, projected = 67),
+            trend(1L, 79, "red"),
+        )
+
+        val title = redTitle()
+        assertTrue("Jul 31 incident at raw 79 projected 67 must fire RED alert", title != null)
+        assertTrue("must be classified as low-side red", prefs.getBoolean("red_low_side", false))
+    }
+
+    @Test
+    fun `silent downgrade is strictly high-side only and low-side yellow entry audibly alerts`() {
+        // High-side downgrade from red is silent:
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 245, severity = "red", ratePerMinute = -1.0, projected = 255),
+            trend(1L, 245, "red"),
+        )
+        // High side downgrade to yellow:
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 230, severity = "yellow", ratePerMinute = -1.5, projected = 210),
+            trend(2L, 230, "yellow"),
+        )
+        val highSideYellow = shadowNm.getNotification(AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID)
+        assertTrue("high-side yellow posted", highSideYellow != null)
+        assertEquals(
+            "high-side downgrade from red must be SILENT on quiet channel",
+            AlertChannels.QUIET_CHANNEL_ID,
+            highSideYellow?.channelId,
+        )
+
+        // Reset prefs for low side
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSystemService(NotificationManager::class.java).cancelAll()
+
+        // Low-side yellow entry (e.g. dropping toward low at 78 mg/dL, projected 72, rate -0.8):
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 78, severity = "yellow", ratePerMinute = -0.8, projected = 72),
+            trend(3L, 78, "yellow"),
+        )
+        val lowSideYellow = shadowNm.getNotification(AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID)
+        assertTrue("low-side yellow posted", lowSideYellow != null)
+        assertEquals(
+            "low-side yellow entry must be AUDIBLE, not silent",
+            AlertChannels.currentYellowChannelId(context),
+            lowSideYellow?.channelId,
+        )
     }
 }

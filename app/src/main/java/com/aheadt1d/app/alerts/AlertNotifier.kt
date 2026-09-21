@@ -186,6 +186,7 @@ object AlertNotifier {
         rate: Double?,
         projectedExtended: Int? = null,
         isInjected: Boolean = DebugGlucoseOverride.isActive,
+        silent: Boolean = false,
     ) {
         if (AlertSilenceManager.isSilenced(context)) return
         AlertChannels.ensure(context)
@@ -198,7 +199,8 @@ object AlertNotifier {
         val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
         val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
 
-        val builder = Notification.Builder(context, AlertChannels.currentYellowChannelId(context))
+        val channelId = if (silent) AlertChannels.QUIET_CHANNEL_ID else AlertChannels.currentYellowChannelId(context)
+        val builder = Notification.Builder(context, channelId)
             .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.readingIcon(context, value, arrow))
             .setContentTitle("${prefix}⚠️ $value mg/dL ${arrow.label}")
@@ -217,6 +219,9 @@ object AlertNotifier {
         val notification = builder.build()
 
         notifyIfAllowed(context) { nm -> nm.notify(YELLOW_ALERT_NOTIFICATION_ID, notification) }
+
+        // A silent update refreshes the visible tray indicator without sounds or speech
+        if (silent) return
 
         AlertTones.play(context, if (isLowSideYellow(value, projected)) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH)
 

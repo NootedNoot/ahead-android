@@ -66,4 +66,30 @@ object BackendClient {
             client.newCall(request).execute().close()
         }
     }
+
+    /**
+     * Best-effort: reports the local alert decision/action taken for a reading
+     * to ahead-backend so the owner telemetry log displays phone alert actions.
+     */
+    fun postAlertAction(context: Context, readingTimeMs: Long, action: String) {
+        val apiKey = runCatching { AuthPrefs.deviceApiKey(context) }.getOrNull() ?: return
+        val json = JSONObject().apply {
+            put("readingTime", readingTimeMs)
+            put("action", action)
+        }
+        val request = Request.Builder()
+            .url("${BuildConfig.BACKEND_BASE_URL}/api/alerts/action")
+            .addHeader("X-Ahead-Api-Key", apiKey)
+            .post(json.toString().toRequestBody(JSON))
+            .build()
+        client.newCall(request).enqueue(object : okhttp3.Callback {
+            override fun onFailure(call: okhttp3.Call, e: IOException) {
+                // Best-effort telemetry, ignore failure
+            }
+            override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                response.close()
+            }
+        })
+    }
 }
+
