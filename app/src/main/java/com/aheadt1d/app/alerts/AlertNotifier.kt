@@ -267,10 +267,24 @@ object AlertNotifier {
         if (silenced && !allowWhileSilenced) return
         AlertChannels.ensure(context)
 
+        val isDropping = lastArrow == GlucoseTrendArrow.SLOWLY_FALLING ||
+                         lastArrow == GlucoseTrendArrow.DOWN ||
+                         lastArrow == GlucoseTrendArrow.DOUBLE_DOWN
+
         val prefix = if (isInjected) DebugGlucoseOverride.TITLE_PREFIX else ""
         val bodyPrefix = if (isInjected) DebugGlucoseOverride.BODY_PREFIX else ""
-        val baseText = "Last reading $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. ${staleGuidance(blockedReason)}"
+        val baseText = if (isDropping) {
+            "Last reading was $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. Check blood sugar immediately!"
+        } else {
+            "Last reading $lastValue mg/dL ${lastArrow.label}, ${ageMinutes}m ago. ${staleGuidance(blockedReason)}"
+        }
         val fullDetail = if (isInjected) "${DebugGlucoseOverride.DISCLAIMER}\n$baseText" else baseText
+
+        val title = if (isDropping) {
+            "${prefix}🔴 CRITICAL: Signal lost while dropping — ${ageMinutes}m"
+        } else {
+            "${prefix}🔴 No new glucose data — ${ageMinutes}m"
+        }
 
         // Visible but mute while silenced - the channel owns sound/vibration from API 26, so
         // this is the only way to post without interrupting. See AlertChannels.QUIET_CHANNEL_ID.
@@ -278,7 +292,7 @@ object AlertNotifier {
         val builder = Notification.Builder(context, channelId)
             .setGroup(AlertChannels.NOTIFICATION_GROUP_KEY)
             .setSmallIcon(NotificationIconFactory.warningIcon(context))
-            .setContentTitle("${prefix}🔴 No new glucose data — ${ageMinutes}m")
+            .setContentTitle(title)
             .setContentText("$bodyPrefix$baseText")
             .setStyle(Notification.BigTextStyle().bigText(fullDetail))
             .setCategory(Notification.CATEGORY_STATUS)
@@ -318,11 +332,19 @@ object AlertNotifier {
             ReadBlockedReason.HC_UNAVAILABLE -> "Health Connect is unavailable. Open the Ahead app."
             null -> "Check your sensor or connection now."
         }
-        VoiceAlertEngine.speak(
-            context,
-            VoiceAlertCategory.SIGNAL_LOST,
-            "Urgent. No new glucose data for $ageMinutes minutes. Last reading was $lastValue. $spokenAdvice"
-        )
+        if (isDropping) {
+            VoiceAlertEngine.speak(
+                context,
+                VoiceAlertCategory.RED,
+                "Urgent emergency. Glucose signal lost while falling. Last reading was $lastValue. Check your blood sugar immediately."
+            )
+        } else {
+            VoiceAlertEngine.speak(
+                context,
+                VoiceAlertCategory.SIGNAL_LOST,
+                "Urgent. No new glucose data for $ageMinutes minutes. Last reading was $lastValue. $spokenAdvice"
+            )
+        }
     }
 
     /**

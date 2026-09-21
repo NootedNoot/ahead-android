@@ -98,6 +98,7 @@ object AlertCoordinator {
     private const val KEY_HAS_EVER_HAD_READING = "has_ever_had_reading"
     private const val KEY_LAST_KNOWN_VALUE = "last_known_value"
     private const val KEY_LAST_KNOWN_TIME = "last_known_time_ms"
+    private const val KEY_LAST_KNOWN_ARROW = "last_known_arrow"
 
     private const val RED_LOW_REALERT_COOLDOWN_MS = 15 * 60_000L
     // High-side red re-alert cooldown: set to 45 minutes to give insulin time
@@ -132,6 +133,7 @@ object AlertCoordinator {
     // least as urgent as an ongoing red glucose reading, and there's no
     // reason for it to go quiet just because the first alert already fired.
     private const val SIGNAL_LOST_REALERT_COOLDOWN_MS = 15 * 60_000L
+    private const val SIGNAL_LOST_DROPPING_REALERT_COOLDOWN_MS = 10 * 60_000L
     // Low-side red clear hysteresis. Once a critical LOW has fired red, the alert
     // is held up until the value climbs solidly past the danger band - not the
     // instant it nudges back over the floor - so a BG hovering near the cutoff
@@ -187,6 +189,23 @@ object AlertCoordinator {
             // The alert is posted MUTED (see showSignalLostAlert's allowWhileSilenced) - visible
             // and honest, but it never overrides the quiet the person actually asked for.
             if (state is GlucoseDisplayState.Stale) handleStale(context, prefs, state, silenced = true)
+            if (state is GlucoseDisplayState.NoData && prefs.getBoolean(KEY_HAS_EVER_HAD_READING, false)) {
+                val lastTime = prefs.getLong(KEY_LAST_KNOWN_TIME, 0L)
+                val arrowName = prefs.getString(KEY_LAST_KNOWN_ARROW, null)
+                val arrow = arrowName?.let { runCatching { com.aheadt1d.app.notifications.GlucoseTrendArrow.valueOf(it) }.getOrNull() }
+                    ?: com.aheadt1d.app.notifications.GlucoseTrendArrow.FLAT
+                handleStale(
+                    context,
+                    prefs,
+                    GlucoseDisplayState.Stale(
+                        lastValue = prefs.getInt(KEY_LAST_KNOWN_VALUE, 0),
+                        lastReadingTime = lastTime,
+                        ageMinutes = if (lastTime > 0L) (System.currentTimeMillis() - lastTime) / 60_000 else 0L,
+                        lastArrow = arrow,
+                    ),
+                    silenced = true,
+                )
+            }
             return
         }
         when (state) {
@@ -234,13 +253,16 @@ object AlertCoordinator {
                 // heartbeat) off the last value we did see.
                 if (prefs.getBoolean(KEY_HAS_EVER_HAD_READING, false)) {
                     val lastTime = prefs.getLong(KEY_LAST_KNOWN_TIME, 0L)
+                    val arrowName = prefs.getString(KEY_LAST_KNOWN_ARROW, null)
+                    val arrow = arrowName?.let { runCatching { com.aheadt1d.app.notifications.GlucoseTrendArrow.valueOf(it) }.getOrNull() }
+                        ?: com.aheadt1d.app.notifications.GlucoseTrendArrow.FLAT
                     handleStale(
                         context, prefs,
                         GlucoseDisplayState.Stale(
                             lastValue = prefs.getInt(KEY_LAST_KNOWN_VALUE, 0),
                             lastReadingTime = lastTime,
                             ageMinutes = if (lastTime > 0L) (System.currentTimeMillis() - lastTime) / 60_000 else 0L,
-                            lastArrow = com.aheadt1d.app.notifications.GlucoseTrendArrow.FLAT,
+                            lastArrow = arrow,
                         ),
                     )
                 }
@@ -278,7 +300,12 @@ object AlertCoordinator {
         val lastFiredAt = prefs.getLong(KEY_SIGNAL_LOST_LAST_FIRED_AT, 0L)
         val now = System.currentTimeMillis()
 
-        if (alreadyFired && now - lastFiredAt < SIGNAL_LOST_REALERT_COOLDOWN_MS) return
+        val isDropping = stale.lastArrow == com.aheadt1d.app.notifications.GlucoseTrendArrow.SLOWLY_FALLING ||
+                         stale.lastArrow == com.aheadt1d.app.notifications.GlucoseTrendArrow.DOWN ||
+                         stale.lastArrow == com.aheadt1d.app.notifications.GlucoseTrendArrow.DOUBLE_DOWN
+        val cooldown = if (isDropping) SIGNAL_LOST_DROPPING_REALERT_COOLDOWN_MS else SIGNAL_LOST_REALERT_COOLDOWN_MS
+
+        if (alreadyFired && now - lastFiredAt < cooldown) return
 
         AlertNotifier.showSignalLostAlert(
             context, stale.lastValue, stale.lastArrow, stale.ageMinutes,
@@ -325,6 +352,7 @@ object AlertCoordinator {
             putBoolean(KEY_HAS_EVER_HAD_READING, true)
             putInt(KEY_LAST_KNOWN_VALUE, reading.value)
             putLong(KEY_LAST_KNOWN_TIME, if (reading.readingTime > 0L) reading.readingTime else now)
+            putString(KEY_LAST_KNOWN_ARROW, reading.arrow.name)
         }
 
         // Exact same scored reading already handled (same severity AND date):
