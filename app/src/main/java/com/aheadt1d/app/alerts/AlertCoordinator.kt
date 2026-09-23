@@ -133,7 +133,10 @@ object AlertCoordinator {
     // resolve fast); rolling, extends-per-correction window on the high side
     // (a high can be legitimately managed over hours with several doses).
     private const val LOW_CORRECTION_GRACE_MS = 30 * 60_000L
-    private const val HIGH_CORRECTION_GRACE_MS = 90 * 60_000L
+    // 2026-09-23: 90 -> 70 min at the owner's request - mid-point of rapid-acting insulin's
+    // typical 60-90 min peak. Sustained highs carry real cost for him (CKD), so the high side is
+    // deliberately a bit less forgiving than the textbook window. Still rolling per correction.
+    private const val HIGH_CORRECTION_GRACE_MS = 70 * 60_000L
     // Same cadence as the red re-alert heartbeat - an ongoing blackout is at
     // least as urgent as an ongoing red glucose reading, and there's no
     // reason for it to go quiet just because the first alert already fired.
@@ -561,10 +564,30 @@ object AlertCoordinator {
     private fun isStillLow(value: Int, projected: Int?): Boolean =
         value < LOW_HIGH_SPLIT || (projected != null && projected < LOW_HIGH_SPLIT)
 
-    private fun derivePhase(stillLow: Boolean, rate: Double?, worseningStreak: Int): LowAlertPhase = when {
+    /** 2026-09-23: severe = at/under SeverityEngine's hard RED floor, or projected there within 15
+     *  min. Found by replay: the original phase logic only looked at rate streaks, so 57 mg/dL with
+     *  an easing fall got the calm STANDARD copy ("keep monitoring") and 70 mg/dL projected to 50
+     *  never escalated because -1.4 never crossed the -1.5 trigger. Severity of WHERE you are/are
+     *  heading now outranks how fast you got there. */
+    private fun isSevere(value: Int, projected: Int?): Boolean =
+        value <= SeverityEngine.SEVERE_LOW_RED_FLOOR ||
+            (projected != null && projected <= SeverityEngine.SEVERE_LOW_RED_FLOOR)
+
+    private fun derivePhase(stillLow: Boolean, severe: Boolean, rate: Double?, worseningStreak: Int): LowAlertPhase = when {
         !stillLow -> LowAlertPhase.RECOVERING
+        severe -> LowAlertPhase.URGENT
         rate != null && rate > 0 -> LowAlertPhase.RISING
         worseningStreak >= LOW_WORSENING_READINGS_REQUIRED -> LowAlertPhase.URGENT
+        else -> LowAlertPhase.STANDARD
+    }
+
+    /** First alert of an episode: no streak history yet, so fall back to what's knowable from one
+     *  reading. 2026-09-23: used to be "rising -> RISING, anything else -> URGENT", which made a
+     *  gentle -0.6 drift at 79 read "URGENT" while a real 57 on a heartbeat read "keep monitoring". */
+    private fun firstAlertPhase(value: Int, projected: Int?, rate: Double?): LowAlertPhase = when {
+        isSevere(value, projected) -> LowAlertPhase.URGENT
+        rate != null && rate > 0 -> LowAlertPhase.RISING
+        rate != null && rate <= SeverityEngine.RATE_FALLING_TRIGGER -> LowAlertPhase.URGENT
         else -> LowAlertPhase.STANDARD
     }
 
@@ -573,7 +596,7 @@ object AlertCoordinator {
      *  doc) so a same-date re-render can still reflect a real rate change in its copy without
      *  counting as an extra "consecutive reading" toward the worsening streak. */
     private fun currentLowPhase(prefs: SharedPreferences, value: Int, projected: Int?, rate: Double?): LowAlertPhase =
-        derivePhase(isStillLow(value, projected), rate, prefs.getInt(KEY_LOW_WORSENING_STREAK, 0))
+        derivePhase(isStillLow(value, projected), isSevere(value, projected), rate, prefs.getInt(KEY_LOW_WORSENING_STREAK, 0))
 
     /**
      * The single decision point both low-side red paths (the actively-red fireRedIfWarranted,
@@ -606,7 +629,7 @@ object AlertCoordinator {
             putInt(KEY_LOW_STABILITY_STREAK, stabilityStreak)
         }
 
-        return derivePhase(stillLow, rate, worseningStreak)
+        return derivePhase(stillLow, isSevere(value, projected), rate, worseningStreak)
     }
 
     /** Wipes per-episode state when a red episode ends, so the next one
@@ -725,22 +748,23 @@ object AlertCoordinator {
         if (isLowSide(value, reading.projected)) {
             // Always advance/read the streak (a later heartbeat or held cycle needs a real
             // baseline) - but a brand-new episode (forceFire) has no history yet to judge
-            // "sustained" against, so its OWN alert copy falls back to the simple rate-sign split
-            // instead of the streak-gated STANDARD/URGENT one (matches this function's
-            // pre-2026-09-23 behavior exactly for a forceFire episode) - a first-time critical low
-            // is never undersold as merely "Low: X mg/dL" just because it hasn't been falling long
-            // enough yet to count as "sustained."
+            // "sustained" against, so its OWN alert copy uses firstAlertPhase (severity of where
+            // you are/are heading, plus a fast rate) instead of the streak-gated split.
             val streakPhase = if (mutateLowStreak) {
                 updateLowPhase(prefs, value, reading.projected, rate)
             } else {
                 currentLowPhase(prefs, value, reading.projected, rate)
             }
             val phase = if (forceFire) {
-                if (rate != null && rate > 0) LowAlertPhase.RISING else LowAlertPhase.URGENT
+                firstAlertPhase(value, reading.projected, rate)
             } else {
                 streakPhase
             }
-            val recovering = phase == LowAlertPhase.RISING || phase == LowAlertPhase.RECOVERING
+            // Suppression/"recovery stalled" tracking stays RATE-based, not copy-based: a 58 that's
+            // rising reads URGENT (severe floor) but is still genuinely recovering, and must keep
+            // the instant re-fire if that recovery stalls. (Caught by the existing
+            // recovery-stall test when these were briefly coupled on 2026-09-23.)
+            val recovering = (rate != null && rate > 0) || phase == LowAlertPhase.RECOVERING
 
             // Correction-aware grace: a logged low correction holds off a
             // follow-up alert for up to LOW_CORRECTION_GRACE_MS from when it

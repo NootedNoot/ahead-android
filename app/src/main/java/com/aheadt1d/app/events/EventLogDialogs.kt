@@ -123,6 +123,33 @@ object EventLogDialogs {
         note: String?,
         pointContext: LoggedPointContext?
     ) {
+        // Ticket 014: a correction must say WHICH way - the app can't safely guess (it used to
+        // infer from glucose at the moment of the tap, which misread early treatments at 71-249
+        // and every backdated log). One extra tap, only for this tag.
+        if (tag == EventTag.CORRECTION) {
+            AlertDialog.Builder(context)
+                .setTitle(titleFor("What were you correcting?", pointContext))
+                .setItems(arrayOf("🍊  Treating a LOW (carbs / juice)", "💉  Correcting a HIGH (insulin)")) { _, which ->
+                    val isLow = which == 0
+                    val directionNote = if (isLow) "Low treatment (carbs)" else "High correction (insulin)"
+                    val fullNote = if (note.isNullOrBlank()) directionNote else "$directionNote — $note"
+                    doLog(context, scope, tag, fullNote, pointContext, explicitLow = isLow)
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
+        doLog(context, scope, tag, note, pointContext, explicitLow = null)
+    }
+
+    private fun doLog(
+        context: Context,
+        scope: LifecycleCoroutineScope,
+        tag: EventTag,
+        note: String?,
+        pointContext: LoggedPointContext?,
+        explicitLow: Boolean?,
+    ) {
         val timestamp = pointContext?.timestamp ?: System.currentTimeMillis()
         scope.launch {
             UserEventRepository.log(
@@ -137,9 +164,14 @@ object EventLogDialogs {
             // window (see PlateauCoordinator.onCorrectionLogged). Every other
             // tag is untouched by this and still feeds nothing alert-adjacent.
             if (tag == EventTag.CORRECTION) {
-                PlateauCoordinator.onCorrectionLogged(context, timestamp)
+                PlateauCoordinator.onCorrectionLogged(
+                    context,
+                    timestamp,
+                    explicitLow = explicitLow,
+                    glucoseAtTime = pointContext?.glucoseValue?.toInt(),
+                )
             }
-            Toast.makeText(context, "Logged: ${tag.label}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Logged: ${note ?: tag.label}", Toast.LENGTH_SHORT).show()
         }
     }
 

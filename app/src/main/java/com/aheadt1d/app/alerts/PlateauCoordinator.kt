@@ -148,8 +148,10 @@ object PlateauCoordinator {
      * tracking always starts from when the correction actually happened, not
      * necessarily when this function runs.
      *
-     * Direction (high vs low) is inferred from glucose AT LOGGING TIME, not
-     * stored per-event - a "Correction" tag means insulin above highThreshold
+     * Direction (high vs low) comes from [explicitLow] when the person chose it
+     * (Ticket 014, the normal path from EventLogDialogs since 2026-09-23). Only
+     * without it is direction inferred from glucose at [glucoseAtTime] (or now) -
+     * that fallback treats a "Correction" tag as insulin above highThreshold
      * and fast carbs below lowThreshold, and the two can never overlap since
      * lowThreshold < highThreshold. Logging while in-range (neither) starts
      * no window - there's nothing to check a response against.
@@ -164,11 +166,20 @@ object PlateauCoordinator {
         context: Context,
         timestamp: Long = System.currentTimeMillis(),
         tuning: PlateauTuningParameters = PlateauTuningPrefs.load(context),
+        // Ticket 014 (2026-09-23): what the person SAID they were treating - true = a low (carbs),
+        // false = a high (insulin). When given, it wins outright: no threshold gate, so juice at
+        // 74 or insulin at 230 finally register (both used to open nothing - only <=70 / >=250
+        // counted). null keeps the old inference for any caller that doesn't ask.
+        explicitLow: Boolean? = null,
+        // The glucose AT THE TIME being logged against (backdated chart-point logs). Before this,
+        // inference always read the CURRENT reading - juice at 62 logged 25 min later at 95 opened
+        // nothing, and juice at 58 logged during a rebound at 262 was recorded as a HIGH correction.
+        glucoseAtTime: Int? = null,
     ) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val currentValue = LatestTrendRepository.latestRawReading.value?.value
-        val isLowNow = currentValue != null && currentValue <= tuning.lowThreshold
-        val isHighNow = currentValue != null && currentValue >= tuning.highThreshold
+        val currentValue = glucoseAtTime ?: LatestTrendRepository.latestRawReading.value?.value
+        val isLowNow = explicitLow ?: (currentValue != null && currentValue <= tuning.lowThreshold)
+        val isHighNow = if (explicitLow != null) !explicitLow else (currentValue != null && currentValue >= tuning.highThreshold)
 
         // Always stamp the rolling last-correction marker, regardless of
         // whether this is a fresh window or a repeat within an open one -

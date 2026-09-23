@@ -146,7 +146,10 @@ object AlertNotifier {
                 .setContentTitle("${prefix}🔴 URGENT: $value mg/dL ${arrow.label}")
                 .setContentText("$bodyPrefix$explanation — check now")
             LowAlertPhase.STANDARD -> builder
-                .setContentTitle("${prefix}🟠 Low: $value mg/dL ${arrow.label}")
+                .setContentTitle(
+                    if (value < LOW_HIGH_SPLIT) "${prefix}🟠 Low: $value mg/dL ${arrow.label}"
+                    else "${prefix}🟠 Heading low: $value mg/dL ${arrow.label}",
+                )
                 .setContentText("$bodyPrefix$explanation — treat and monitor")
             LowAlertPhase.RISING -> builder
                 .setContentTitle("${prefix}🟠 Low but rising: $value mg/dL")
