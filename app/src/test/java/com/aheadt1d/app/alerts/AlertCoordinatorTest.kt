@@ -178,18 +178,42 @@ class AlertCoordinatorTest {
     }
 
     @Test
-    fun `low red clear hysteresis holds the alert below 80, cancels once past it`() {
+    fun `low red clear buffer holds through the first good reading, clears on the second`() {
+        // 2026-09-23 ticket: replaces the old flat 80 mg/dL LOW_RED_CLEAR_HYSTERESIS band with a
+        // 2-consecutive-reading stability streak gated on the app's own actual 70 mg/dL
+        // threshold. A value of 76 is already >= 70 - it must never be labeled "still low" - but
+        // the episode still doesn't fully clear until a SECOND reading also holds/climbs.
         AlertCoordinator.evaluate(context, reading(value = 55, severity = "red"), trend(1L, 55, "red"))
         assertTrue(redTitle() != null)
 
-        // Severity dropped to none, but value (76) is still under the 80
-        // clear-hysteresis buffer - must hold the red alert, not cancel it.
-        AlertCoordinator.evaluate(context, reading(value = 76, severity = "none"), trend(2L, 76, "none"))
-        assertTrue("red alert should still be held under 80", redTitle() != null)
+        // Severity dropped to none, value (76) is already >= 70 - "Recovering," never "Still low."
+        AlertCoordinator.evaluate(context, reading(value = 76, severity = "none", ratePerMinute = 0.0), trend(2L, 76, "none"))
+        assertTrue("red alert should still be held pending a second stable reading", redTitle() != null)
+        assertTrue(
+            "must say 'Recovering', never 'Still low' - 76 is already above the app's own 70 threshold",
+            redTitle()?.contains("Recovering") == true,
+        )
+        assertTrue("must not use the old (now-wrong) 'still low' wording", redTitle()?.contains("Still low") != true)
 
-        // Now solidly past the buffer (81) - should actually clear.
-        AlertCoordinator.evaluate(context, reading(value = 81, severity = "none"), trend(3L, 81, "none"))
-        assertNull("red alert should now be cancelled", redTitle())
+        // Second consecutive reading holding at/above 70 - now it actually clears.
+        AlertCoordinator.evaluate(context, reading(value = 78, severity = "none", ratePerMinute = 0.0), trend(3L, 78, "none"))
+        assertNull("red alert should now be cancelled after two stable readings", redTitle())
+    }
+
+    @Test
+    fun `a bounce back under 70 mid-recovery re-alerts immediately instead of prematurely clearing`() {
+        // The exact real scenario from the ticket: 79 -> 87 (building toward stable) -> a
+        // reversal back under 70 - must re-alert immediately rather than silently continuing to
+        // hold as if the first good reading still counted.
+        AlertCoordinator.evaluate(context, reading(value = 55, severity = "red"), trend(1L, 55, "red"))
+        AlertCoordinator.evaluate(context, reading(value = 79, severity = "none", ratePerMinute = 0.8), trend(2L, 79, "none"))
+        assertTrue("first good reading - held, not yet cleared", redTitle() != null)
+
+        AlertCoordinator.evaluate(context, reading(value = 68, severity = "red", ratePerMinute = -1.8, projected = 58), trend(3L, 68, "red"))
+        assertTrue(
+            "a reversal back under 70 mid-recovery must re-alert, not stay silently held",
+            redTitle()?.contains("68") == true,
+        )
     }
 
     @Test
@@ -604,15 +628,27 @@ class AlertCoordinatorTest {
         assertTrue("raw 75 projected 60 fires RED immediately", title != null)
         assertTrue("classified as low-side", prefs.getBoolean("red_low_side", false))
 
-        // When rising out of danger to 82 mg/dL (projected 85, yellow):
-        // Exits LOW_RED_CLEAR_HYSTERESIS (80). High-side logic must NOT hold this (isLowRed is true, so high-side hysteresis never runs).
+        // Rising out of danger to 82 mg/dL (projected 85, yellow) - already >= 70, so this must
+        // never be held by HIGH-side logic (isLowRed is true, so that branch never runs), but it
+        // also isn't fully clear yet either - only the first of the two stability readings.
         AlertCoordinator.evaluate(
             context,
             reading(value = 82, severity = "yellow", ratePerMinute = 0.7, projected = 85),
             trend(2L, 82, "yellow"),
         )
-        // Red alert was cancelled!
-        assertNull("red alert cancelled when exiting low-side danger band", redTitle())
+        assertTrue("still held pending a second stable reading, not silently dropped", redTitle() != null)
+        assertTrue(
+            "must say 'Recovering', never 'Still low' - 82 is already above the app's own 70 threshold",
+            redTitle()?.contains("Recovering") == true,
+        )
+
+        // A second consecutive reading holding/climbing above 70 - now it actually clears.
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 88, severity = "yellow", ratePerMinute = 0.6, projected = 90),
+            trend(3L, 88, "yellow"),
+        )
+        assertNull("red alert cancelled once the stability buffer is satisfied", redTitle())
     }
 
     @Test

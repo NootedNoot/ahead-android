@@ -128,8 +128,10 @@ class AlertPathGapsTest {
     // =================================================================================
 
     /**
-     * The low-red clear hysteresis (LOW_RED_CLEAR_HYSTERESIS = 80) keeps a fired red posted until
-     * the value climbs clear of the danger band. It does that by RETURNING EARLY from
+     * The low-red clear buffer (2026-09-23: a 2-consecutive-reading stability streak gated on
+     * the app's own 70 mg/dL threshold, replacing the old flat 80 mg/dL LOW_RED_CLEAR_HYSTERESIS
+     * band - see AlertCoordinator's LOW_STABILITY_READINGS_REQUIRED doc) keeps a fired red posted
+     * until the episode is confirmed stable. It does that by RETURNING EARLY from
      * handleReading - before the `when (severity)` block and before any re-alert heartbeat - on
      * the assumption that the already-posted notification is still sitting in the tray.
      *

@@ -70,10 +70,12 @@ object AlertNotifier {
      * notification for both branches, same delivery tier as yellow, just
      * with red's own color/copy/channel.
      *
-     * @param recovering True only for a low-side red that's rising as
-     *   expected (see AlertCoordinator's low-recovery handling) - the person
-     *   is already being warned and is trending back to safety, so this
-     *   fires calmer copy ("recovering") instead of "URGENT check now".
+     * @param lowPhase Low-side urgency/state phase (2026-09-23 ticket - see LowAlertPhase's own
+     *   doc for what each value means and how AlertCoordinator decides it). Defaults to URGENT,
+     *   which is also what every high-side call site leaves it at - the high side has no
+     *   low/not-low or stability concept, just its own flat cooldown, so URGENT's existing
+     *   "check now" copy is the correct unconditional wording there, unchanged from before this
+     *   parameter existed (when it was a plain `recovering: Boolean = false`).
      * @param projectedExtended the 30-min projection, for AlertExplainer's
      *   one-liner - see that class's own doc for when it picks this over
      *   the 15-min [projected] window. Optional/nullable so existing debug
@@ -84,7 +86,7 @@ object AlertNotifier {
         value: Int,
         projected: Int?,
         rate: Double?,
-        recovering: Boolean = false,
+        lowPhase: LowAlertPhase = LowAlertPhase.URGENT,
         projectedExtended: Int? = null,
         isInjected: Boolean = DebugGlucoseOverride.isActive,
         // 2026-09-20: a RE-POST of an alert the person already heard and then dismissed, while
@@ -134,14 +136,24 @@ object AlertNotifier {
             builder.setSubText(DebugGlucoseOverride.DISCLAIMER_SHORT)
         }
 
-        if (recovering) {
-            builder
-                .setContentTitle("${prefix}🟠 Still low: $value mg/dL, rising")
-                .setContentText("$bodyPrefix$explanation — keep monitoring")
-        } else {
-            builder
+        // Copy varies by phase, not just a recovering/urgent binary (2026-09-23 ticket) - see
+        // LowAlertPhase's own doc. Real bug this replaces: a 79 mg/dL reading (already above the
+        // app's own 70 mg/dL threshold) still said "Still low... rising," because the old binary
+        // only ever distinguished "rate positive" from "rate not positive," with no separate
+        // concept for "this isn't low anymore, it just isn't CONFIRMED stable yet."
+        when (lowPhase) {
+            LowAlertPhase.URGENT -> builder
                 .setContentTitle("${prefix}🔴 URGENT: $value mg/dL ${arrow.label}")
                 .setContentText("$bodyPrefix$explanation — check now")
+            LowAlertPhase.STANDARD -> builder
+                .setContentTitle("${prefix}🟠 Low: $value mg/dL ${arrow.label}")
+                .setContentText("$bodyPrefix$explanation — treat and monitor")
+            LowAlertPhase.RISING -> builder
+                .setContentTitle("${prefix}🟠 Low but rising: $value mg/dL")
+                .setContentText("$bodyPrefix$explanation — informational, no need to re-treat yet")
+            LowAlertPhase.RECOVERING -> builder
+                .setContentTitle("${prefix}🟡 Recovering — not yet stable: $value mg/dL")
+                .setContentText("$bodyPrefix$explanation — back above 70, confirming it holds")
         }
         builder.addAction(snoozeAction(context, 15))
 
@@ -170,16 +182,22 @@ object AlertNotifier {
         // AlertTones.vibrate's own doc for the real incident this closes. Placed after the
         // `if (silent) return` above so a silent re-post (already-acknowledged, tray-only
         // restore) still doesn't re-buzz - same rule voice already follows.
-        // Pattern varies with [recovering] the same way the copy above already does - urgency,
-        // not just tier, is felt (see AlertChannels' patterns for the design language).
+        // Pattern varies with [lowPhase] the same way the copy above already does - urgency, not
+        // just tier, is felt (see AlertChannels' patterns for the design language). URGENT and
+        // STANDARD both get the sharper pattern (still a real, active low, under 70 mg/dL, that
+        // needs a felt alert whether or not it's actively worsening); RISING and RECOVERING both
+        // get the calmer one (already turning around or already back over threshold).
         AlertTones.vibrate(
             context,
-            if (recovering) AlertChannels.RED_RECOVERING_VIBRATION_PATTERN else AlertChannels.RED_URGENT_VIBRATION_PATTERN,
+            when (lowPhase) {
+                LowAlertPhase.URGENT, LowAlertPhase.STANDARD -> AlertChannels.RED_URGENT_VIBRATION_PATTERN
+                LowAlertPhase.RISING, LowAlertPhase.RECOVERING -> AlertChannels.RED_RECOVERING_VIBRATION_PATTERN
+            },
         )
 
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
-        val spokenText = SpokenAlertText.red(value, rate, projected, projectedExtended, recovering)
+        val spokenText = SpokenAlertText.red(value, rate, projected, projectedExtended, lowPhase)
         VoiceAlertEngine.speak(context, VoiceAlertCategory.RED, spokenText)
     }
 

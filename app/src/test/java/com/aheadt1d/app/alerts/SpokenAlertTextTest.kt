@@ -39,13 +39,13 @@ class SpokenAlertTextTest {
         // "glucose is at 99 and falling fast at minus 2.2 points a min projected 70 in 15 minutes"
         assertEquals(
             "Urgent. Glucose is at 99 and falling fast at minus 2.2 points a minute. Projected 70 in fifteen minutes. Check now.",
-            SpokenAlertText.red(99, -2.2, 70, null, recovering = false),
+            SpokenAlertText.red(99, -2.2, 70, null, lowPhase = LowAlertPhase.URGENT),
         )
     }
 
     @Test
     fun `red alert always says the glucose number`() {
-        val said = SpokenAlertText.red(82, -2.8, 40, null, recovering = false)
+        val said = SpokenAlertText.red(82, -2.8, 40, null, lowPhase = LowAlertPhase.URGENT)
         assertEquals(
             "Urgent. Glucose is at 82 and falling fast at minus 2.8 points a minute. Projected 40 in fifteen minutes. Check now.",
             said,
@@ -53,10 +53,31 @@ class SpokenAlertTextTest {
     }
 
     @Test
-    fun `recovering red keeps its calmer wording, still says the number, and adds the rate`() {
+    fun `a still-low but rising reading gets the calmer RISING wording, not urgent copy`() {
         assertEquals(
-            "Still low at 68, but rising at plus 0.9 points a minute. Projected 75 in fifteen minutes. Keep monitoring.",
-            SpokenAlertText.red(68, 0.9, 75, null, recovering = true),
+            "Low at 68, but rising at plus 0.9 points a minute. Projected 75 in fifteen minutes. No need to re-treat yet.",
+            SpokenAlertText.red(68, 0.9, 75, null, lowPhase = LowAlertPhase.RISING),
+        )
+    }
+
+    @Test
+    fun `a value that's crossed back above 70 but isn't confirmed stable never says 'still low'`() {
+        // 2026-09-23 ticket: a real 79 mg/dL reading (already above the app's own 70 mg/dL
+        // threshold) once said "Still low... rising" here - factually wrong per the owner's own
+        // threshold. RECOVERING must say something else entirely.
+        val said = SpokenAlertText.red(79, 0.8, 87, null, lowPhase = LowAlertPhase.RECOVERING)
+        assertEquals(
+            "Recovering. Glucose is at 79, back above seventy but not yet stable at plus 0.8 points a minute. Projected 87 in fifteen minutes.",
+            said,
+        )
+        assertEquals(false, said.contains("Still low", ignoreCase = true))
+    }
+
+    @Test
+    fun `a still-low flat or mildly-negative reading gets STANDARD wording, not full URGENT`() {
+        assertEquals(
+            "Glucose is at 68 and falling at minus 0.6 points a minute. Projected 62 in fifteen minutes. Keep monitoring.",
+            SpokenAlertText.red(68, -0.6, 62, null, lowPhase = LowAlertPhase.STANDARD),
         )
     }
 
@@ -80,7 +101,7 @@ class SpokenAlertTextTest {
     fun `when the rate is unknown the number is still said and the trend is called unknown`() {
         assertEquals(
             "Urgent. Glucose is at 82, trend unknown. Projected 60 in fifteen minutes. Check now.",
-            SpokenAlertText.red(82, null, 60, null, recovering = false),
+            SpokenAlertText.red(82, null, 60, null, lowPhase = LowAlertPhase.URGENT),
         )
     }
 

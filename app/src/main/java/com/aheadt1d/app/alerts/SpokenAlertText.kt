@@ -50,11 +50,18 @@ object SpokenAlertText {
         return "Projected $value in $minWord minutes."
     }
 
-    fun red(value: Int, rate: Double?, projected: Int?, projectedExtended: Int?, recovering: Boolean): String =
-        if (recovering) {
-            "Still low at $value, but rising${rate(rate)}. ${projection(value, projected, projectedExtended)} Keep monitoring."
-        } else {
-            "Urgent. Glucose is at $value${trend(rate)}. ${projection(value, projected, projectedExtended)} Check now."
+    /** Mirrors AlertNotifier.showRedAlert's four [LowAlertPhase] copy branches - see that
+     *  enum's own doc. Kept in its own tested function like the rest of this object. */
+    fun red(value: Int, rate: Double?, projected: Int?, projectedExtended: Int?, lowPhase: LowAlertPhase): String =
+        when (lowPhase) {
+            LowAlertPhase.URGENT ->
+                "Urgent. Glucose is at $value${trend(rate)}. ${projection(value, projected, projectedExtended)} Check now."
+            LowAlertPhase.STANDARD ->
+                "Glucose is at $value${trend(rate)}. ${projection(value, projected, projectedExtended)} Keep monitoring."
+            LowAlertPhase.RISING ->
+                "Low at $value, but rising${rate(rate)}. ${projection(value, projected, projectedExtended)} No need to re-treat yet."
+            LowAlertPhase.RECOVERING ->
+                "Recovering. Glucose is at $value, back above seventy but not yet stable${rate(rate)}. ${projection(value, projected, projectedExtended)}"
         }
 
     fun yellow(value: Int, rate: Double?, projected: Int?, projectedExtended: Int?): String =

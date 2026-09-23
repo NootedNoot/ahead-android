@@ -160,9 +160,9 @@ class AlertVibrationTest {
 
     @Test
     fun `a recovering red vibrates a different pattern than an urgent red`() {
-        AlertNotifier.showRedAlert(context, value = 65, projected = 68, rate = 1.0, recovering = true)
+        AlertNotifier.showRedAlert(context, value = 65, projected = 68, rate = 1.0, lowPhase = LowAlertPhase.RISING)
         val recoveringPattern = lastPattern()
-        AlertNotifier.showRedAlert(context, value = 55, projected = 50, rate = -2.0, recovering = false)
+        AlertNotifier.showRedAlert(context, value = 55, projected = 50, rate = -2.0, lowPhase = LowAlertPhase.URGENT)
         val urgentPattern = lastPattern()
         assertTrue("setup: expected to capture both patterns", recoveringPattern != null && urgentPattern != null)
         assertTrue(
@@ -172,6 +172,21 @@ class AlertVibrationTest {
         )
         assertArrayEquals(AlertChannels.RED_RECOVERING_VIBRATION_PATTERN, recoveringPattern)
         assertArrayEquals(AlertChannels.RED_URGENT_VIBRATION_PATTERN, urgentPattern)
+    }
+
+    @Test
+    fun `RECOVERING and STANDARD low phases map to the calm and sharp patterns respectively`() {
+        // 2026-09-23 ticket: two more LowAlertPhase values beyond the original recovering/urgent
+        // binary. RECOVERING (value back above 70, not yet stable) should feel as calm as RISING;
+        // STANDARD (still under 70, flat/mild rate) should feel as sharp as URGENT - still a real
+        // active low, just not sustained-worsening.
+        AlertNotifier.showRedAlert(context, value = 82, projected = 85, rate = 0.0, lowPhase = LowAlertPhase.RECOVERING)
+        val recoveringPattern = lastPattern()
+        AlertNotifier.showRedAlert(context, value = 68, projected = 65, rate = -0.6, lowPhase = LowAlertPhase.STANDARD)
+        val standardPattern = lastPattern()
+
+        assertArrayEquals(AlertChannels.RED_RECOVERING_VIBRATION_PATTERN, recoveringPattern)
+        assertArrayEquals(AlertChannels.RED_URGENT_VIBRATION_PATTERN, standardPattern)
     }
 
     @Test

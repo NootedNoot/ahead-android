@@ -7,6 +7,7 @@ import androidx.core.content.edit
 import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.notifications.GlucoseDisplayState
 import com.aheadt1d.app.state.LatestTrend
+import org.aheadt1d.ratemath.SeverityEngine
 
 /**
  * Decides *when* the yellow/red alert notifications fire, from the same
@@ -93,6 +94,10 @@ object AlertCoordinator {
     private const val KEY_YELLOW_LAST_ALERTED_PROJECTED = "yellow_last_alerted_projected"
     private const val KEY_LAST_LOW_EVENT_AT = "last_low_event_at_ms"
     private const val KEY_LAST_YELLOW_FIRED_AT = "last_yellow_fired_at_ms"
+    // 2026-09-23 ticket ("value vs rate gating"): consecutive-reading streaks backing
+    // LowAlertPhase - see updateLowPhase's own doc for exactly how each is scored.
+    private const val KEY_LOW_WORSENING_STREAK = "low_worsening_streak"
+    private const val KEY_LOW_STABILITY_STREAK = "low_stability_streak"
     // Set the first time a real reading is ever handled, so the NoData branch can tell a fresh
     // install (nothing to say) from an app that HAD a reading and has since lost it entirely.
     private const val KEY_HAS_EVER_HAD_READING = "has_ever_had_reading"
@@ -134,12 +139,24 @@ object AlertCoordinator {
     // reason for it to go quiet just because the first alert already fired.
     private const val SIGNAL_LOST_REALERT_COOLDOWN_MS = 15 * 60_000L
     private const val SIGNAL_LOST_DROPPING_REALERT_COOLDOWN_MS = 10 * 60_000L
-    // Low-side red clear hysteresis. Once a critical LOW has fired red, the alert
-    // is held up until the value climbs solidly past the danger band - not the
-    // instant it nudges back over the floor - so a BG hovering near the cutoff
-    // can't flicker the red alert on and off. Set to 80 mg/dL (updated 2026-08-20
-    // at owner request) so recovery is clear and unambiguous.
-    private const val LOW_RED_CLEAR_HYSTERESIS = 80
+    // Low-side red clear buffer - streak-based, not a fixed mg/dL band (2026-09-23,
+    // replacing the old flat LOW_RED_CLEAR_HYSTERESIS = 80). That old band held the alert (and
+    // its "Still low... rising" copy) up to 80 mg/dL regardless of the app's own 70 mg/dL
+    // threshold - real bug, reported live: a 79 mg/dL reading, already above 70, still showed
+    // "Still low: 79 mg/dL, rising." Per the owner's explicit ticket: the low/not-low LABEL now
+    // gates strictly on value (and projection) vs LOW_HIGH_SPLIT (70) with no rate dependency -
+    // see LowAlertPhase's doc - while a SEPARATE stability buffer (this constant) still holds
+    // off fully clearing the episode (cancelling the notification, letting severity flow
+    // through as normal) until LOW_STABILITY_READINGS_REQUIRED consecutive readings hold or
+    // keep climbing at/above that threshold. This is what catches a bounce that hasn't finished
+    // (real case: 79 -> 87 -> 89 -> 83 @ -1.2 mg/dL/min) instead of prematurely signaling
+    // recovery on the first good tick - though, being reactive rather than predictive, it's a
+    // meaningful reduction in false-clears, not a guarantee against every possible bounce shape.
+    private const val LOW_STABILITY_READINGS_REQUIRED = 2
+    // Urgency escalation (URGENT vs STANDARD copy/tone) requires a SUSTAINED negative rate too -
+    // two or more consecutive readings at/below SeverityEngine.RATE_FALLING_TRIGGER, not one
+    // noisy blip - see LowAlertPhase's doc for the full reasoning.
+    private const val LOW_WORSENING_READINGS_REQUIRED = 2
 
     // High-side red clear hysteresis. Once a critical HIGH has fired red (projected >= 250),
     // hold the red state while projection remains >= 235 (or value >= 200) unless the rate
@@ -352,7 +369,11 @@ object AlertCoordinator {
         val suppressAlert = CheckNowSuppression.isSuppressed()
         if (suppressAlert) Log.d("CheckNow", "Suppressed alert - app foregrounded")
 
-        if (reading.value <= LOW_RED_CLEAR_HYSTERESIS || isLowSide(reading.value, reading.projected)) {
+        // SeverityEngine.DEFAULT_YELLOW_LOW (80), not LOW_HIGH_SPLIT (70): this marker feeds the
+        // post-hypo recovery grace window below, which is deliberately about "a treated low just
+        // happened" more broadly than the strict 70 mg/dL low/not-low label - unrelated to the
+        // low-side red stability buffer (see LOW_STABILITY_READINGS_REQUIRED's doc).
+        if (reading.value <= SeverityEngine.DEFAULT_YELLOW_LOW || isLowSide(reading.value, reading.projected)) {
             prefs.edit { putLong(KEY_LAST_LOW_EVENT_AT, now) }
         }
 
@@ -387,20 +408,51 @@ object AlertCoordinator {
         // last-severity/date) until the reading has solidly exited the danger band.
         val isLowRed = prefs.getBoolean(KEY_RED_LOW_SIDE, false)
         if (prevSeverity == "red" && severity != "red") {
-            if (isLowRed && reading.value < LOW_RED_CLEAR_HYSTERESIS) {
-                if (BuildConfig.DEBUG) {
-                    Log.d("AlertCoordinator", "low red held: value ${reading.value} < $LOW_RED_CLEAR_HYSTERESIS clear buffer")
+            if (isLowRed) {
+                val previousStabilityStreak = prefs.getInt(KEY_LOW_STABILITY_STREAK, 0)
+                val phase = updateLowPhase(prefs, reading.value, reading.projected, reading.ratePerMinute)
+                val stabilityStreak = prefs.getInt(KEY_LOW_STABILITY_STREAK, 0)
+
+                if (stabilityStreak < LOW_STABILITY_READINGS_REQUIRED) {
+                    if (BuildConfig.DEBUG) {
+                        Log.d(
+                            "AlertCoordinator",
+                            "low red held: value ${reading.value}, phase $phase, " +
+                                "stability streak $stabilityStreak/$LOW_STABILITY_READINGS_REQUIRED",
+                        )
+                    }
+                    // A reading that just broke an already-building stability streak (value
+                    // dropped back under the threshold, or rate went negative again after
+                    // holding/climbing) is new information worth an immediate re-alert - same
+                    // urgency as a fresh low, and specifically what catches a bounce still in
+                    // progress (see LOW_STABILITY_READINGS_REQUIRED's doc) instead of silently
+                    // continuing to hold as if nothing changed.
+                    val justReversed = previousStabilityStreak > 0 && stabilityStreak == 0
+                    // Unconditional (no isNotificationPosted gate) - unlike the high-side hold
+                    // below, which only reposts when dismissed. nm.notify() with the same id
+                    // updates a still-posted notification in place rather than duplicating it, so
+                    // calling this every cycle both restores a dismissed notification (the
+                    // original Gap 2 fix this replaces) AND keeps a still-posted one's visible
+                    // text current - real bug this closes: a live "Still low: 79 mg/dL, rising"
+                    // reading a value the app's own 70 mg/dL threshold says is fine sitting
+                    // unchanged in the tray because nothing had dismissed it yet. silent=true
+                    // (unless justReversed) means this never re-buzzes/re-speaks - see
+                    // showRedAlert's own silent-return doc.
+                    if (!suppressAlert) {
+                        AlertNotifier.showRedAlert(
+                            context, reading.value, reading.projected, reading.ratePerMinute,
+                            lowPhase = phase,
+                            projectedExtended = reading.projectedExtended,
+                            silent = !justReversed,
+                        )
+                        if (justReversed) prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
+                    }
+                    recordAlertAction(context, date, if (justReversed) "audible_red" else "held_low_red")
+                    return
                 }
-                if (!isNotificationPosted(context, AlertNotifier.RED_ALERT_NOTIFICATION_ID) && !suppressAlert) {
-                    AlertNotifier.showRedAlert(
-                        context, reading.value, reading.projected, reading.ratePerMinute,
-                        recovering = (reading.ratePerMinute ?: 0.0) > 0,
-                        projectedExtended = reading.projectedExtended,
-                        silent = true,
-                    )
-                }
-                recordAlertAction(context, date, "held_low_red")
-                return
+                // Stability requirement met - fall through to the ordinary severity handling
+                // below, which actually clears the episode (cancels the red alert, resets
+                // episode state) for whatever this reading's real severity is.
             } else if (!isLowRed) {
                 val proj = reading.projected ?: reading.value
                 val isActivelyFalling = reading.ratePerMinute != null && reading.ratePerMinute <= -0.5
@@ -422,7 +474,8 @@ object AlertCoordinator {
                     if (!isNotificationPosted(context, AlertNotifier.RED_ALERT_NOTIFICATION_ID) && !suppressAlert) {
                         AlertNotifier.showRedAlert(
                             context, reading.value, reading.projected, reading.ratePerMinute,
-                            recovering = false,
+                            // No lowPhase passed - high side, defaults to the URGENT copy/tone
+                            // (unaffected by the low-side-only LowAlertPhase system).
                             projectedExtended = reading.projectedExtended,
                             silent = true,
                         )
@@ -502,6 +555,60 @@ object AlertCoordinator {
             .activeNotifications.any { it.id == id }
     }.getOrDefault(true)
 
+    /** Same "is this genuinely still low" question isLowSide answers (raw value OR projection
+     *  under LOW_HIGH_SPLIT) - kept as its own name here since LowAlertPhase's decision is about
+     *  the CURRENT episode's state, not about routing a reading to the low vs high branch. */
+    private fun isStillLow(value: Int, projected: Int?): Boolean =
+        value < LOW_HIGH_SPLIT || (projected != null && projected < LOW_HIGH_SPLIT)
+
+    private fun derivePhase(stillLow: Boolean, rate: Double?, worseningStreak: Int): LowAlertPhase = when {
+        !stillLow -> LowAlertPhase.RECOVERING
+        rate != null && rate > 0 -> LowAlertPhase.RISING
+        worseningStreak >= LOW_WORSENING_READINGS_REQUIRED -> LowAlertPhase.URGENT
+        else -> LowAlertPhase.STANDARD
+    }
+
+    /** Read-only: derives the current LowAlertPhase from whatever streak is already persisted,
+     *  without advancing it. Used by the heartbeat path (see fireRedIfWarranted's mutateLowStreak
+     *  doc) so a same-date re-render can still reflect a real rate change in its copy without
+     *  counting as an extra "consecutive reading" toward the worsening streak. */
+    private fun currentLowPhase(prefs: SharedPreferences, value: Int, projected: Int?, rate: Double?): LowAlertPhase =
+        derivePhase(isStillLow(value, projected), rate, prefs.getInt(KEY_LOW_WORSENING_STREAK, 0))
+
+    /**
+     * The single decision point both low-side red paths (the actively-red fireRedIfWarranted,
+     * and the held-past-red block in handleReading) share for LowAlertPhase, so the two can never
+     * disagree about what tier a given reading is in. Advances and persists both streaks for
+     * THIS reading, then derives the phase from the result - see LowAlertPhase's doc for what
+     * each phase means and why the streaks exist.
+     *
+     * Worsening streak: consecutive readings at/below SeverityEngine.RATE_FALLING_TRIGGER while
+     * still genuinely low (isStillLow) - resets to 0 the moment either condition fails. Gates the
+     * URGENT phase so one noisy blip can't swing the tone.
+     *
+     * Stability streak: consecutive readings holding or climbing (rate >= 0, or unknown - a
+     * missing rate is never treated as "still falling") once no longer low - resets the instant
+     * value/projection drops back under the threshold OR the rate goes negative again, even if
+     * still >= 70. That reset is what catches a bounce still in progress (see
+     * LOW_STABILITY_READINGS_REQUIRED's doc) rather than treating one good tick as recovery.
+     */
+    private fun updateLowPhase(prefs: SharedPreferences, value: Int, projected: Int?, rate: Double?): LowAlertPhase {
+        val stillLow = isStillLow(value, projected)
+
+        val worsening = stillLow && rate != null && rate <= SeverityEngine.RATE_FALLING_TRIGGER
+        val worseningStreak = if (worsening) prefs.getInt(KEY_LOW_WORSENING_STREAK, 0) + 1 else 0
+
+        val holdingOrClimbing = rate == null || rate >= 0
+        val stabilityStreak = if (!stillLow && holdingOrClimbing) prefs.getInt(KEY_LOW_STABILITY_STREAK, 0) + 1 else 0
+
+        prefs.edit {
+            putInt(KEY_LOW_WORSENING_STREAK, worseningStreak)
+            putInt(KEY_LOW_STABILITY_STREAK, stabilityStreak)
+        }
+
+        return derivePhase(stillLow, rate, worseningStreak)
+    }
+
     /** Wipes per-episode state when a red episode ends, so the next one
      *  (low or high) starts from a clean slate instead of inheriting stale
      *  state from an unrelated earlier episode. */
@@ -511,6 +618,8 @@ object AlertCoordinator {
             remove(KEY_LOW_WAS_HELD)
             remove(KEY_RED_LOW_SIDE)
             remove(KEY_HIGH_RED_HELD_SINCE)
+            remove(KEY_LOW_WORSENING_STREAK)
+            remove(KEY_LOW_STABILITY_STREAK)
         }
     }
 
@@ -533,18 +642,35 @@ object AlertCoordinator {
         // (see the class doc's item 1) - a yellow->red flap re-enters red
         // structurally but is NOT a fresh episode on the high side.
         val enteringRed = prevSeverity != "red"
+        // Read BEFORE the enteringRed reset below (and before fireRedIfWarranted's own
+        // updateLowPhase call resets it further down) - see forceFire's doc just below for why
+        // this matters: prevSeverity stays "red" in prefs for the ENTIRE duration a low episode
+        // is held past its actual severity drop (see handleReading's hold block), so enteringRed
+        // alone can never detect "this was recovering and just reversed."
+        val wasRecoveringNotYetStable = prefs.getInt(KEY_LOW_STABILITY_STREAK, 0) > 0
         if (enteringRed) {
             prefs.edit {
                 // Remember which side this episode is, so the clear-hysteresis
                 // below only ever holds a LOW red (never a high one).
                 putBoolean(KEY_RED_LOW_SIDE, isLowSide(reading.value, reading.projected))
                 remove(KEY_HIGH_RED_HELD_SINCE)
+                // A genuinely fresh episode starts its urgency/stability streaks clean too -
+                // defense in depth alongside clearRedEpisodeState (which should have already
+                // cleared these when the PREVIOUS episode ended).
+                remove(KEY_LOW_WORSENING_STREAK)
+                remove(KEY_LOW_STABILITY_STREAK)
             }
         } else {
             prefs.edit { remove(KEY_HIGH_RED_HELD_SINCE) }
         }
         val forceFire = if (isLowSide(reading.value, reading.projected)) {
-            enteringRed
+            // A reading that had built ANY stability streak (KEY_LAST_SEVERITY stuck on "red" in
+            // prefs the whole time it was held - see the comment above) and is now genuinely
+            // scored red again is a reversal, not a continuation - same urgency as a fresh
+            // episode, per the ticket's "a bounce that hadn't finished" case (real values:
+            // 79 -> 87 -> 89 -> 83 @ -1.2). Without this, fireRedIfWarranted's ordinary 15-minute
+            // cooldown could silently swallow exactly the re-alert this ticket asked for.
+            enteringRed || wasRecoveringNotYetStable
         } else {
             // High side only: a yellow->red flap is the person never actually
             // getting out of the high, not new information - fall through to
@@ -568,7 +694,7 @@ object AlertCoordinator {
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
     ) {
-        fireRedIfWarranted(context, prefs, reading, forceFire = false, now, lastRedFiredAt, suppressAlert)
+        fireRedIfWarranted(context, prefs, reading, forceFire = false, now, lastRedFiredAt, suppressAlert, mutateLowStreak = false)
     }
 
     /** Single decision point for both the transition and heartbeat paths -
@@ -584,12 +710,37 @@ object AlertCoordinator {
         lastRedFiredAt: Long,
         suppressAlert: Boolean,
         readingDate: Long = 0L,
+        // False only from handleRedHeartbeat's 60s-tick re-emission (same backend trend.date as
+        // last handled): the worsening/stability streaks must only advance on a genuinely NEW
+        // reading (handleRedTransition), never on a same-date re-render - otherwise a single real
+        // CGM sample could satisfy "2 consecutive readings" within a couple of ticks/minutes
+        // just by being re-evaluated repeatedly, defeating the whole point of the streak (see
+        // LowAlertPhase's doc). A heartbeat still reads the CURRENT streak/rate to pick a phase
+        // for copy purposes - it just doesn't get to advance it.
+        mutateLowStreak: Boolean = true,
     ) {
         val value = reading.value
         val rate = reading.ratePerMinute
 
         if (isLowSide(value, reading.projected)) {
-            val recovering = rate != null && rate > 0
+            // Always advance/read the streak (a later heartbeat or held cycle needs a real
+            // baseline) - but a brand-new episode (forceFire) has no history yet to judge
+            // "sustained" against, so its OWN alert copy falls back to the simple rate-sign split
+            // instead of the streak-gated STANDARD/URGENT one (matches this function's
+            // pre-2026-09-23 behavior exactly for a forceFire episode) - a first-time critical low
+            // is never undersold as merely "Low: X mg/dL" just because it hasn't been falling long
+            // enough yet to count as "sustained."
+            val streakPhase = if (mutateLowStreak) {
+                updateLowPhase(prefs, value, reading.projected, rate)
+            } else {
+                currentLowPhase(prefs, value, reading.projected, rate)
+            }
+            val phase = if (forceFire) {
+                if (rate != null && rate > 0) LowAlertPhase.RISING else LowAlertPhase.URGENT
+            } else {
+                streakPhase
+            }
+            val recovering = phase == LowAlertPhase.RISING || phase == LowAlertPhase.RECOVERING
 
             // Correction-aware grace: a logged low correction holds off a
             // follow-up alert for up to LOW_CORRECTION_GRACE_MS from when it
@@ -629,7 +780,7 @@ object AlertCoordinator {
             // least that long since the last actual alert.
             val heldJustStopped = wasHeld && !held && now - lastRedFiredAt >= MIN_REALERT_GAP_MS
             if ((forceFire || heldJustStopped || now - lastRedFiredAt >= RED_LOW_REALERT_COOLDOWN_MS) && !suppressAlert) {
-                AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = recovering, projectedExtended = reading.projectedExtended)
+                AlertNotifier.showRedAlert(context, value, reading.projected, rate, lowPhase = phase, projectedExtended = reading.projectedExtended)
                 prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
                 recordAlertAction(context, readingDate, "audible_red")
             } else {
@@ -662,7 +813,8 @@ object AlertCoordinator {
         }
 
         if ((forceFire || now - lastRedFiredAt >= RED_HIGH_REALERT_COOLDOWN_MS) && !suppressAlert) {
-            AlertNotifier.showRedAlert(context, value, reading.projected, rate, recovering = false, projectedExtended = reading.projectedExtended)
+            // No lowPhase passed - high side, defaults to URGENT (unaffected by LowAlertPhase).
+            AlertNotifier.showRedAlert(context, value, reading.projected, rate, projectedExtended = reading.projectedExtended)
             prefs.edit { putLong(KEY_LAST_RED_FIRED_AT, now) }
             recordAlertAction(context, readingDate, "audible_red")
         } else {
@@ -706,6 +858,20 @@ object AlertCoordinator {
         if (inPostHypoGraceWindow && isRecoveringRise) {
             if (BuildConfig.DEBUG) {
                 Log.d("AlertCoordinator", "Yellow alert suppressed: in 40m post-hypo recovery grace window (value=${reading.value}, rate=${reading.ratePerMinute})")
+            }
+            // 2026-09-23: a downgrade from red must still leave SOMETHING visible, even muted -
+            // AlertCoordinator's caller already cancelled the red notification right before this
+            // call (see handleReading's yellow branch). Without this, a low that clears the new
+            // (shorter, streak-based) stability buffer right as it enters this grace window would
+            // go from a posted red alert to nothing at all - the exact "notification the
+            // hysteresis assumes is still there" failure class the rest of this file exists to
+            // avoid (see AlertNotifier.showRedAlert's own isNotificationPosted-adjacent doc).
+            if (downgradedFromRed && !suppressAlert) {
+                AlertNotifier.showYellowAlert(
+                    context, reading.value, reading.projected, reading.ratePerMinute,
+                    projectedExtended = reading.projectedExtended,
+                    silent = true,
+                )
             }
             if (projected != null) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
             recordAlertAction(context, readingDate, "suppressed_cooldown")
