@@ -105,9 +105,31 @@ class AlertScenarioReplayTest {
             val t = base + i * 5 * 60_000L
             SystemClock.setCurrentTimeMillis(t + 30_000L)
             points.add(GlucosePoint(Instant.ofEpochMilli(t), v))
-            val raw = RawReading.fromPoints(points.filter { t - it.time.toEpochMilli() <= 120 * 60_000L })!!
-            LatestTrendRepository.updateRawReading(context, raw)
+            val rawBeforeTier = RawReading.fromPoints(points.filter { t - it.time.toEpochMilli() <= 120 * 60_000L })!!
             corrections[i]?.let { PlateauCoordinator.onCorrectionLogged(context, t, explicitLow = it, glucoseAtTime = v) }
+            // Ticket 017: mirrors GlucoseCheckRunner's own causeTier wiring (see its own comment
+            // for why Context is needed and fromPoints can't do this itself) so this replay
+            // exercises the REAL end-to-end chain the class doc promises, not a permanently-null
+            // causeTier - which would happen to collapse to the same "requires 3" answer as
+            // UNEXPLAINED for every scenario in this file that never logs a matching-direction
+            // correction (true of all of them before the two cause-tier regression tests below).
+            // Correction-logging above runs first so a correction logged at THIS same index is
+            // already visible here, matching how a real correction logged via EventLogDialogs is
+            // committed to PlateauCoordinator's prefs before any later read of it.
+            val isLowSideForTier = rawBeforeTier.value < 125
+            val correctionAnchor = if (isLowSideForTier) {
+                PlateauCoordinator.activeLowCorrectionAnchorMs(context)
+            } else {
+                PlateauCoordinator.activeHighCorrectionAnchorMs(context)
+            }
+            val causeTier = org.aheadt1d.ratemath.TreatmentEffectWindow.causeTier(
+                now = t + 30_000L,
+                isLow = isLowSideForTier,
+                correctionAnchorMs = correctionAnchor,
+                exerciseLoggedAtMs = null,
+            )
+            val raw = rawBeforeTier.copy(causeTier = causeTier)
+            LatestTrendRepository.updateRawReading(context, raw)
 
             val plateauBefore = shadowNm.getNotification(AlertNotifier.PLATEAU_ALERT_NOTIFICATION_ID)
             val corrBefore = shadowNm.getNotification(AlertNotifier.CORRECTION_ALERT_NOTIFICATION_ID)
@@ -181,6 +203,54 @@ class AlertScenarioReplayTest {
         val steps = replay("REAL_2026-09-22_c", real20260922)
         val window = steps.subList(thirdLowIndex - 3, thirdLowIndex + 1)
         assertTrue("the 96 -> 74 re-drop got no audible alert: $window", window.any { it.anyAudible })
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Ticket 017 - cause-tier-aware low stability buffer (Fix 2)
+    // --------------------------------------------------------------------------------------------
+
+    @Test
+    fun `real 2026-09-22 bounce - two stable readings alone do not clear an unexplained low`() {
+        // No correction and no exercise anywhere in this trace, so causeTier resolves to
+        // UNEXPLAINED throughout the bounce - the flat OLD 2-reading requirement cleared this
+        // exact real bounce right at 87 (79 -> 87 are the 1st and 2nd consecutive
+        // holding/climbing readings), before the reversal at 83 -> 74 that made it a genuine
+        // second low (see stabilityReadingsRequired's doc for the full motivating case). This is
+        // the concrete proof Fix 2 works: with no known reason to trust an early reversal, 87
+        // alone (only two stable readings) must still be held, not cleared.
+        val steps = replay("unexplained_bounce_holds_past_87", real20260922)
+        val afterFirstTwoStable = steps[secondLowIndex - 3] // index 25: value 87 (79 -> 87)
+        assertEquals("sanity check on the trace's own indexing", 87, afterFirstTwoStable.sgv)
+        assertNotNull(
+            "an unexplained bounce must still be held (not cleared) after only two stable " +
+                "readings (79 -> 87) - step: $afterFirstTwoStable",
+            afterFirstTwoStable.redTitle,
+        )
+    }
+
+    @Test
+    fun `real 2026-09-22 bounce - a matching low correction keeps the fast 2-reading clear`() {
+        // The SAME real bounce as the test above, but with a LOW correction explicitly logged
+        // (matching direction, glucose 75 - already low by the app's own threshold) right before
+        // it starts. TREATED keeps the ORIGINAL, faster 2-reading requirement - there IS a known
+        // reason here to trust an early reversal - so this must still clear right where the flat
+        // requirement always did: at 87. Proves Fix 2 doesn't over-correct and punish a real
+        // treated low with extra, unwarranted holding.
+        val steps = replay(
+            "treated_bounce_clears_fast",
+            real20260922,
+            // Low correction logged at index 23 (75 mg/dL), the reading immediately before the
+            // 79 -> 87 -> 89 -> 83 bounce - matches PlateauCoordinator.onCorrectionLogged's real
+            // call shape (explicitLow=true, Ticket 014's explicit-direction path).
+            corrections = mapOf(23 to true),
+        )
+        val afterFirstTwoStable = steps[secondLowIndex - 3] // index 25: value 87
+        assertEquals("sanity check on the trace's own indexing", 87, afterFirstTwoStable.sgv)
+        assertNull(
+            "a TREATED bounce (matching low correction logged) must clear after just two stable " +
+                "readings, same as the original flat requirement - step: $afterFirstTwoStable",
+            afterFirstTwoStable.redTitle,
+        )
     }
 
     // --------------------------------------------------------------------------------------------

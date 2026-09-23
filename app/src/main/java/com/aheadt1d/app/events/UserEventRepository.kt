@@ -69,4 +69,22 @@ object UserEventRepository {
      */
     suspend fun mostRecentInsulinTimestamp(context: Context, beforeMillis: Long = System.currentTimeMillis()): Long? =
         dao(context).getMostRecentByTag(EventTag.INSULIN.storageValue, beforeMillis)?.timestamp
+
+    /**
+     * Epoch millis of the most recent logged EXERCISE event at or before
+     * [beforeMillis], or null if none exists yet. Same shape as
+     * mostRecentInsulinTimestamp right above - deliberately timestamp-only,
+     * no intensity/duration (out of scope for v1). Feeds
+     * TreatmentEffectWindow.causeTier's exerciseLoggedAtMs param (ahead-
+     * rate-math), read by GlucoseCheckRunner once per check cycle - a
+     * recently-logged EXERCISE event is what distinguishes EXERCISE_ACTIVE/
+     * EXERCISE_RISK from UNEXPLAINED when a low is turning around with no
+     * CORRECTION logged, which is the whole point of the tier: exercise-
+     * induced lows are expected to self-resolve, but also carry delayed
+     * hypoglycemia risk hours later, so this timestamp has to be reachable
+     * independent of whether a correction was ever logged for the same
+     * episode.
+     */
+    suspend fun mostRecentExerciseTimestamp(context: Context, beforeMillis: Long = System.currentTimeMillis()): Long? =
+        dao(context).getMostRecentByTag(EventTag.EXERCISE.storageValue, beforeMillis)?.timestamp
 }

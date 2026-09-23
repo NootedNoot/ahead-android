@@ -221,7 +221,44 @@ data class RawReading(
     // written before this field existed should degrade to "don't suppress
     // RED on this basis," not silently gain a new suppression path it was
     // never evaluated against.
-    val rateMethodsAgree: Boolean = true
+    val rateMethodsAgree: Boolean = true,
+    // ADDED 2026-09-23 (Ticket 017): which TreatmentEffectWindow.CauseTier (ahead-rate-math)
+    // explains the current low/high excursion, if anything does - TREATED (a matching-direction
+    // correction is logged and still plausibly working), EXERCISE_ACTIVE/EXERCISE_RISK (a
+    // recently-logged exercise event), or UNEXPLAINED (neither). Feeds SeverityEngine.classify's
+    // causeTier param AND AlertCoordinator's low-side stability buffer (see its
+    // stabilityReadingsRequired) - an UNEXPLAINED or EXERCISE_RISK reversal needs more
+    // confirmation before an episode is declared resolved than a TREATED/EXERCISE_ACTIVE one,
+    // because there's no known reason yet to trust an early reversal.
+    //
+    // Deliberately NOT a parameter of fromPoints() below, unlike every other field in this
+    // class: fromPoints is a pure function with no Context, and computing a real CauseTier needs
+    // Context (to read PlateauCoordinator's correction-window prefs and query the Room event DB
+    // for the most recent logged exercise). It's set via a subsequent .copy() in
+    // GlucoseCheckRunner, the one place in the live pipeline that has both a fresh RawReading and
+    // a Context at the same time - see its own comment at the call site.
+    //
+    // Defaults null (not "UNEXPLAINED") so every pre-existing construction of RawReading
+    // elsewhere in the codebase (debug scenarios, tests, prefs written before this field
+    // existed) keeps compiling and flows through to SeverityEngine.classify/
+    // stabilityReadingsRequired as "no cause info" - which both treat identically to UNEXPLAINED
+    // (fail toward requiring more confirmation, never less) per the ratemath contract, so a
+    // missing value is exactly as safe as an explicit UNEXPLAINED, never more permissive.
+    //
+    // CORRECTED 2026-09-23, same day - this was briefly FALSE for one of the two consumers
+    // (TreatmentEffectWindow.projectWithPhysiologicalDecay originally let null fall back to the
+    // pre-cause-tier fixed windows, which on the low side is MORE permissive than UNEXPLAINED, not
+    // equivalent - see that function's own doc). Adversarial review also found this null default
+    // is reachable in real, non-debug usage, not just a theoretical fallback: MainActivity's own,
+    // more frequent chart-refresh path (syncRawReadingToRepository) independently calls
+    // RawReading.fromPoints and writes a fresh RawReading with no causeTier at all, so it can win
+    // the race against GlucoseCheckRunner's slower cadence and briefly overwrite an already-tiered
+    // reading whenever the app is open - plausibly exactly when someone is anxiously watching a
+    // real low. RawReadingStore.save/load (below) now persists this field for the same reason (a
+    // process restart used to silently drop it too) - defense in depth now that null is safe by
+    // construction, not the only thing preventing a wrong answer. The MainActivity race itself is
+    // NOT separately fixed (only made safe, never dangerous) - a known, accepted, documented gap.
+    val causeTier: org.aheadt1d.ratemath.CauseTier? = null
 ) {
     companion object {
         fun fromPoints(
@@ -348,6 +385,7 @@ object RawReadingStore {
     private const val KEY_SEVERITY_RATE = "severity_rate_per_minute"
     private const val KEY_EXCURSION_DURATION = "excursion_duration_minutes"
     private const val KEY_RATE_METHODS_AGREE = "rate_methods_agree"
+    private const val KEY_CAUSE_TIER = "cause_tier"
     private const val NO_DELTA = Int.MIN_VALUE
     private const val NO_EXCURSION_DURATION = -1L
 
@@ -369,6 +407,21 @@ object RawReadingStore {
             // valid answer, not "absent." -1 is never a real duration.
             putLong(KEY_EXCURSION_DURATION, reading.excursionDurationMinutes ?: NO_EXCURSION_DURATION)
             putBoolean(KEY_RATE_METHODS_AGREE, reading.rateMethodsAgree)
+            // 2026-09-23 (Ticket 017, added during adversarial review - this key was missing from the
+            // original pass): without this, a process restart (a real, recurring failure mode for this
+            // app - aggressive OEM foreground-service kills, mitigated elsewhere by the WorkManager
+            // watchdog) reloaded the last RawReading with causeTier forced back to null, right before
+            // the render loop's first collectLatest fires off the just-reloaded StateFlow value - a
+            // real window where a genuinely TREATED or UNEXPLAINED classification silently reverted
+            // to "unknown" for one render pass. causeTier=null is now SAFE by construction (see
+            // TreatmentEffectWindow.projectWithPhysiologicalDecay's own doc - it resolves exactly like
+            // UNEXPLAINED), so this is defense in depth, not the only thing standing between a process
+            // restart and a wrong answer - but a TREATED/EXERCISE_ACTIVE reading correctly round-
+            // tripping through a restart, instead of briefly downgrading to the more cautious tier
+            // until the next check cycle, is still worth the one extra key. name stores CauseTier.name
+            // (enum ordinal is NOT used - see load()'s own comment for why that matters across a
+            // future reordering of the enum).
+            if (reading.causeTier != null) putString(KEY_CAUSE_TIER, reading.causeTier.name) else remove(KEY_CAUSE_TIER)
         }
     }
 
@@ -398,7 +451,16 @@ object RawReadingStore {
             excursionDurationMinutes = if (excursionDuration == NO_EXCURSION_DURATION) null else excursionDuration,
             // Default true (permissive) for prefs written before this key
             // existed - matches RawReading.rateMethodsAgree's own default.
-            rateMethodsAgree = prefs.getBoolean(KEY_RATE_METHODS_AGREE, true)
+            rateMethodsAgree = prefs.getBoolean(KEY_RATE_METHODS_AGREE, true),
+            // Stored by NAME, not ordinal - an ordinal would silently point at the wrong tier (or
+            // throw) the moment CauseTier's declaration order ever changes; a name that no longer
+            // matches any entry (a future rename, or prefs written by an older version before a tier
+            // was added/removed) falls back to null exactly like a prefs file written before this key
+            // existed at all - both degrade to the same UNEXPLAINED-equivalent, never-more-permissive
+            // safe default (see TreatmentEffectWindow.projectWithPhysiologicalDecay's own doc).
+            causeTier = prefs.getString(KEY_CAUSE_TIER, null)?.let { name ->
+                runCatching { org.aheadt1d.ratemath.CauseTier.valueOf(name) }.getOrNull()
+            }
         )
     }
 

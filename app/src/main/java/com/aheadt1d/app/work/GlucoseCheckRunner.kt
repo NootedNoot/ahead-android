@@ -138,7 +138,38 @@ object GlucoseCheckRunner {
                 wasBroadcastSupplemented = usedBroadcastFallback && latest.time.toEpochMilli() == fallback?.timestampMillis
             )
             if (reading != null) {
-                LatestTrendRepository.updateRawReading(context, reading)
+                // ADDED 2026-09-23 (Ticket 017): wires TreatmentEffectWindow.causeTier
+                // (ahead-rate-math) onto the RawReading BEFORE it's persisted, so
+                // GlucoseDisplayState.toDisplayState (and, downstream, SeverityEngine.classify
+                // and AlertCoordinator's stabilityReadingsRequired) read the real value instead
+                // of RawReading's null default. Has to happen here, not inside fromPoints itself
+                // - fromPoints is a pure function with no Context, and this needs Context for
+                // both PlateauCoordinator's correction-window prefs and the Room event query
+                // below. isLowSideForTier matches fromPoints' own `latest.sgv < 125` check
+                // exactly (same value, same threshold) so the tier is judged from the same side
+                // of the split severity itself uses.
+                //
+                // Best-effort, same pattern as lastBolusTimestamp further down this function: a
+                // transient Room read failure here must never take down the raw-reading write
+                // everything else (the ongoing notification, AlertCoordinator) depends on every
+                // cycle - it just degrades to "no exercise info," which TreatmentEffectWindow
+                // already treats as safely as no cause info at all.
+                val isLowSideForTier = reading.value < 125
+                val lastExerciseTimestamp = runCatching {
+                    UserEventRepository.mostRecentExerciseTimestamp(context)
+                }.getOrNull()
+                val correctionAnchor = if (isLowSideForTier) {
+                    PlateauCoordinator.activeLowCorrectionAnchorMs(context)
+                } else {
+                    PlateauCoordinator.activeHighCorrectionAnchorMs(context)
+                }
+                val causeTier = org.aheadt1d.ratemath.TreatmentEffectWindow.causeTier(
+                    now = System.currentTimeMillis(),
+                    isLow = isLowSideForTier,
+                    correctionAnchorMs = correctionAnchor,
+                    exerciseLoggedAtMs = lastExerciseTimestamp,
+                )
+                LatestTrendRepository.updateRawReading(context, reading.copy(causeTier = causeTier))
             }
         }
 
@@ -179,6 +210,16 @@ object GlucoseCheckRunner {
             UserEventRepository.mostRecentInsulinTimestamp(context)
         }.getOrNull()
 
+        // 2026-09-23 (Ticket 017 follow-up, caught while verifying the fan-out): the block above at
+        // line ~140 already computes a local lastExerciseTimestamp, but only in scope for THIS
+        // cycle's causeTier computation - it's re-fetched here (cheap, best-effort, same pattern as
+        // lastBolusTimestamp right above) so the backend's guess-engine actually receives it. Without
+        // this the server-side guess-engine fix is silently dead: minutesSinceExercise would always
+        // be null, since nothing ever put it on the wire.
+        val lastExerciseTimestamp = runCatching {
+            UserEventRepository.mostRecentExerciseTimestamp(context)
+        }.getOrNull()
+
         val body = JSONObject().apply {
             put("readings", JSONArray(points.map { point ->
                 JSONObject().apply {
@@ -187,6 +228,7 @@ object GlucoseCheckRunner {
                 }
             }))
             lastBolusTimestamp?.let { put("lastBolusTimestamp", it) }
+            lastExerciseTimestamp?.let { put("lastExerciseTimestamp", it) }
             // Development-only overrides. Release builds leave backend defaults
             // authoritative; debug values are validated again on the server.
             if (BuildConfig.DEBUG) {

@@ -47,7 +47,13 @@ sealed class GlucoseDisplayState {
         // surfaced separately so the notification can show it explicitly
         // labeled, distinct from deltaFromPrevious which is a raw mg/dL
         // difference between the last two readings.
-        val ratePerMinute: Double?
+        val ratePerMinute: Double?,
+        // ADDED 2026-09-23 (Ticket 017): mirrors how ratePerMinute/projected are already
+        // surfaced on this class - straight passthrough of raw.causeTier (see its own doc for
+        // what null vs. each tier means) so AlertCoordinator can read it off the same Reading it
+        // already has in hand, rather than reaching back into LatestTrendRepository's raw
+        // reading itself. Feeds AlertCoordinator.stabilityReadingsRequired.
+        val causeTier: org.aheadt1d.ratemath.CauseTier? = null
     ) : GlucoseDisplayState()
 
     /** A reading exists but is older than the staleness threshold. lastArrow is
@@ -137,6 +143,12 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
         recoveringFromLow = raw.recoveringFromLow,
         excursionDurationMinutes = raw.excursionDurationMinutes,
         ratesAgree = raw.rateMethodsAgree,
+        // ADDED 2026-09-23 (Ticket 017): raw.causeTier is computed once per check cycle in
+        // GlucoseCheckRunner (see its own comment for why it can't be computed here or in
+        // RawReading.fromPoints - both lack Context) and persisted onto RawReading. null (no
+        // cause info yet, or a pre-existing RawReading predating this field) is the safe default
+        // the ratemath contract already treats the same as UNEXPLAINED.
+        causeTier = raw.causeTier,
     )
 
     // Hard safety floor: <= 60 is always RED immediately
@@ -158,6 +170,7 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
         severity = finalSeverity,
         projected = finalProjected,
         projectedExtended = finalExtended,
-        ratePerMinute = rate
+        ratePerMinute = rate,
+        causeTier = raw.causeTier
     )
 }

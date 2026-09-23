@@ -178,26 +178,39 @@ class AlertCoordinatorTest {
     }
 
     @Test
-    fun `low red clear buffer holds through the first good reading, clears on the second`() {
+    fun `low red clear buffer holds through the first two good readings, clears on the third when unexplained`() {
         // 2026-09-23 ticket: replaces the old flat 80 mg/dL LOW_RED_CLEAR_HYSTERESIS band with a
-        // 2-consecutive-reading stability streak gated on the app's own actual 70 mg/dL
-        // threshold. A value of 76 is already >= 70 - it must never be labeled "still low" - but
-        // the episode still doesn't fully clear until a SECOND reading also holds/climbs.
+        // consecutive-reading stability streak gated on the app's own actual 70 mg/dL threshold.
+        // A value of 76 is already >= 70 - it must never be labeled "still low" - but the episode
+        // still doesn't fully clear until enough consecutive readings also hold/climb.
+        //
+        // 2026-09-23 (Ticket 017 follow-up): the required count is no longer a flat 2 - this test
+        // uses the plain reading() helper, which sets no causeTier (null), and
+        // stabilityReadingsRequired treats null the same as UNEXPLAINED (fail toward caution) - so
+        // THREE consecutive stable readings are required here, not two. See
+        // `real 2026-09-22 bounce - two stable readings alone do not clear an unexplained low` in
+        // AlertScenarioReplayTest.kt for the real-trace version of this same requirement, and
+        // `real 2026-09-22 bounce - a matching low correction keeps the fast 2-reading clear` for
+        // the TREATED case that still clears at two.
         AlertCoordinator.evaluate(context, reading(value = 55, severity = "red"), trend(1L, 55, "red"))
         assertTrue(redTitle() != null)
 
         // Severity dropped to none, value (76) is already >= 70 - "Recovering," never "Still low."
         AlertCoordinator.evaluate(context, reading(value = 76, severity = "none", ratePerMinute = 0.0), trend(2L, 76, "none"))
-        assertTrue("red alert should still be held pending a second stable reading", redTitle() != null)
+        assertTrue("red alert should still be held pending more stable readings", redTitle() != null)
         assertTrue(
             "must say 'Recovering', never 'Still low' - 76 is already above the app's own 70 threshold",
             redTitle()?.contains("Recovering") == true,
         )
         assertTrue("must not use the old (now-wrong) 'still low' wording", redTitle()?.contains("Still low") != true)
 
-        // Second consecutive reading holding at/above 70 - now it actually clears.
+        // Second consecutive stable reading - still held, an unexplained low now needs a third.
         AlertCoordinator.evaluate(context, reading(value = 78, severity = "none", ratePerMinute = 0.0), trend(3L, 78, "none"))
-        assertNull("red alert should now be cancelled after two stable readings", redTitle())
+        assertTrue("still held after only two stable readings with no known cause", redTitle() != null)
+
+        // Third consecutive reading holding at/above 70 - now it actually clears.
+        AlertCoordinator.evaluate(context, reading(value = 80, severity = "none", ratePerMinute = 0.0), trend(4L, 80, "none"))
+        assertNull("red alert should now be cancelled after three stable readings", redTitle())
     }
 
     @Test
@@ -403,6 +416,98 @@ class AlertCoordinatorTest {
         assertTrue(
             "past the fixed 30-minute grace, the plain heartbeat should resume",
             redTitle()?.contains("56") == true,
+        )
+    }
+
+    // 2026-09-23 (Ticket 017 follow-up): fireYellowIfWarranted's material-worsening re-alert now
+    // mirrors fireRedIfWarranted's correction-aware grace one tier up - proves Fix 3.
+    //
+    // CORRECTED 2026-09-23, same day - adversarial review caught that the original version of
+    // this test (and the code it was written against) gated "still worsening" on the instantaneous
+    // rate's sign, not on the projection actually moving. That let a correction's grace window
+    // suppress a re-alert - AND silently re-anchor the comparison baseline - for a projection that
+    // was genuinely collapsing but happened to have a flat/noisy instantaneous rate at each check.
+    // The test below now asserts the CORRECTED contract: holding requires the projection itself to
+    // be flat-or-improved (worsenedBy <= 0), never merely a calm-looking rate.
+    @Test
+    fun `yellow material-worsening re-alert is held only while the projection itself isn't worsening`() {
+        val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
+
+        // ---- Matching LOW correction logged, projection genuinely holding steady (72 -> 74, an
+        // IMPROVEMENT, not worsening) - must NOT re-fire, this is the real "it's working" case. ----
+        logCorrection(glucoseValue = 60)
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 78, severity = "yellow", ratePerMinute = -0.5, projected = 72),
+            trend(1L, 78, "yellow"),
+        )
+        context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 76, severity = "yellow", ratePerMinute = 0.1, projected = 74),
+            trend(2L, 76, "yellow"),
+        )
+        assertNull(
+            "a matching correction still in its grace window, with the PROJECTION itself flat/" +
+                "improved (72 -> 74), must hold off a re-alert",
+            shadowNm.getNotification(yellowNotificationId),
+        )
+
+        // ---- Otherwise-identical episode, no correction logged: must re-fire audibly once past
+        // YELLOW_MATERIAL_WORSENING_MGDL. ----
+        context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSharedPreferences("ahead_plateau_state", Context.MODE_PRIVATE).edit().clear().commit()
+        context.getSystemService(NotificationManager::class.java).cancelAll()
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 78, severity = "yellow", ratePerMinute = -0.5, projected = 72),
+            trend(3L, 78, "yellow"),
+        )
+        context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
+
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 65, severity = "yellow", ratePerMinute = 0.0, projected = 50),
+            trend(4L, 65, "yellow"),
+        )
+        assertTrue(
+            "the same material worsening with no correction logged must re-fire audibly",
+            shadowNm.getNotification(yellowNotificationId) != null,
+        )
+    }
+
+    // 2026-09-23 - the exact regression adversarial review caught before this shipped, adapted
+    // from that review's own repro. A projection that keeps collapsing across several checks, each
+    // individually past YELLOW_MATERIAL_WORSENING_MGDL, but with a flat (0.0) instantaneous rate at
+    // every single check, must still re-alert - the old rate-sign-only check would have silently
+    // ratcheted the comparison baseline through the whole drift with zero re-alerts, ever.
+    @Test
+    fun `a collapsing projection with a flat instantaneous rate still re-alerts through a correction grace`() {
+        val yellowId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
+        val nm = context.getSystemService(NotificationManager::class.java)
+
+        logCorrection(glucoseValue = 60)
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 88, severity = "yellow", ratePerMinute = -0.4, projected = 78),
+            trend(1L, 88, "yellow"),
+        )
+        assertTrue("setup: initial entry must fire", shadowNm.getNotification(yellowId) != null)
+        nm.cancel(yellowId)
+
+        // Each step worsens the projection by 23 (past the 20-point material threshold) with a
+        // flat rate - the bug would have suppressed every one of these AND silently re-anchored
+        // the baseline, so none would ever re-fire even though the true drift (78 -> 9) is 69.
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 82, severity = "yellow", ratePerMinute = 0.0, projected = 55),
+            trend(2L, 82, "yellow"),
+        )
+        assertTrue(
+            "a 23-point projection collapse past threshold must re-alert even with a flat rate",
+            shadowNm.getNotification(yellowId) != null,
         )
     }
 
@@ -636,17 +741,27 @@ class AlertCoordinatorTest {
             reading(value = 82, severity = "yellow", ratePerMinute = 0.7, projected = 85),
             trend(2L, 82, "yellow"),
         )
-        assertTrue("still held pending a second stable reading, not silently dropped", redTitle() != null)
+        assertTrue("still held pending more stable readings, not silently dropped", redTitle() != null)
         assertTrue(
             "must say 'Recovering', never 'Still low' - 82 is already above the app's own 70 threshold",
             redTitle()?.contains("Recovering") == true,
         )
 
-        // A second consecutive reading holding/climbing above 70 - now it actually clears.
+        // 2026-09-23 (Ticket 017 follow-up): no causeTier is set on this test's reading() helper
+        // (null -> treated the same as UNEXPLAINED, fail toward caution), so THREE consecutive
+        // stable readings are now required, not two - a second one here still must not clear yet.
         AlertCoordinator.evaluate(
             context,
             reading(value = 88, severity = "yellow", ratePerMinute = 0.6, projected = 90),
             trend(3L, 88, "yellow"),
+        )
+        assertTrue("still held after only two stable readings with no known cause", redTitle() != null)
+
+        // Third consecutive reading holding/climbing above 70 - now it actually clears.
+        AlertCoordinator.evaluate(
+            context,
+            reading(value = 91, severity = "yellow", ratePerMinute = 0.5, projected = 95),
+            trend(4L, 91, "yellow"),
         )
         assertNull("red alert cancelled once the stability buffer is satisfied", redTitle())
     }

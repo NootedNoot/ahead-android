@@ -80,6 +80,11 @@ import org.aheadt1d.ratemath.SeverityEngine
  *    the same window). A high can be legitimately managed over hours with
  *    several doses (HIGH_CORRECTION_GRACE_MS, rolling 90 min from the MOST
  *    RECENT correction - extends with every additional one logged).
+ *
+ * 2026-09-23 (Ticket 017 follow-up): item 2's correction-aware grace now also covers yellow
+ * (fireYellowIfWarranted's material-worsening path) - it had no such check at all until today.
+ * Same reused constants, same asymmetric reasoning. See fireYellowIfWarranted's own comment for
+ * the detail.
  */
 object AlertCoordinator {
     private const val PREFS_NAME = "ahead_alert_state"
@@ -148,14 +153,36 @@ object AlertCoordinator {
     // threshold - real bug, reported live: a 79 mg/dL reading, already above 70, still showed
     // "Still low: 79 mg/dL, rising." Per the owner's explicit ticket: the low/not-low LABEL now
     // gates strictly on value (and projection) vs LOW_HIGH_SPLIT (70) with no rate dependency -
-    // see LowAlertPhase's doc - while a SEPARATE stability buffer (this constant) still holds
-    // off fully clearing the episode (cancelling the notification, letting severity flow
-    // through as normal) until LOW_STABILITY_READINGS_REQUIRED consecutive readings hold or
-    // keep climbing at/above that threshold. This is what catches a bounce that hasn't finished
-    // (real case: 79 -> 87 -> 89 -> 83 @ -1.2 mg/dL/min) instead of prematurely signaling
-    // recovery on the first good tick - though, being reactive rather than predictive, it's a
-    // meaningful reduction in false-clears, not a guarantee against every possible bounce shape.
-    private const val LOW_STABILITY_READINGS_REQUIRED = 2
+    // see LowAlertPhase's doc - while a SEPARATE stability buffer still holds off fully clearing
+    // the episode (cancelling the notification, letting severity flow through as normal) until
+    // stabilityReadingsRequired() consecutive readings hold or keep climbing at/above that
+    // threshold. This is what catches a bounce that hasn't finished (real case: 79 -> 87 -> 89 ->
+    // 83 @ -1.2 mg/dL/min) instead of prematurely signaling recovery on the first good tick -
+    // though, being reactive rather than predictive, it's a meaningful reduction in false-clears,
+    // not a guarantee against every possible bounce shape.
+    // 2026-09-23 (Ticket 017): as of this date the requirement is no longer a flat 2 - it's
+    // cause-tier-aware (see stabilityReadingsRequired's own doc just below for why).
+    /**
+     * How many consecutive stable readings are required before a held low-red episode is
+     * declared fully resolved - was a flat constant (2) until today; now a function of
+     * TreatmentEffectWindow.CauseTier (ahead-rate-math).
+     *
+     * Real motivating case: the owner's actual 2026-09-22 bounce (79 -> 87 -> 89 -> 83 -> 74) had
+     * NO correction logged, and the flat 2-reading requirement would have cleared the episode at
+     * 87 - before the reversal at 83/74 that made it a real second low. TREATED (a correction was
+     * logged, matching direction) and EXERCISE_ACTIVE (a recently-logged exercise event,
+     * self-resolving by design) keep the existing 2-reading buffer - there IS a known reason to
+     * trust an early reversal in both cases. UNEXPLAINED and EXERCISE_RISK (delayed hypoglycemia
+     * risk, NOT a reason to trust a quick recovery - see TreatmentEffectWindow.CauseTier's own
+     * doc) require a THIRD confirming reading, and so does a null causeTier (unknown - a
+     * pre-existing RawReading from before this field existed, or a cycle where the cause-tier
+     * computation itself failed) - fail toward the more cautious requirement, never the more
+     * permissive one, when there's nothing to go on.
+     */
+    private fun stabilityReadingsRequired(causeTier: org.aheadt1d.ratemath.CauseTier?): Int = when (causeTier) {
+        org.aheadt1d.ratemath.CauseTier.TREATED, org.aheadt1d.ratemath.CauseTier.EXERCISE_ACTIVE -> 2
+        else -> 3 // UNEXPLAINED, EXERCISE_RISK, and null (unknown - fail toward caution) all require 3
+    }
     // Urgency escalation (URGENT vs STANDARD copy/tone) requires a SUSTAINED negative rate too -
     // two or more consecutive readings at/below SeverityEngine.RATE_FALLING_TRIGGER, not one
     // noisy blip - see LowAlertPhase's doc for the full reasoning.
@@ -375,7 +402,7 @@ object AlertCoordinator {
         // SeverityEngine.DEFAULT_YELLOW_LOW (80), not LOW_HIGH_SPLIT (70): this marker feeds the
         // post-hypo recovery grace window below, which is deliberately about "a treated low just
         // happened" more broadly than the strict 70 mg/dL low/not-low label - unrelated to the
-        // low-side red stability buffer (see LOW_STABILITY_READINGS_REQUIRED's doc).
+        // low-side red stability buffer (see stabilityReadingsRequired's doc).
         if (reading.value <= SeverityEngine.DEFAULT_YELLOW_LOW || isLowSide(reading.value, reading.projected)) {
             prefs.edit { putLong(KEY_LAST_LOW_EVENT_AT, now) }
         }
@@ -412,23 +439,29 @@ object AlertCoordinator {
         val isLowRed = prefs.getBoolean(KEY_RED_LOW_SIDE, false)
         if (prevSeverity == "red" && severity != "red") {
             if (isLowRed) {
+                // 2026-09-23 (Ticket 017): required count now depends on WHY this low is turning
+                // around - see stabilityReadingsRequired's own doc. reading.causeTier is
+                // whatever GlucoseCheckRunner computed for THIS reading (or null if that's never
+                // run for it, e.g. a pre-existing RawReading) - never re-derived here.
+                val requiredStabilityReadings = stabilityReadingsRequired(reading.causeTier)
                 val previousStabilityStreak = prefs.getInt(KEY_LOW_STABILITY_STREAK, 0)
                 val phase = updateLowPhase(prefs, reading.value, reading.projected, reading.ratePerMinute)
                 val stabilityStreak = prefs.getInt(KEY_LOW_STABILITY_STREAK, 0)
 
-                if (stabilityStreak < LOW_STABILITY_READINGS_REQUIRED) {
+                if (stabilityStreak < requiredStabilityReadings) {
                     if (BuildConfig.DEBUG) {
                         Log.d(
                             "AlertCoordinator",
                             "low red held: value ${reading.value}, phase $phase, " +
-                                "stability streak $stabilityStreak/$LOW_STABILITY_READINGS_REQUIRED",
+                                "stability streak $stabilityStreak/$requiredStabilityReadings " +
+                                "(causeTier=${reading.causeTier})",
                         )
                     }
                     // A reading that just broke an already-building stability streak (value
                     // dropped back under the threshold, or rate went negative again after
                     // holding/climbing) is new information worth an immediate re-alert - same
                     // urgency as a fresh low, and specifically what catches a bounce still in
-                    // progress (see LOW_STABILITY_READINGS_REQUIRED's doc) instead of silently
+                    // progress (see stabilityReadingsRequired's doc) instead of silently
                     // continuing to hold as if nothing changed.
                     val justReversed = previousStabilityStreak > 0 && stabilityStreak == 0
                     // Unconditional (no isNotificationPosted gate) - unlike the high-side hold
@@ -613,7 +646,7 @@ object AlertCoordinator {
      * missing rate is never treated as "still falling") once no longer low - resets the instant
      * value/projection drops back under the threshold OR the rate goes negative again, even if
      * still >= 70. That reset is what catches a bounce still in progress (see
-     * LOW_STABILITY_READINGS_REQUIRED's doc) rather than treating one good tick as recovery.
+     * stabilityReadingsRequired's doc) rather than treating one good tick as recovery.
      */
     private fun updateLowPhase(prefs: SharedPreferences, value: Int, projected: Int?, rate: Double?): LowAlertPhase {
         val stillLow = isStillLow(value, projected)
@@ -955,7 +988,47 @@ object AlertCoordinator {
         val isLowSide = projected < YELLOW_MID_POINT
         val worsenedBy = if (isLowSide) lastAlertedProjected - projected else projected - lastAlertedProjected
 
-        if (worsenedBy >= YELLOW_MATERIAL_WORSENING_MGDL) {
+        // 2026-09-23 (Ticket 017 follow-up): correction-aware re-alert grace, mirroring
+        // fireRedIfWarranted's one tier down (see that function's own correctionAnchor/
+        // inCorrectionGrace/correctionHolding block, and the class doc's item 2) - found while
+        // wiring up cause-tier awareness for the low-side stability buffer above that yellow had
+        // NO equivalent check at all: a logged correction changed nothing about whether a yellow
+        // (re-)fired here. Same asymmetric grace windows as red (LOW_CORRECTION_GRACE_MS,
+        // fixed/30m from the FIRST low correction; HIGH_CORRECTION_GRACE_MS, rolling/70m from
+        // the MOST RECENT high correction - reusing those exact constants, not new ones) and the
+        // same "only while it looks like it's working" rule: a correction never holds off a
+        // re-alert while the projection is still moving further into danger on this episode's
+        // own side. Deliberately does NOT touch the forceFire branch above (already returned by
+        // this point) - a correction never suppresses the FIRST alert of an episode, matching
+        // the existing red-side rule.
+        //
+        // CORRECTED 2026-09-23, same day - adversarial review caught a real gap in the first
+        // version: "still worsening" was checked against reading.ratePerMinute's instantaneous
+        // sign, but this function's whole re-alert decision is driven by worsenedBy (the
+        // PROJECTION's movement vs. the last-alerted baseline) - a different, independently
+        // computed quantity (GlucoseDisplayState.toDisplayState feeds severity/projection from
+        // raw.severityRatePerMinute, a RateConsensus median plus decay/trajectory history, NOT the
+        // plain 2-point raw.ratePerMinute this file's Reading.ratePerMinute actually carries - see
+        // that function's own comment). A flat/positive instantaneous rate could sit next to a
+        // still-collapsing projection, and the old check would call that "not worsening," hold the
+        // re-alert, AND silently re-anchor the baseline to the new, worse value every cycle -
+        // letting a real, large drift disappear in sub-threshold bites for the whole grace window
+        // with zero re-alert, ever (not even a delayed catch-up once the grace expired, since the
+        // ratcheted baseline had already absorbed it). Checking worsenedBy itself - the exact
+        // quantity this function already alerts on - closes that gap: a correction only ever holds
+        // when the projection is flat or has genuinely improved since the last alert, never merely
+        // because the instantaneous rate happens to read calm.
+        val correctionAnchor = if (isLowSide) {
+            PlateauCoordinator.activeLowCorrectionAnchorMs(context)
+        } else {
+            PlateauCoordinator.activeHighCorrectionAnchorMs(context)
+        }
+        val correctionGraceMs = if (isLowSide) LOW_CORRECTION_GRACE_MS else HIGH_CORRECTION_GRACE_MS
+        val inCorrectionGrace = correctionAnchor != null && now - correctionAnchor < correctionGraceMs
+        val stillWorseningProjection = worsenedBy > 0
+        val correctionHolding = inCorrectionGrace && !stillWorseningProjection
+
+        if (worsenedBy >= YELLOW_MATERIAL_WORSENING_MGDL && !correctionHolding) {
             // Deliberately NOT gated by MIN_YELLOW_REALERT_GAP_MS: the projection moving 20+
             // further into danger is real new information, not a flap.
             AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute, projectedExtended = reading.projectedExtended)
@@ -965,6 +1038,12 @@ object AlertCoordinator {
             }
             recordAlertAction(context, readingDate, "audible_yellow")
         } else {
+            // A correction holding this re-alert off still moves the comparison baseline forward
+            // - same reasoning as fireRedIfWarranted's held-state tracking - so a LATER reading
+            // that's still worsening despite the correction is judged against where the
+            // projection was NOW, not against a stale pre-correction number that would otherwise
+            // make worsenedBy balloon the moment the grace window lapses.
+            if (correctionHolding) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
             recordAlertAction(context, readingDate, "suppressed_cooldown")
         }
     }
