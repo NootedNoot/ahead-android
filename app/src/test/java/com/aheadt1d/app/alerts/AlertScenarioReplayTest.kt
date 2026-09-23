@@ -11,6 +11,8 @@ import com.aheadt1d.app.notifications.GlucoseDisplayState
 import com.aheadt1d.app.notifications.toDisplayState
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
+import com.aheadt1d.app.state.withComputedCauseTier
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -107,28 +109,10 @@ class AlertScenarioReplayTest {
             points.add(GlucosePoint(Instant.ofEpochMilli(t), v))
             val rawBeforeTier = RawReading.fromPoints(points.filter { t - it.time.toEpochMilli() <= 120 * 60_000L })!!
             corrections[i]?.let { PlateauCoordinator.onCorrectionLogged(context, t, explicitLow = it, glucoseAtTime = v) }
-            // Ticket 017: mirrors GlucoseCheckRunner's own causeTier wiring (see its own comment
-            // for why Context is needed and fromPoints can't do this itself) so this replay
-            // exercises the REAL end-to-end chain the class doc promises, not a permanently-null
-            // causeTier - which would happen to collapse to the same "requires 3" answer as
-            // UNEXPLAINED for every scenario in this file that never logs a matching-direction
-            // correction (true of all of them before the two cause-tier regression tests below).
-            // Correction-logging above runs first so a correction logged at THIS same index is
-            // already visible here, matching how a real correction logged via EventLogDialogs is
-            // committed to PlateauCoordinator's prefs before any later read of it.
-            val isLowSideForTier = rawBeforeTier.value < 125
-            val correctionAnchor = if (isLowSideForTier) {
-                PlateauCoordinator.activeLowCorrectionAnchorMs(context)
-            } else {
-                PlateauCoordinator.activeHighCorrectionAnchorMs(context)
-            }
-            val causeTier = org.aheadt1d.ratemath.TreatmentEffectWindow.causeTier(
-                now = t + 30_000L,
-                isLow = isLowSideForTier,
-                correctionAnchorMs = correctionAnchor,
-                exerciseLoggedAtMs = null,
-            )
-            val raw = rawBeforeTier.copy(causeTier = causeTier)
+            // Ticket 017: wires RawReading.withComputedCauseTier (shared canonically with
+            // GlucoseCheckRunner and MainActivity) so this replay exercises the REAL
+            // end-to-end chain the class doc promises.
+            val raw = runBlocking { rawBeforeTier.withComputedCauseTier(context, now = t + 30_000L) }
             LatestTrendRepository.updateRawReading(context, raw)
 
             val plateauBefore = shadowNm.getNotification(AlertNotifier.PLATEAU_ALERT_NOTIFICATION_ID)

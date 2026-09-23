@@ -245,19 +245,11 @@ data class RawReading(
     // (fail toward requiring more confirmation, never less) per the ratemath contract, so a
     // missing value is exactly as safe as an explicit UNEXPLAINED, never more permissive.
     //
-    // CORRECTED 2026-09-23, same day - this was briefly FALSE for one of the two consumers
-    // (TreatmentEffectWindow.projectWithPhysiologicalDecay originally let null fall back to the
-    // pre-cause-tier fixed windows, which on the low side is MORE permissive than UNEXPLAINED, not
-    // equivalent - see that function's own doc). Adversarial review also found this null default
-    // is reachable in real, non-debug usage, not just a theoretical fallback: MainActivity's own,
-    // more frequent chart-refresh path (syncRawReadingToRepository) independently calls
-    // RawReading.fromPoints and writes a fresh RawReading with no causeTier at all, so it can win
-    // the race against GlucoseCheckRunner's slower cadence and briefly overwrite an already-tiered
-    // reading whenever the app is open - plausibly exactly when someone is anxiously watching a
-    // real low. RawReadingStore.save/load (below) now persists this field for the same reason (a
-    // process restart used to silently drop it too) - defense in depth now that null is safe by
-    // construction, not the only thing preventing a wrong answer. The MainActivity race itself is
-    // NOT separately fixed (only made safe, never dangerous) - a known, accepted, documented gap.
+    // FIXED 2026-09-23 (Ticket 017): MainActivity's chart-refresh path previously wrote an
+    // untiered RawReading (causeTier=null) which could overwrite an already-tiered reading
+    // computed by GlucoseCheckRunner. Both MainActivity and GlucoseCheckRunner now use
+    // [withComputedCauseTier] to populate the true CauseTier before writing, and
+    // LatestTrendRepository.updateRawReading preserves non-null tiers as defense in depth.
     val causeTier: org.aheadt1d.ratemath.CauseTier? = null
 ) {
     companion object {
@@ -293,6 +285,41 @@ data class RawReading(
             )
         }
     }
+}
+
+/**
+ * Computes the [org.aheadt1d.ratemath.CauseTier] that explains this [RawReading] excursion using
+ * the current context (PlateauCoordinator active correction anchor, UserEventRepository recent
+ * exercise timestamp, and ExerciseTuningPrefs risk window). Returns a copy of [this] with [causeTier] set.
+ *
+ * Used canonically by both GlucoseCheckRunner and MainActivity (eliminating the dual-writer
+ * race where MainActivity's faster cadence used to overwrite a computed tier with null).
+ */
+suspend fun RawReading.withComputedCauseTier(
+    context: Context,
+    now: Long = System.currentTimeMillis(),
+): RawReading {
+    val isLowSideForTier = value < 125
+    val lastExerciseTimestamp = runCatching {
+        com.aheadt1d.app.events.UserEventRepository.mostRecentExerciseTimestamp(context, now)
+    }.getOrNull()
+    val correctionAnchor = if (isLowSideForTier) {
+        com.aheadt1d.app.alerts.PlateauCoordinator.activeLowCorrectionAnchorMs(context)
+    } else {
+        com.aheadt1d.app.alerts.PlateauCoordinator.activeHighCorrectionAnchorMs(context)
+    }
+    val riskHours = runCatching {
+        com.aheadt1d.app.tuning.ExerciseTuningPrefs.load(context).exerciseRiskWindowHours
+    }.getOrDefault(org.aheadt1d.ratemath.TreatmentEffectWindow.EXERCISE_RISK_WINDOW_HOURS)
+
+    val tier = org.aheadt1d.ratemath.TreatmentEffectWindow.causeTier(
+        now = now,
+        isLow = isLowSideForTier,
+        correctionAnchorMs = correctionAnchor,
+        exerciseLoggedAtMs = lastExerciseTimestamp,
+        riskWindowHours = riskHours,
+    )
+    return copy(causeTier = tier)
 }
 
 /**

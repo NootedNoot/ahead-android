@@ -52,8 +52,22 @@ object LatestTrendRepository {
     }
 
     fun updateRawReading(context: Context, reading: RawReading) {
-        RawReadingStore.save(context.applicationContext, reading)
-        _latestRawReading.value = reading
+        val existing = _latestRawReading.value
+        // Defense in depth (Ticket 017): if an incoming write has no causeTier (e.g. from an
+        // untiered construction or legacy path) but the repository already holds a non-null
+        // causeTier for this exact reading timestamp, preserve the already-computed tier rather
+        // than letting null stomp it.
+        val effectiveReading = if (
+            reading.causeTier == null &&
+            existing?.causeTier != null &&
+            existing.time == reading.time
+        ) {
+            reading.copy(causeTier = existing.causeTier)
+        } else {
+            reading
+        }
+        RawReadingStore.save(context.applicationContext, effectiveReading)
+        _latestRawReading.value = effectiveReading
     }
 
     fun markChecked() {

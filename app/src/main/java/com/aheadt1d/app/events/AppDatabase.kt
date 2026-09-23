@@ -73,5 +73,11 @@ abstract class AppDatabase : RoomDatabase() {
                     "ahead_events.db"
                 ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
             }
+
+        @androidx.annotation.VisibleForTesting
+        fun resetForTesting() {
+            instance?.close()
+            instance = null
+        }
     }
 }

@@ -10,6 +10,9 @@ import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
 import com.aheadt1d.app.state.isStale
+import com.aheadt1d.app.state.withComputedCauseTier
+import kotlinx.coroutines.runBlocking
+import org.aheadt1d.ratemath.CauseTier
 
 /**
  * Shared debug-only path for pushing a synthetic reading through the real
@@ -30,10 +33,11 @@ object DebugInjection {
         rate: Double,
         ageMin: Int = 0,
         delta: Int? = -8,
+        causeTier: CauseTier? = null,
     ) {
         val ctx = context.applicationContext
         val readingTime = System.currentTimeMillis() - ageMin * 60_000L
-        Log.d(TAG, "apply: severity=$severity value=$value projected=$projected rate=$rate ageMin=$ageMin")
+        Log.d(TAG, "apply: severity=$severity value=$value projected=$projected rate=$rate ageMin=$ageMin causeTier=$causeTier")
 
         val trend = LatestTrend(
             currentValue = value,
@@ -43,10 +47,13 @@ object DebugInjection {
             projectedExtended = projectedExtended,
             date = readingTime
         )
-        LatestTrendRepository.updateRawReading(
-            ctx,
-            RawReading(value = value, time = readingTime, ratePerMinute = rate, deltaFromPrevious = delta)
-        )
+        val raw = RawReading(value = value, time = readingTime, ratePerMinute = rate, deltaFromPrevious = delta)
+        val tieredReading = if (causeTier != null) {
+            raw.copy(causeTier = causeTier)
+        } else {
+            runBlocking { raw.withComputedCauseTier(ctx, readingTime) }
+        }
+        LatestTrendRepository.updateRawReading(ctx, tieredReading)
         LatestTrendRepository.update(ctx, trend)
 
         val arrow = GlucoseTrendArrow.fromRatePerMinute(rate)
@@ -68,7 +75,8 @@ object DebugInjection {
                 severity = severity,
                 projected = projected,
                 projectedExtended = projectedExtended,
-                ratePerMinute = rate
+                ratePerMinute = rate,
+                causeTier = tieredReading.causeTier
             )
         }
         AlertCoordinator.evaluate(ctx, state, trend)

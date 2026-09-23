@@ -20,6 +20,8 @@ import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
 import com.aheadt1d.app.state.effectiveRatePerMinute
+import com.aheadt1d.app.tuning.ExerciseTuningParameters
+import com.aheadt1d.app.tuning.ExerciseTuningPrefs
 import com.aheadt1d.app.tuning.PlateauTuningParameters
 import com.aheadt1d.app.tuning.PlateauTuningPrefs
 import com.aheadt1d.app.tuning.TuningParameters
@@ -35,6 +37,7 @@ import kotlinx.coroutines.launch
 class TuningActivity : AppCompatActivity() {
     private lateinit var inputs: List<EditText>
     private lateinit var inputs2: List<EditText>
+    private lateinit var exerciseRiskHoursInput: EditText
     private lateinit var liveReading: TextView
     private lateinit var liveRate: TextView
     private lateinit var liveProjected: TextView
@@ -70,8 +73,11 @@ class TuningActivity : AppCompatActivity() {
         liveSeverity = findViewById(R.id.liveSeverityText)
         livePlateau = findViewById(R.id.livePlateauText)
 
+        exerciseRiskHoursInput = findViewById(R.id.exerciseRiskHoursInput)
+
         populate(TuningPrefs.load(this))
         populate2(PlateauTuningPrefs.load(this))
+        populateExercise(ExerciseTuningPrefs.load(this))
         val watcher = object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
@@ -80,21 +86,25 @@ class TuningActivity : AppCompatActivity() {
                 renderPlateauPreview()
             }
         }
-        (inputs + inputs2).forEach { it.addTextChangedListener(watcher) }
+        (inputs + inputs2 + listOf(exerciseRiskHoursInput)).forEach { it.addTextChangedListener(watcher) }
 
         findViewById<Button>(R.id.saveTuningButton).setOnClickListener {
             val value = parseInputs()
             val value2 = parseInputs2()
-            if (value == null || value2 == null) {
+            val value3 = parseExerciseInputs()
+            if (value == null || value2 == null || value3 == null) {
                 Toast.makeText(this, "Enter valid numeric parameters", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
             val normalized = value.normalized()
             val normalized2 = value2.normalized()
+            val normalized3 = value3.normalized()
             TuningPrefs.save(this, normalized)
             PlateauTuningPrefs.save(this, normalized2)
+            ExerciseTuningPrefs.save(this, normalized3)
             populate(normalized)
             populate2(normalized2)
+            populateExercise(normalized3)
             WorkScheduler.runOnce(applicationContext)
             lifecycleScope.launch { refreshPlateauPoints() }
             (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
@@ -104,8 +114,10 @@ class TuningActivity : AppCompatActivity() {
         findViewById<Button>(R.id.resetTuningButton).setOnClickListener {
             TuningPrefs.reset(this)
             PlateauTuningPrefs.reset(this)
+            ExerciseTuningPrefs.reset(this)
             populate(TuningPrefs.load(this))
             populate2(PlateauTuningPrefs.load(this))
+            populateExercise(ExerciseTuningPrefs.load(this))
             WorkScheduler.runOnce(applicationContext)
             lifecycleScope.launch { refreshPlateauPoints() }
             Toast.makeText(this, "Restored server defaults and queued a check.", Toast.LENGTH_SHORT).show()
@@ -170,6 +182,15 @@ class TuningActivity : AppCompatActivity() {
             lowThreshold = ints[6], lowCorrectionWindowMinutes = ints[7],
             lowResponseRateThreshold = lowRate,
         )
+    }
+
+    private fun populateExercise(value: ExerciseTuningParameters) {
+        exerciseRiskHoursInput.setText(value.exerciseRiskWindowHours.toString())
+    }
+
+    private fun parseExerciseInputs(): ExerciseTuningParameters? {
+        val hours = exerciseRiskHoursInput.text.toString().trim().toIntOrNull() ?: return null
+        return ExerciseTuningParameters(exerciseRiskWindowHours = hours)
     }
 
     /** Fetches (or, in debug builds, picks up injected/scenario data via

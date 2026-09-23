@@ -43,6 +43,7 @@ class DebugTrendInjector : BroadcastReceiver() {
             com.aheadt1d.app.alerts.AlertNotifier.cancelPlateau(ctx)
             com.aheadt1d.app.alerts.AlertNotifier.cancelCorrection(ctx)
             ctx.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE).edit().clear().apply()
+            ctx.getSharedPreferences("ahead_plateau_state", Context.MODE_PRIVATE).edit().clear().apply()
             DebugGlucoseOverride.clear()
             DebugGlucoseOverride.notifyStateChanged(ctx)
             // Best-effort: clear any test readings from ahead-backend so Ahead Lite doesn't show them
@@ -55,12 +56,33 @@ class DebugTrendInjector : BroadcastReceiver() {
             return
         }
 
+        if (intent.getStringExtra("action") == "log_correction") {
+            val isLow = intent.getBooleanExtra("isLow", true)
+            val now = System.currentTimeMillis()
+            com.aheadt1d.app.alerts.PlateauCoordinator.onCorrectionLogged(ctx, now, explicitLow = isLow)
+            Log.d(TAG, "Logged debug correction: isLow=$isLow at $now")
+            return
+        }
+
+        if (intent.getStringExtra("action") == "log_exercise") {
+            val minutesAgo = intent.getIntExtra("minutesAgo", 0)
+            val timestamp = System.currentTimeMillis() - minutesAgo * 60_000L
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.aheadt1d.app.events.UserEventRepository.log(ctx, com.aheadt1d.app.events.EventTag.EXERCISE, timestamp = timestamp)
+            }
+            Log.d(TAG, "Logged debug exercise: timestamp=$timestamp ($minutesAgo min ago)")
+            return
+        }
+
         val severity = intent.getStringExtra("severity") ?: "red"
         val value = intent.getIntExtra("value", 82)
         val projected = if (intent.hasExtra("projected")) intent.getIntExtra("projected", 68) else null
         val projectedExtended = if (intent.hasExtra("projExt")) intent.getIntExtra("projExt", 68) else projected
         val rate = if (intent.hasExtra("rate")) intent.getFloatExtra("rate", -2.8f).toDouble() else -2.8
         val ageMin = intent.getIntExtra("ageMin", 0)
+        val causeTier = intent.getStringExtra("causeTier")?.let {
+            runCatching { org.aheadt1d.ratemath.CauseTier.valueOf(it.uppercase()) }.getOrNull()
+        }
 
         val readingTime = java.time.Instant.now().minusSeconds(ageMin * 60L)
         val prevValue = (value - (rate * 5)).toInt().coerceIn(20, 500)
@@ -71,7 +93,7 @@ class DebugTrendInjector : BroadcastReceiver() {
         DebugGlucoseOverride.setPoints(points)
         DebugGlucoseOverride.notifyStateChanged(ctx)
 
-        DebugInjection.apply(ctx, severity, value, projected, projectedExtended, rate, ageMin)
+        DebugInjection.apply(ctx, severity, value, projected, projectedExtended, rate, ageMin, causeTier = causeTier)
     }
 
     companion object {

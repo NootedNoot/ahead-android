@@ -138,6 +138,28 @@
             <EditText android:id="@+id/lowResponseRateInput" style="@style/TuningInputSigned" android:hint="mg/dL/min" />
         </LinearLayout>
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="EXERCISE PARAMETERS"
+            android:textColor="@color/muted"
+            android:textSize="11sp"
+            android:letterSpacing="0.12" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/card_background"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView style="@style/TuningParameterLabel" android:text="EXERCISE_RISK_WINDOW (default 10 hours)" />
+            <TextView style="@style/TuningParameterHelp" android:text="How many hours after a logged exercise event a low-side excursion is treated as delayed-onset exercise risk (CauseTier.EXERCISE_RISK). Allowed range: 2 to 24 hours." />
+            <EditText android:id="@+id/exerciseRiskHoursInput" style="@style/TuningInput" android:hint="hours (2-24)" />
+        </LinearLayout>
+
         <Button
             android:id="@+id/saveTuningButton"
             android:layout_width="match_parent"

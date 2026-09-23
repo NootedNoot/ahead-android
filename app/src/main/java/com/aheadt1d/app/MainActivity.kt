@@ -45,6 +45,7 @@ import com.aheadt1d.app.state.DebugGlucoseOverride
 import com.aheadt1d.app.state.LatestTrend
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.aheadt1d.app.state.RawReading
+import com.aheadt1d.app.state.withComputedCauseTier
 import com.aheadt1d.app.state.TREND_MATCH_TOLERANCE_MS
 import com.aheadt1d.app.state.effectiveRatePerMinute
 import com.aheadt1d.app.state.isStale
@@ -681,13 +682,14 @@ class MainActivity : AppCompatActivity() {
      * watchdog) sees new data first is the one that updates it - the other two
      * just no-op next time since nothing's newer.
      */
-    private fun syncRawReadingToRepository() {
+    private suspend fun syncRawReadingToRepository() {
         val latest = cachedPoints.lastOrNull() ?: return
         val current = LatestTrendRepository.latestRawReading.value
         if (current != null && latest.time.toEpochMilli() <= current.time) return
 
         val reading = RawReading.fromPoints(cachedPoints) ?: return
-        LatestTrendRepository.updateRawReading(applicationContext, reading)
+        val tieredReading = reading.withComputedCauseTier(applicationContext)
+        LatestTrendRepository.updateRawReading(applicationContext, tieredReading)
         GlucoseStatusService.refreshNotification(applicationContext)
     }
 
