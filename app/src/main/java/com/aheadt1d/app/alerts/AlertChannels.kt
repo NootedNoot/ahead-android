@@ -62,12 +62,63 @@ object AlertChannels {
     // notification's title can never visually match an alert's).
     const val NOTIFICATION_GROUP_KEY = "ahead_notifications"
 
-    // Shared with AlertNotifier's new (2026-09-22) direct AlertTones.vibrate() calls, so the
-    // channel's own vibration and the redundant direct one are always the same pattern - never
-    // two independently-declared literals that can quietly drift apart. Red's pattern also covers
-    // signal-lost, which deliberately shares red's notification id/channel identity.
+    // Shared with AlertNotifier's direct AlertTones.vibrate() calls, so the channel's own
+    // vibration and the redundant direct one are always the same pattern - never two
+    // independently-declared literals that can quietly drift apart.
+    //
+    // RED_VIBRATION_PATTERN/CUSTOM_THRESHOLD_VIBRATION_PATTERN (2026-09-22, the ringer-silent fix)
+    // are still what each CHANNEL itself carries - one fixed pattern per channel, since Android
+    // channels can't vary their vibration per notification once created. They stay as the
+    // baseline/fallback layer.
+    //
+    // 2026-09-22 (same day, the owner's own follow-up): "type AND urgency" - the direct
+    // AlertTones.vibrate() calls below now pick a DIFFERENT pattern depending on how urgent this
+    // specific alert actually is, not just which tier it's in. This mirrors a design language this
+    // codebase already applies to TONE and to notification COPY (WARN_LOW vs WARN_HIGH, red's own
+    // `recovering: Boolean` swapping "Still low... keep monitoring" for "URGENT... check now") -
+    // vibration was the one channel that hadn't caught up. Same two encoding rules AlertTones'
+    // class doc already uses for tone: REGISTER/LENGTH for urgency (longer, stronger pulses =
+    // more urgent), RHYTHM for direction/kind (a distinct shape, not just a shorter version of the
+    // same shape, so it's tellable by feel alone, not just by counting buzzes).
     val RED_VIBRATION_PATTERN = longArrayOf(0, 400, 200, 400, 200, 600)
     val CUSTOM_THRESHOLD_VIBRATION_PATTERN = longArrayOf(0, 200, 100, 200, 100, 200, 100, 200)
+
+    /** Non-recovering red - "URGENT, check now". Unchanged from the original red pattern; this
+     *  stays the single most intense thing Ahead can make a phone do. */
+    val RED_URGENT_VIBRATION_PATTERN = RED_VIBRATION_PATTERN
+
+    /** Recovering red - "Still low, rising, keep monitoring". Two shorter pulses with a longer
+     *  gap, deliberately calmer than the urgent triple - the person is already being warned and
+     *  already trending the right way; this should feel like it's easing off, not escalating. */
+    val RED_RECOVERING_VIBRATION_PATTERN = longArrayOf(0, 250, 400, 250)
+
+    /** Signal lost while actively dropping - "CRITICAL: Signal lost while dropping", the one
+     *  signal-lost case with confirmed spoken/voice urgency escalation already. As dangerous as a
+     *  real red, so it gets red's own pattern rather than a lesser one. */
+    val SIGNAL_LOST_DROPPING_VIBRATION_PATTERN = RED_URGENT_VIBRATION_PATTERN
+
+    /** Ordinary signal lost (not confirmed dropping) - a few quick equal taps building to one
+     *  longer buzz. Distinct rhythm from red's decisive triple, matching AlertTones.Tone
+     *  .SIGNAL_LOST's own "alternating uncertain wobble" identity (see that class's doc) - there
+     *  is no confirmed reading to point at, so it shouldn't feel as certain as red does. */
+    val SIGNAL_LOST_UNCERTAIN_VIBRATION_PATTERN = longArrayOf(0, 150, 150, 150, 150, 150, 150, 400)
+
+    /** Yellow, low side - identical to the channel's own existing pattern on purpose, so nothing
+     *  that already shipped and felt like "yellow" changes shape for the low-side case. */
+    val YELLOW_LOW_VIBRATION_PATTERN = longArrayOf(0, 300, 150, 300)
+
+    /** Yellow, high side - one longer, single buzz. A different RHYTHM from low's two-pulse
+     *  (not just a variant of it), the same register/contour-encodes-direction idea AlertTones
+     *  already uses for WARN_LOW vs WARN_HIGH's differently-pitched sweeps. */
+    val YELLOW_HIGH_VIBRATION_PATTERN = longArrayOf(0, 500)
+
+    /** Custom threshold, falling direction - identical to the channel's own existing pattern,
+     *  same reasoning as yellow-low above. */
+    val CUSTOM_THRESHOLD_FALLING_VIBRATION_PATTERN = CUSTOM_THRESHOLD_VIBRATION_PATTERN
+
+    /** Custom threshold, rising direction - one longer pulse then two short ones, a "climbing"
+     *  shape distinct from falling's uniform four-tap staccato. */
+    val CUSTOM_THRESHOLD_RISING_VIBRATION_PATTERN = longArrayOf(0, 350, 100, 150, 100, 150)
 
     private const val PREFS_NAME = "ahead_alert_channels"
     private const val KEY_RED_CHANNEL_ID = "red_channel_id"

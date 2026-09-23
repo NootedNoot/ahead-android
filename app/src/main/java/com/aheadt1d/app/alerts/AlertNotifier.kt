@@ -170,7 +170,12 @@ object AlertNotifier {
         // AlertTones.vibrate's own doc for the real incident this closes. Placed after the
         // `if (silent) return` above so a silent re-post (already-acknowledged, tray-only
         // restore) still doesn't re-buzz - same rule voice already follows.
-        AlertTones.vibrate(context, AlertChannels.RED_VIBRATION_PATTERN)
+        // Pattern varies with [recovering] the same way the copy above already does - urgency,
+        // not just tier, is felt (see AlertChannels' patterns for the design language).
+        AlertTones.vibrate(
+            context,
+            if (recovering) AlertChannels.RED_RECOVERING_VIBRATION_PATTERN else AlertChannels.RED_URGENT_VIBRATION_PATTERN,
+        )
 
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
@@ -229,7 +234,16 @@ object AlertNotifier {
         // A silent update refreshes the visible tray indicator without sounds or speech
         if (silent) return
 
-        AlertTones.play(context, if (isLowSideYellow(value, projected)) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH)
+        // Direct vibration (2026-09-22), added alongside the tone/pattern differentiation below -
+        // yellow never had ANY direct vibration before this, only whatever the channel itself
+        // carried. Deliberately default ignoreSilence (NOT passed here, so it stays false) -
+        // unlike red/custom-threshold, yellow is still meant to respect Ahead's own silence
+        // toggle, exactly like its tone call right below already does. Pattern varies by
+        // direction, the same split the tone call uses.
+        val isLow = isLowSideYellow(value, projected)
+        AlertTones.vibrate(context, if (isLow) AlertChannels.YELLOW_LOW_VIBRATION_PATTERN else AlertChannels.YELLOW_HIGH_VIBRATION_PATTERN)
+
+        AlertTones.play(context, if (isLow) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH)
 
         VoiceAlertEngine.speak(
             context,
@@ -336,10 +350,15 @@ object AlertNotifier {
         // Muted while silenced: the notification above is the whole point, the noise is not.
         if (silenced) return
 
-        // Direct, channel-independent vibration guarantee (2026-09-22) - see
-        // AlertTones.vibrate's own doc. Signal-lost shares red's notification identity, so it
-        // shares red's vibration pattern too.
-        AlertTones.vibrate(context, AlertChannels.RED_VIBRATION_PATTERN)
+        // Direct, channel-independent vibration guarantee (2026-09-22) - see AlertTones.vibrate's
+        // own doc. Pattern varies with [isDropping] the same way the title/text/voice above
+        // already do: a confirmed drop-while-blind is as dangerous as a real red and gets red's
+        // own pattern; an ordinary blackout gets a distinct "uncertain" one, matching
+        // AlertTones.Tone.SIGNAL_LOST's own "alternating wobble" identity.
+        AlertTones.vibrate(
+            context,
+            if (isDropping) AlertChannels.SIGNAL_LOST_DROPPING_VIBRATION_PATTERN else AlertChannels.SIGNAL_LOST_UNCERTAIN_VIBRATION_PATTERN,
+        )
 
         AlertTones.play(context, AlertTones.Tone.SIGNAL_LOST)
 
@@ -641,14 +660,20 @@ object AlertNotifier {
 
         val posted = notifyIfAllowed(context) { nm -> nm.notify(id, notification) }
         if (posted) {
-            val tone = if (threshold.direction == CustomThreshold.Direction.FALLING) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH
+            val falling = threshold.direction == CustomThreshold.Direction.FALLING
+            val tone = if (falling) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH
             AlertTones.play(context, tone, ignoreSilence = true)
             // Direct, channel-independent vibration guarantee (2026-09-22) - see
             // AlertTones.vibrate's own doc for the real incident (a threshold at 68 fired
             // silently on a Silent-mode phone). ignoreSilence=true matches the tone call above:
             // this tier already overrides Ahead's own in-app silence toggle, not just Android's
-            // DND, so the vibration override must too.
-            AlertTones.vibrate(context, AlertChannels.CUSTOM_THRESHOLD_VIBRATION_PATTERN, ignoreSilence = true)
+            // DND, so the vibration override must too. Pattern varies with direction, mirroring
+            // the WARN_LOW/WARN_HIGH tone split right above it.
+            AlertTones.vibrate(
+                context,
+                if (falling) AlertChannels.CUSTOM_THRESHOLD_FALLING_VIBRATION_PATTERN else AlertChannels.CUSTOM_THRESHOLD_RISING_VIBRATION_PATTERN,
+                ignoreSilence = true,
+            )
         }
         return posted
     }

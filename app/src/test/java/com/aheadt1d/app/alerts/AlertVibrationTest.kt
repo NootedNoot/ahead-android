@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.os.Vibrator
 import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -146,6 +147,97 @@ class AlertVibrationTest {
         val posted = AlertNotifier.showCustomThresholdAlert(context, threshold, currentValue = 66, currentRate = -0.5, metric = 66.0)
         assertFalse("setup: the dev kill switch should block the post itself", posted)
         assertFalse(shadowVibrator.isVibrating)
+    }
+
+    // =================================================================================
+    // "Vibrations based off of alert type and urgency" - 2026-09-22, the owner's own follow-up.
+    // Each pair below is the SAME alert tier/notification, differing only in the one axis that's
+    // supposed to change the felt pattern - so a passing test proves the pattern actually moved,
+    // not just that vibration happened at all.
+    // =================================================================================
+
+    private fun lastPattern(): LongArray? = shadowVibrator.pattern
+
+    @Test
+    fun `a recovering red vibrates a different pattern than an urgent red`() {
+        AlertNotifier.showRedAlert(context, value = 65, projected = 68, rate = 1.0, recovering = true)
+        val recoveringPattern = lastPattern()
+        AlertNotifier.showRedAlert(context, value = 55, projected = 50, rate = -2.0, recovering = false)
+        val urgentPattern = lastPattern()
+        assertTrue("setup: expected to capture both patterns", recoveringPattern != null && urgentPattern != null)
+        assertTrue(
+            "recovering (${recoveringPattern?.toList()}) and urgent (${urgentPattern?.toList()}) " +
+                "must feel different - urgency, not just tier, should be felt",
+            !recoveringPattern.contentEquals(urgentPattern),
+        )
+        assertArrayEquals(AlertChannels.RED_RECOVERING_VIBRATION_PATTERN, recoveringPattern)
+        assertArrayEquals(AlertChannels.RED_URGENT_VIBRATION_PATTERN, urgentPattern)
+    }
+
+    @Test
+    fun `signal lost while dropping vibrates red's urgent pattern, not the uncertain one`() {
+        AlertNotifier.showSignalLostAlert(
+            context, lastValue = 80, lastArrow = com.aheadt1d.app.notifications.GlucoseTrendArrow.DOUBLE_DOWN, ageMinutes = 5,
+        )
+        assertArrayEquals(AlertChannels.SIGNAL_LOST_DROPPING_VIBRATION_PATTERN, lastPattern())
+    }
+
+    @Test
+    fun `ordinary signal lost vibrates the uncertain pattern, distinct from a confirmed drop`() {
+        AlertNotifier.showSignalLostAlert(
+            context, lastValue = 100, lastArrow = com.aheadt1d.app.notifications.GlucoseTrendArrow.FLAT, ageMinutes = 20,
+        )
+        val uncertain = lastPattern()
+        assertArrayEquals(AlertChannels.SIGNAL_LOST_UNCERTAIN_VIBRATION_PATTERN, uncertain)
+        assertTrue(
+            "an ordinary blackout must not feel identical to a confirmed dangerous drop",
+            !uncertain.contentEquals(AlertChannels.SIGNAL_LOST_DROPPING_VIBRATION_PATTERN),
+        )
+    }
+
+    @Test
+    fun `yellow vibrates a different pattern low-side vs high-side`() {
+        AlertNotifier.showYellowAlert(context, value = 75, projected = 72, rate = -0.5)
+        val lowPattern = lastPattern()
+        AlertNotifier.showYellowAlert(context, value = 190, projected = 205, rate = 1.0)
+        val highPattern = lastPattern()
+        assertArrayEquals(AlertChannels.YELLOW_LOW_VIBRATION_PATTERN, lowPattern)
+        assertArrayEquals(AlertChannels.YELLOW_HIGH_VIBRATION_PATTERN, highPattern)
+        assertTrue("low-side and high-side yellow must feel different", !lowPattern.contentEquals(highPattern))
+    }
+
+    @Test
+    fun `yellow vibration respects Ahead's own silence toggle, matching its tone`() {
+        AlertSilenceManager.silence(context, 15)
+        AlertNotifier.showYellowAlert(context, value = 75, projected = 72, rate = -0.5)
+        assertFalse("yellow is not supposed to override Ahead's own silence toggle", shadowVibrator.isVibrating)
+    }
+
+    @Test
+    fun `yellow vibration is skipped on a silent tray-only update`() {
+        AlertNotifier.showYellowAlert(context, value = 75, projected = 72, rate = -0.5, silent = true)
+        assertFalse(shadowVibrator.isVibrating)
+    }
+
+    @Test
+    fun `custom threshold vibrates a different pattern falling vs rising`() {
+        val falling = CustomThreshold(
+            id = "f", kind = CustomThreshold.Kind.VALUE, direction = CustomThreshold.Direction.FALLING,
+            amount = 68.0, label = "", temporary = false,
+        )
+        AlertNotifier.showCustomThresholdAlert(context, falling, currentValue = 66, currentRate = -0.5, metric = 66.0)
+        val fallingPattern = lastPattern()
+
+        val rising = CustomThreshold(
+            id = "r", kind = CustomThreshold.Kind.VALUE, direction = CustomThreshold.Direction.RISING,
+            amount = 250.0, label = "", temporary = false,
+        )
+        AlertNotifier.showCustomThresholdAlert(context, rising, currentValue = 255, currentRate = 3.0, metric = 255.0)
+        val risingPattern = lastPattern()
+
+        assertArrayEquals(AlertChannels.CUSTOM_THRESHOLD_FALLING_VIBRATION_PATTERN, fallingPattern)
+        assertArrayEquals(AlertChannels.CUSTOM_THRESHOLD_RISING_VIBRATION_PATTERN, risingPattern)
+        assertTrue("falling and rising custom thresholds must feel different", !fallingPattern.contentEquals(risingPattern))
     }
 
     // =================================================================================
