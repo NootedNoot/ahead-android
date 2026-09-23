@@ -166,6 +166,12 @@ object AlertNotifier {
         // someone without waking a room. Voice is ungated (see
         // VoiceAlertEngine.UNGATED_CATEGORIES) so it's never the silent link.
 
+        // Direct, channel-independent vibration guarantee (2026-09-22) - see
+        // AlertTones.vibrate's own doc for the real incident this closes. Placed after the
+        // `if (silent) return` above so a silent re-post (already-acknowledged, tray-only
+        // restore) still doesn't re-buzz - same rule voice already follows.
+        AlertTones.vibrate(context, AlertChannels.RED_VIBRATION_PATTERN)
+
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
         val spokenText = SpokenAlertText.red(value, rate, projected, projectedExtended, recovering)
@@ -329,6 +335,11 @@ object AlertNotifier {
 
         // Muted while silenced: the notification above is the whole point, the noise is not.
         if (silenced) return
+
+        // Direct, channel-independent vibration guarantee (2026-09-22) - see
+        // AlertTones.vibrate's own doc. Signal-lost shares red's notification identity, so it
+        // shares red's vibration pattern too.
+        AlertTones.vibrate(context, AlertChannels.RED_VIBRATION_PATTERN)
 
         AlertTones.play(context, AlertTones.Tone.SIGNAL_LOST)
 
@@ -632,6 +643,12 @@ object AlertNotifier {
         if (posted) {
             val tone = if (threshold.direction == CustomThreshold.Direction.FALLING) AlertTones.Tone.WARN_LOW else AlertTones.Tone.WARN_HIGH
             AlertTones.play(context, tone, ignoreSilence = true)
+            // Direct, channel-independent vibration guarantee (2026-09-22) - see
+            // AlertTones.vibrate's own doc for the real incident (a threshold at 68 fired
+            // silently on a Silent-mode phone). ignoreSilence=true matches the tone call above:
+            // this tier already overrides Ahead's own in-app silence toggle, not just Android's
+            // DND, so the vibration override must too.
+            AlertTones.vibrate(context, AlertChannels.CUSTOM_THRESHOLD_VIBRATION_PATTERN, ignoreSilence = true)
         }
         return posted
     }

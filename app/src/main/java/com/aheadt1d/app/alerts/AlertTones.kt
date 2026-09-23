@@ -4,6 +4,8 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import androidx.annotation.RawRes
 import com.aheadt1d.app.R
@@ -83,9 +85,27 @@ object AlertTones {
         // volume would otherwise play this silently even though every
         // permission and channel setting is correct. Real incident: a
         // correct, DND-bypassing notification that nobody actually heard.
-        if (tone.urgent) forceAlarmVolume(appContext)
+        //
+        // 2026-09-22: [ignoreSilence] now also picks the alarm stream, not just
+        // WARN_LOW/WARN_HIGH's own non-urgent AudioAttributes. Real incident: a
+        // custom threshold set for 68 (falling) fired a correctly-posted,
+        // correctly-DND-bypassing-on-paper notification while the phone's
+        // ringer was in Silent - no sound, no ping. Root cause traced on-device
+        // (`dumpsys audio`): this phone's ringer-silent state mutes
+        // STREAM_NOTIFICATION directly (`ringer mode affected streams` includes
+        // STREAM_NOTIFICATION on this Samsung build), which is exactly the
+        // stream WARN_LOW/WARN_HIGH were routed to via [notificationAttrs] -
+        // completely independent of Do Not Disturb, and independent of whether
+        // the channel's own setBypassDnd(true) actually stuck (see
+        // AlertChannels' doc for why that flag can silently fail to apply).
+        // STREAM_ALARM was NOT in that device's ringer-affected-streams list,
+        // confirming [alarmAttrs] really is immune to this failure mode where
+        // [notificationAttrs] is not. A caller passing ignoreSilence=true is
+        // explicitly saying "this must be heard no matter what" - that already
+        // implied alarm-stream routing; the two were just never wired together.
+        if (tone.urgent || ignoreSilence) forceAlarmVolume(appContext)
         runCatching {
-            val attrs = if (tone.urgent) alarmAttrs else notificationAttrs
+            val attrs = if (tone.urgent || ignoreSilence) alarmAttrs else notificationAttrs
             val player = MediaPlayer.create(appContext, tone.res, attrs, 0)
             if (player == null) {
                 Log.w(TAG, "MediaPlayer.create returned null for $tone")
@@ -95,6 +115,46 @@ object AlertTones {
             player.setOnErrorListener { mp, _, _ -> runCatching { mp.release() }; true }
             player.start()
         }.onFailure { Log.w(TAG, "couldn't play $tone", it) }
+    }
+
+    /**
+     * A direct [Vibrator] call, completely independent of any NotificationChannel's own
+     * vibration - added 2026-09-22 as the vibration equivalent of [alarmAttrs] above, for the
+     * exact same reason: a channel's vibration is only as reliable as that channel's settings
+     * actually being what the code asked for, and [AlertChannels]' own doc documents a real,
+     * confirmed way that can silently fail (setBypassDnd only sticks if Notification Policy
+     * Access was already granted at channel-CREATION time; a phone that never granted it keeps
+     * a channel that never bypasses anything, indefinitely, with nothing in the UI forcing the
+     * user to notice). This call needs no such permission at all: `AudioAttributes.USAGE_ALARM`
+     * routes to the alarm vibration path the same way it routes MediaPlayer to the alarm stream
+     * above - the same real incident (a Silent-mode phone, a correctly-configured custom
+     * threshold, zero perceptible alert) is what motivated adding this, not just the tone fix,
+     * since a phone with its ringer silenced but not muted-notifications-only could just as
+     * easily have had a working speaker and a broken/never-granted vibration channel instead.
+     *
+     * Deliberately redundant with the channel's own vibration (same philosophy as the channel
+     * sound + AlertTones tone redundancy above) - this can only ever add a second buzz, never
+     * replace a working one.
+     */
+    fun vibrate(context: Context, pattern: LongArray, ignoreSilence: Boolean = false) {
+        val appContext = context.applicationContext
+        if (!ignoreSilence && AlertSilenceManager.isSilenced(appContext)) {
+            Log.d(TAG, "Skipping direct vibration - alerts silenced")
+            return
+        }
+        if (ignoreSilence && AlertSilenceManager.isDevKillSwitchActive(appContext)) {
+            Log.d(TAG, "Skipping direct vibration - dev kill switch active")
+            return
+        }
+        runCatching {
+            @Suppress("DEPRECATION") // Vibrator via getSystemService still works on every
+            // supported API level (28+); VibratorManager (API 31+) only matters for
+            // multi-vibrator devices, which this app has no need to distinguish.
+            val vibrator = appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
+            if (!vibrator.hasVibrator()) return
+            val effect = VibrationEffect.createWaveform(pattern, -1)
+            vibrator.vibrate(effect, alarmAttrs)
+        }.onFailure { Log.w(TAG, "couldn't run direct vibration", it) }
     }
 
     private fun forceAlarmVolume(context: Context) {

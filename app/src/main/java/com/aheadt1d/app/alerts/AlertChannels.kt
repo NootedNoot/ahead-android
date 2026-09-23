@@ -62,6 +62,13 @@ object AlertChannels {
     // notification's title can never visually match an alert's).
     const val NOTIFICATION_GROUP_KEY = "ahead_notifications"
 
+    // Shared with AlertNotifier's new (2026-09-22) direct AlertTones.vibrate() calls, so the
+    // channel's own vibration and the redundant direct one are always the same pattern - never
+    // two independently-declared literals that can quietly drift apart. Red's pattern also covers
+    // signal-lost, which deliberately shares red's notification id/channel identity.
+    val RED_VIBRATION_PATTERN = longArrayOf(0, 400, 200, 400, 200, 600)
+    val CUSTOM_THRESHOLD_VIBRATION_PATTERN = longArrayOf(0, 200, 100, 200, 100, 200, 100, 200)
+
     private const val PREFS_NAME = "ahead_alert_channels"
     private const val KEY_RED_CHANNEL_ID = "red_channel_id"
     private const val KEY_YELLOW_CHANNEL_ID = "yellow_channel_id"
@@ -97,7 +104,15 @@ object AlertChannels {
     // that tier is now vibration + ungated voice, no tone (see
     // buildRedChannel). Yellow keeps its sound; only red changed, but the
     // version gate is shared so both channels re-migrate.
-    private const val SOUND_SCHEME_VERSION = 6
+    // v6->v7 (2026-09-22): custom-threshold's channel sound moved from
+    // USAGE_NOTIFICATION to USAGE_ALARM (see buildCustomThresholdChannel's own
+    // doc for the real incident - a threshold fired silently on a phone whose
+    // ringer-silent state muted STREAM_NOTIFICATION directly, independent of
+    // DND). This version gate is shared across all three channels, so red and
+    // yellow also re-migrate even though neither's own settings changed this
+    // time - harmless (idempotent, one-shot) and keeps a single version
+    // counter instead of a third parallel one.
+    private const val SOUND_SCHEME_VERSION = 7
 
     fun currentRedChannelId(context: Context): String =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -168,16 +183,20 @@ object AlertChannels {
             prefs.edit { putInt(KEY_SOUND_SCHEME_VERSION, SOUND_SCHEME_VERSION) }
         }
 
-        // Custom-threshold channel: same DND-bypass-granted-late migration
-        // red needs, on its own id/version track (not folded into
-        // SOUND_SCHEME_VERSION - that scheme is specifically red/yellow's
-        // historical sound changes, and doesn't apply to a brand-new channel).
+        // Custom-threshold channel: migrates on the DND-bypass-granted-late
+        // check red also needs, AND now (2026-09-22) on needsSoundMigration too
+        // - joined onto the shared SOUND_SCHEME_VERSION gate specifically so
+        // an existing install (a channel created back when its sound was still
+        // USAGE_NOTIFICATION) actually picks up the USAGE_ALARM fix. Without
+        // this, the code change alone does nothing for anyone who already had
+        // the channel - see buildCustomThresholdChannel's own doc for why.
         val customId = currentCustomChannelId(context)
         if (nm.getNotificationChannel(customId) == null) {
             nm.createNotificationChannel(buildCustomThresholdChannel(customId))
         } else {
             val customChannel = nm.getNotificationChannel(customId)
-            if (customChannel != null && !customChannel.canBypassDnd() && nm.isNotificationPolicyAccessGranted) {
+            val customNeedsDndMigration = customChannel != null && !customChannel.canBypassDnd() && nm.isNotificationPolicyAccessGranted
+            if (customChannel != null && (customNeedsDndMigration || needsSoundMigration)) {
                 val newId = nextVersionedId(customId, DEFAULT_CUSTOM_CHANNEL_ID)
                 nm.createNotificationChannel(buildCustomThresholdChannel(newId))
                 nm.deleteNotificationChannel(customId)
@@ -233,7 +252,7 @@ object AlertChannels {
             description = "Urgent alerts when glucose is dangerously low or high"
             setBypassDnd(true)
             enableVibration(true)
-            vibrationPattern = longArrayOf(0, 400, 200, 400, 200, 600)
+            vibrationPattern = RED_VIBRATION_PATTERN
             // Silent by design as of 2026-08-01 - red alerts are vibration +
             // (ungated) voice, no tone. See AlertNotifier.showRedAlert for
             // the reasoning. Note this channel still sets bypassDnd and a
@@ -255,18 +274,30 @@ object AlertChannels {
      * sound, because the whole point of this tier is "punch through silence
      * for the one thing I specifically asked to be told about," and a silent
      * vibrate-only alert wouldn't reliably do that. Deliberately NOT the old
-     * CriticalLowSiren's forced-ALARM-stream approach (removed 2026-08-20,
-     * "an alarm that couldn't be dismissed") - this plays through the
-     * ordinary notification volume/stream via the channel's own sound
-     * attribute, same mechanism yellow already uses safely. It overrides
-     * Android's Do Not Disturb (setBypassDnd) and Ahead's own in-app silence
-     * killswitch (see AlertNotifier.showCustomThresholdAlert, which
-     * deliberately skips the AlertSilenceManager.isSilenced() gate every
-     * other alert function checks first) - but ONLY the one notification
-     * CustomThresholdCoordinator actually decides to post (a fresh crossing
-     * or a further escalation), never a standing "always loud" state. If the
-     * phone's own physical volume is at zero, this still won't force sound -
-     * that's a deliberate line short of what the old siren did.
+     * CriticalLowSiren's forced-volume approach (removed 2026-08-20, "an
+     * alarm that couldn't be dismissed") - it doesn't force the device's
+     * volume up the way [AlertTones.forceAlarmVolume] does for red/
+     * signal-lost, and it overrides Ahead's own in-app silence killswitch
+     * (see AlertNotifier.showCustomThresholdAlert, which deliberately skips
+     * the AlertSilenceManager.isSilenced() gate every other alert function
+     * checks first) - but ONLY the one notification CustomThresholdCoordinator
+     * actually decides to post (a fresh crossing or a further escalation),
+     * never a standing "always loud" state.
+     *
+     * 2026-09-22: sound AudioAttributes changed from USAGE_NOTIFICATION to
+     * USAGE_ALARM. Real incident: a threshold set at 68 (falling) fired a
+     * correctly-posted notification while the phone's ringer was in Silent -
+     * no sound, no vibration felt. Traced on-device: this phone's
+     * ringer-silent state mutes STREAM_NOTIFICATION directly (independent of
+     * Do Not Disturb, and independent of whether setBypassDnd actually stuck -
+     * see this file's class doc on why that flag can silently fail to apply),
+     * which is exactly the stream this channel's sound used to route through.
+     * STREAM_ALARM is not muted by ringer-silent on that same device. Matches
+     * AlertTones.play()'s identical 2026-09-22 fix for the direct-MediaPlayer
+     * path, and AlertTones.vibrate() (new the same day) adds a
+     * channel-independent vibration guarantee on top, for the same reason
+     * this channel's own vibration alone wasn't enough - see that function's
+     * doc for the full reasoning.
      */
     private fun buildCustomThresholdChannel(id: String): NotificationChannel =
         NotificationChannel(id, "Custom glucose thresholds", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -275,11 +306,11 @@ object AlertChannels {
             enableVibration(true)
             // A third, distinct pattern from yellow's two-pulse and red's
             // three-pulse, so this tier is tellable by feel alone too.
-            vibrationPattern = longArrayOf(0, 200, 100, 200, 100, 200, 100, 200)
+            vibrationPattern = CUSTOM_THRESHOLD_VIBRATION_PATTERN
             setSound(
                 RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION),
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                     .build(),
             )
