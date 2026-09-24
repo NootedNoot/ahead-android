@@ -27,10 +27,21 @@
 
     <!-- Groups a related run of controls inside a card without a full new
          card shell - a lighter-weight subsection break than DebugCardTitle. -->
+    <style name="DebugSectionHeader">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">20dp</item>
+        <item name="android:layout_marginBottom">2dp</item>
+        <item name="android:textColor">@color/muted</item>
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.12</item>
+    </style>
+
     <style name="DebugSubheading">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">16dp</item>
+        <item name="android:layout_marginTop">14dp</item>
         <item name="android:textColor">@color/muted</item>
         <item name="android:textSize">11sp</item>
         <item name="android:textStyle">bold</item>
@@ -40,7 +51,7 @@
     <style name="DebugLabel">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:layout_marginTop">8dp</item>
         <item name="android:textColor">@color/muted</item>
         <item name="android:textSize">12sp</item>
     </style>
@@ -48,14 +59,24 @@
     <!-- ============================ Buttons ============================ -->
     <style name="DebugButton">
         <item name="android:layout_width">match_parent</item>
-        <item name="android:layout_height">48dp</item>
-        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">46dp</item>
+        <item name="android:layout_marginTop">8dp</item>
         <item name="android:background">@drawable/button_background</item>
         <item name="android:textColor">#FFFFFF</item>
-        <item name="android:textSize">14sp</item>
+        <item name="android:textSize">13.5sp</item>
+        <item name="android:paddingHorizontal">12dp</item>
+        <item name="android:paddingVertical">8dp</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:elevation">0dp</item>
         <item name="android:stateListAnimator">@null</item>
+    </style>
+    <style name="DebugButton.Small">
+        <item name="android:minHeight">38dp</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:paddingHorizontal">8dp</item>
+        <item name="android:paddingVertical">6dp</item>
+        <item name="android:layout_marginTop">4dp</item>
     </style>
     <style name="DebugButton.Danger">
         <item name="android:background">@drawable/emergency_button_background</item>

@@ -113,7 +113,10 @@ class DebugMenuActivity : AppCompatActivity() {
         setupSystemState()
         setupNotesHistoryTest()
         setupPlateauTest()
-
+        findViewById<android.view.View>(R.id.backButton)?.setOnClickListener { finish() }
+        findViewById<Button>(R.id.openTuningButton)?.setOnClickListener {
+            startActivity(Intent(this, TuningActivity::class.java))
+        }
         findViewById<Button>(R.id.closeButton).setOnClickListener { finish() }
     }
 

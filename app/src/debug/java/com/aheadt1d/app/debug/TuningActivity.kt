@@ -50,10 +50,10 @@ class TuningActivity : AppCompatActivity() {
     // free (pure math), so the field-adjustment feedback loop stays instant
     // without hammering Health Connect once per digit typed.
     private var cachedPlateauPoints: List<GlucosePoint> = emptyList()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_tuning)
+        findViewById<android.view.View>(R.id.backButton)?.setOnClickListener { finish() }
 
         inputs = listOf(
             findViewById(R.id.yellowLowInput), findViewById(R.id.yellowHighInput),
