@@ -346,7 +346,7 @@
 
     <!-- ===================== Drawer ===================== -->
     <ScrollView
-        android:layout_width="264dp"
+        android:layout_width="280dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:background="@color/surface"
@@ -357,8 +357,9 @@
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:paddingTop="20dp"
-            android:paddingBottom="14dp">
+            android:paddingBottom="24dp">
 
+            <!-- Drawer Header -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -366,22 +367,71 @@
                 android:paddingHorizontal="18dp"
                 android:paddingBottom="14dp">
 
-                <TextView
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Ahead"
-                    android:textColor="@color/text_primary"
-                    android:textSize="17sp"
-                    android:textStyle="bold" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Ahead"
+                        android:textColor="@color/text_primary"
+                        android:textSize="20sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/drawer_debug_badge"
+                        android:paddingHorizontal="6dp"
+                        android:paddingVertical="2dp"
+                        android:text="T1D"
+                        android:textColor="@color/accent2"
+                        android:textSize="9sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <TextView
-                    android:id="@+id/drawerUserLabel"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
-                    android:text=""
+                    android:text="Predictive Decision Support"
                     android:textColor="@color/muted"
                     android:textSize="11sp" />
+
+                <!-- User Profile Label -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:background="@drawable/card_background"
+                    android:paddingHorizontal="10dp"
+                    android:paddingVertical="8dp">
+
+                    <View
+                        android:layout_width="7dp"
+                        android:layout_height="7dp"
+                        android:background="@drawable/live_dot_core"
+                        android:backgroundTint="@color/ok" />
+
+                    <TextView
+                        android:id="@+id/drawerUserLabel"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="8dp"
+                        android:text="Active Patient"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp"
+                        android:textStyle="bold"
+                        android:ellipsize="end"
+                        android:singleLine="true" />
+                </LinearLayout>
 
             </LinearLayout>
 
@@ -390,81 +440,106 @@
                 android:layout_height="1dp"
                 android:background="@color/border" />
 
+            <!-- ================= SECTION 1: CARE & INSIGHTS ================= -->
+            <TextView
+                style="@style/DrawerSectionLabel"
+                android:text="CARE &amp; INSIGHTS" />
+
             <!-- Dashboard (active) -->
             <LinearLayout
                 android:id="@+id/drawerDashboardItem"
                 style="@style/DrawerItem"
                 android:background="@drawable/drawer_item_active">
-                <TextView style="@style/DrawerItemLabel" android:text="Dashboard" android:textColor="@color/text_primary" android:textStyle="bold" />
+                <TextView
+                    style="@style/DrawerItemLabel"
+                    android:text="📊 Dashboard"
+                    android:textColor="@color/text_primary"
+                    android:textStyle="bold" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerGraphItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Glucose Graph" />
+                <TextView style="@style/DrawerItemLabel" android:text="📈 Glucose Graph" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerNotesItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Notes History" />
+                <TextView style="@style/DrawerItemLabel" android:text="📝 Logbook &amp; Notes" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerReportItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Doctor Report" />
+                <TextView style="@style/DrawerItemLabel" android:text="📋 Doctor Report" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerHealthItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Health Data" />
+                <TextView style="@style/DrawerItemLabel" android:text="⌚ Health Connect" />
             </LinearLayout>
 
-            <LinearLayout android:id="@+id/drawerAccountItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Account" />
-            </LinearLayout>
-
-            <TextView style="@style/DrawerSectionLabel" android:text="SAFETY" />
+            <!-- ================= SECTION 2: ALERTS & SAFETY ================= -->
+            <TextView
+                style="@style/DrawerSectionLabel"
+                android:text="ALERTS &amp; SAFETY" />
 
             <LinearLayout android:id="@+id/drawerSilenceItem" style="@style/DrawerItem">
-                <TextView android:id="@+id/drawerSilenceLabel" style="@style/DrawerItemLabel" android:text="🔕 Silence Alerts" />
-                <TextView android:id="@+id/drawerSilenceBadge" style="@style/DrawerBadge" android:text="MUTED" android:visibility="gone" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/drawerVoiceItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Voice Alerts" />
+                <TextView
+                    android:id="@+id/drawerSilenceLabel"
+                    style="@style/DrawerItemLabel"
+                    android:text="🔕 Silence Alerts" />
+                <TextView
+                    android:id="@+id/drawerSilenceBadge"
+                    style="@style/DrawerBadge"
+                    android:text="MUTED"
+                    android:visibility="gone" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerCustomThresholdsItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Alarm Thresholds" />
+                <TextView style="@style/DrawerItemLabel" android:text="🔔 Alarm Thresholds" />
             </LinearLayout>
 
+            <LinearLayout android:id="@+id/drawerVoiceItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="🗣️ Voice Alerts" />
+            </LinearLayout>
+
+            <!-- ================= SECTION 3: SETTINGS & DATA ================= -->
+            <TextView
+                style="@style/DrawerSectionLabel"
+                android:text="SETTINGS &amp; DATA" />
+
             <LinearLayout android:id="@+id/drawerCgmSyncItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="CGM Sync" />
+                <TextView style="@style/DrawerItemLabel" android:text="📡 CGM Data Source" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerUploadItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="Data Upload" />
+                <TextView style="@style/DrawerItemLabel" android:text="☁️ Cloud Sync" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerAccountItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="👤 Account &amp; Sharing" />
             </LinearLayout>
 
             <LinearLayout android:id="@+id/drawerArchiveItem" style="@style/DrawerItem">
-                <TextView style="@style/DrawerItemLabel" android:text="@string/archive_drawer_item" />
+                <TextView style="@style/DrawerItemLabel" android:text="💾 Data Vault &amp; Export" />
             </LinearLayout>
 
-            <!-- Debug-only - each gone by default, shown only when
-                 BuildConfig.DEBUG (see MainActivity.setupDrawer). -->
+            <!-- ================= SECTION 4: ABOUT & SYSTEM ================= -->
+            <TextView
+                style="@style/DrawerSectionLabel"
+                android:text="ABOUT &amp; SYSTEM" />
+
+            <LinearLayout android:id="@+id/drawerAboutItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="ℹ️ About Ahead" />
+            </LinearLayout>
+
+            <!-- ================= SECTION 5: DEVELOPER (Debug Builds Only) ================= -->
             <TextView
                 android:id="@+id/drawerDebugSectionLabel"
                 style="@style/DrawerSectionLabel"
-                android:text="DEBUG BUILD"
+                android:text="DEVELOPER TOOLS"
                 android:visibility="gone" />
 
-            <LinearLayout android:id="@+id/drawerDebugMenuItem" style="@style/DrawerItem" android:visibility="gone">
-                <TextView style="@style/DrawerItemLabel" android:text="Debug Menu" />
-                <TextView style="@style/DrawerBadge" android:text="DEBUG" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/drawerTuningItem" style="@style/DrawerItem" android:visibility="gone">
-                <TextView style="@style/DrawerItemLabel" android:text="Tuning Parameters" />
-                <TextView style="@style/DrawerBadge" android:text="DEBUG" />
-            </LinearLayout>
-
-            <LinearLayout android:id="@+id/drawerResetWizardItem" style="@style/DrawerItem" android:visibility="gone">
-                <TextView style="@style/DrawerItemLabel" android:text="Reset Setup Wizard" />
+            <LinearLayout
+                android:id="@+id/drawerDebugMenuItem"
+                style="@style/DrawerItem"
+                android:visibility="gone">
+                <TextView style="@style/DrawerItemLabel" android:text="🛠️ Debug &amp; Diagnostics" />
                 <TextView style="@style/DrawerBadge" android:text="DEBUG" />
             </LinearLayout>
 

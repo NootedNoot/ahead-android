@@ -242,7 +242,13 @@ class MainActivity : AppCompatActivity() {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(com.aheadt1d.app.account.AccountSettingsActivity.createIntent(this))
         }
-        findViewById<TextView>(R.id.drawerUserLabel).text = AuthPrefs.displayLabel(this) ?: ""
+        findViewById<View>(R.id.drawerAboutItem).setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            showAboutDialog()
+        }
+        val userLabel = AuthPrefs.displayLabel(this)?.takeIf { it.isNotBlank() } ?: "Active Patient"
+        val roleSuffix = if (AuthPrefs.isOwner(this)) " (Owner)" else ""
+        findViewById<TextView>(R.id.drawerUserLabel).text = "$userLabel$roleSuffix"
         updateSilenceUI()
 
         // Both conditions required, deliberately - see AuthPrefs.isOwner's
@@ -252,8 +258,6 @@ class MainActivity : AppCompatActivity() {
         if (BuildConfig.DEBUG && AuthPrefs.isOwner(this)) {
             findViewById<View>(R.id.drawerDebugSectionLabel).visibility = View.VISIBLE
             findViewById<View>(R.id.drawerDebugMenuItem).visibility = View.VISIBLE
-            findViewById<View>(R.id.drawerTuningItem).visibility = View.VISIBLE
-            findViewById<View>(R.id.drawerResetWizardItem).visibility = View.VISIBLE
 
             // Debug source-set classes: reference by name so release
             // compilation never requires them, and these paths are
@@ -261,16 +265,6 @@ class MainActivity : AppCompatActivity() {
             findViewById<View>(R.id.drawerDebugMenuItem).setOnClickListener {
                 drawerLayout.closeDrawer(GravityCompat.START)
                 startActivity(Intent().setClassName(packageName, "$packageName.debug.DebugMenuActivity"))
-            }
-            findViewById<View>(R.id.drawerTuningItem).setOnClickListener {
-                drawerLayout.closeDrawer(GravityCompat.START)
-                startActivity(Intent().setClassName(packageName, "$packageName.debug.TuningActivity"))
-            }
-            findViewById<View>(R.id.drawerResetWizardItem).setOnClickListener {
-                drawerLayout.closeDrawer(GravityCompat.START)
-                SetupPrefs.resetWizardState(this)
-                startActivity(Intent(this, MainActivity::class.java))
-                finish()
             }
         }
 
@@ -455,6 +449,30 @@ class MainActivity : AppCompatActivity() {
         val versionText = findViewById<TextView>(R.id.versionText)
         val suffix = if (BuildConfig.DEBUG) " (debug)" else ""
         versionText.text = "v${BuildConfig.VERSION_NAME}$suffix"
+    }
+
+    /**
+     * Shows a clean clinical and technical About dialog for patients, beta
+     * testers, and endocrinologists reviewing Ahead.
+     */
+    private fun showAboutDialog() {
+        val appVersion = BuildConfig.VERSION_NAME
+        val isDebug = BuildConfig.DEBUG
+        val buildLabel = if (isDebug) "v$appVersion (debug)" else "v$appVersion"
+
+        AlertDialog.Builder(this)
+            .setTitle("About Ahead")
+            .setMessage(
+                "Ahead · Type 1 Diabetes Decision Support\n\n" +
+                "• Version: $buildLabel\n" +
+                "• Engine: RateMath v1.2 (Real-time velocity & acceleration analysis)\n" +
+                "• CGM Sources: Health Connect, Dexcom, Juggluco, AheadBLE\n" +
+                "• Cloud Sync: mouse-jessica-hazardous-praise.trycloudflare.com\n\n" +
+                "CLINICAL DECISION SUPPORT NOTICE:\n" +
+                "Ahead provides algorithmic decision support and predictive alerts for T1D management. Ahead does NOT replace professional medical advice, clinical diagnosis, or emergency care. Always perform a fingerstick blood glucose check before taking clinical action if symptoms disagree with readings."
+            )
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     /**

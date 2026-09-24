@@ -772,6 +772,12 @@
                 android:text="⚙️ Open Tuning Parameters" />
 
             <Button
+                android:id="@+id/resetWizardButton"
+                style="@style/DebugButton.Danger"
+                android:layout_marginTop="8dp"
+                android:text="🔄 Reset Setup Wizard" />
+
+            <Button
                 android:id="@+id/closeButton"
                 style="@style/DebugButton.Ghost"
                 android:layout_marginTop="8dp"

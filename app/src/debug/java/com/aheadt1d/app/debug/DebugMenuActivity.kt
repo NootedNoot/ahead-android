@@ -31,6 +31,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.Duration
 import android.content.Intent
+import androidx.appcompat.app.AlertDialog
+import com.aheadt1d.app.MainActivity
+import com.aheadt1d.app.setup.SetupPrefs
 
 /**
  * Debug-only hub for the manual testing tools described in the debug-menu
@@ -116,6 +119,21 @@ class DebugMenuActivity : AppCompatActivity() {
         findViewById<android.view.View>(R.id.backButton)?.setOnClickListener { finish() }
         findViewById<Button>(R.id.openTuningButton)?.setOnClickListener {
             startActivity(Intent(this, TuningActivity::class.java))
+        }
+        findViewById<Button>(R.id.resetWizardButton)?.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Reset Setup Wizard?")
+                .setMessage("This will reset your onboarding preferences and restart the setup wizard from Step 1. Your historical database and server credentials remain intact. Continue?")
+                .setPositiveButton("Reset & Restart") { _, _ ->
+                    SetupPrefs.resetWizardState(this)
+                    val intent = Intent(this, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                    }
+                    startActivity(intent)
+                    finish()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
         findViewById<Button>(R.id.closeButton).setOnClickListener { finish() }
     }
