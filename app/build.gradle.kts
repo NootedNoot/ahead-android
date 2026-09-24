@@ -15,13 +15,12 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        buildConfigField("String", "BACKEND_BASE_URL", "\"https://ahead-backend-production-ee80.up.railway.app\"")
+        buildConfigField("String", "BACKEND_BASE_URL", "\"https://mouse-jessica-hazardous-praise.trycloudflare.com\"")
     }
 
     buildTypes {
         debug {
-            // Uses defaultConfig's Railway URL above. If you need to point at a
-            // local dev server again later, override BACKEND_BASE_URL here.
+            // Defaults to the self-hosted Cloudflare Tunnel URL.
         }
         release {
             isMinifyEnabled = false
