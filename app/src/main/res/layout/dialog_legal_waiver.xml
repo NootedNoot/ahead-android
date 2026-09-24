@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/surface"
+    android:padding="20dp">
+
+    <!-- Header -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="12dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="🛡️"
+            android:textSize="28sp"
+            android:layout_marginEnd="12dp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Medical Disclaimer &amp; Legal Waiver"
+                android:textColor="@color/text_primary"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/waiverSubtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="Experimental beta software. Review and accept to proceed."
+                android:textColor="@color/muted"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Key Warning Banner -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/debug_card_background"
+        android:padding="12dp"
+        android:layout_marginBottom="12dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⚠️ IMPORTANT CLINICAL &amp; LEGAL NOTICE"
+            android:textColor="@color/high"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.05" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Ahead is NOT a medical device. Ahead NEVER provides insulin dosing advice. You MUST keep your official CGM receiver, Dexcom app, and primary alarms active and audible at all times."
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:lineSpacingExtra="2dp" />
+    </LinearLayout>
+
+    <!-- Scrollable Terms Body -->
+    <ScrollView
+        android:id="@+id/waiverScrollView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:maxHeight="320dp"
+        android:fillViewport="true"
+        android:scrollbars="vertical"
+        android:layout_marginBottom="12dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingEnd="4dp">
+
+            <!-- Term 1 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="1. NOT A MEDICAL DEVICE / NO DOSING ADVICE"
+                android:textColor="@color/accent2"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="10dp"
+                android:text="Ahead is an independent research tool and secondary awareness aid. It is NOT cleared or approved by the U.S. FDA or any medical authority. Ahead NEVER calculates insulin doses, suggests boluses, or replaces clinical medical judgment. Always verify readings with a certified fingerstick meter before making treatment decisions."
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="2dp" />
+
+            <!-- Term 2 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="2. SECONDARY MONITOR ONLY — NEVER RELY ALONE"
+                android:textColor="@color/accent2"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="10dp"
+                android:text="Ahead is strictly a secondary monitor. You must keep your official CGM app, receiver, and factory alarms running. Never disable, silence, or ignore your official alarms because Ahead is installed. Never rely on Ahead alone while sleeping, driving, exercising, or managing hypoglycemia unawareness."
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="2dp" />
+
+            <!-- Term 3 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="3. SOFTWARE GLITCH &amp; DELAY IMMUNITY"
+                android:textColor="@color/accent2"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="10dp"
+                android:text="Ahead runs on consumer Android hardware. Android OS battery optimizations, Bluetooth drops, system task killers, or software bugs may delay, silence, or drop glucose alerts without warning. You acknowledge that Ahead is provided 'AS-IS' with no warranty of uptime or timeliness."
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="2dp" />
+
+            <!-- Term 4 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="4. COMPLETE ASSUMPTION OF RISK"
+                android:textColor="@color/accent2"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="10dp"
+                android:text="Managing Type 1 Diabetes carries severe inherent risks including hypoglycemia, diabetic ketoacidosis (DKA), coma, and death. You knowingly, voluntarily, and freely assume all risks, known or unknown, associated with using Ahead, its predictive calculations, and its notifications."
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="2dp" />
+
+            <!-- Term 5 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="5. COVENANT NOT TO SUE &amp; LIABILITY RELEASE"
+                android:textColor="@color/accent2"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="10dp"
+                android:text="To the fullest extent permitted by law, you release Ryan Singer, AheadT1D, developers, and project contributors from any and all liability, claims, or damages for personal injury, illness, complications, or wrongful death. YOU EXPRESSLY COVENANT AND AGREE NEVER TO SUE, BRING A LAWSUIT, OR COMMENCE ARBITRATION AGAINST RYAN SINGER OR AHEADT1D."
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="2dp" />
+
+            <!-- Term 6 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="6. $0 LIABILITY CAP &amp; COLORADO JURISDICTION"
+                android:textColor="@color/accent2"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="10dp"
+                android:text="Ahead is free software. Total cumulative liability is capped at $0.00 USD (or $100.00 statutory floor). These terms are governed exclusively by the laws of the State of Colorado, USA."
+                android:textColor="@color/text_primary"
+                android:textSize="11sp"
+                android:lineSpacingExtra="2dp" />
+
+            <TextView
+                android:id="@+id/viewOnlineTermsButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔗 View complete Terms of Use &amp; Privacy Policy online"
+                android:textColor="@color/accent2"
+                android:textSize="12sp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Interactive Agreement Checkbox -->
+    <LinearLayout
+        android:id="@+id/agreementCheckboxContainer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@drawable/debug_input_background"
+        android:padding="10dp"
+        android:layout_marginBottom="14dp"
+        android:gravity="center_vertical">
+
+        <CheckBox
+            android:id="@+id/waiverCheckbox"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:buttonTint="@color/ok" />
+
+        <TextView
+            android:id="@+id/waiverCheckboxLabel"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="8dp"
+            android:text="I understand Ahead is NOT a medical device. I assume all risks and covenant NOT to sue Ryan Singer or AheadT1D."
+            android:textColor="@color/text_primary"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <Button
+            android:id="@+id/declineWaiverButton"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginEnd="8dp"
+            android:text="Decline &amp; Exit"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/agreeWaiverButton"
+            style="@style/DebugButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1.6"
+            android:text="I Agree &amp; Continue"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:textAllCaps="false"
+            android:enabled="false"
+            android:alpha="0.5" />
+    </LinearLayout>
+
+</LinearLayout>

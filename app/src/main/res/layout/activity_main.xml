@@ -528,6 +528,10 @@
                 <TextView style="@style/DrawerItemLabel" android:text="ℹ️ About Ahead" />
             </LinearLayout>
 
+            <LinearLayout android:id="@+id/drawerTermsItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="📜 Terms &amp; Legal Waiver" />
+            </LinearLayout>
+
             <!-- ================= SECTION 5: DEVELOPER (Debug Builds Only) ================= -->
             <TextView
                 android:id="@+id/drawerDebugSectionLabel"

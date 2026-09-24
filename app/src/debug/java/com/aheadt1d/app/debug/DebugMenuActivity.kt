@@ -98,14 +98,22 @@ class DebugMenuActivity : AppCompatActivity() {
 
         scenarioSpinner.adapter = ArrayAdapter(
             this,
-            android.R.layout.simple_spinner_dropdown_item,
+            R.layout.item_debug_spinner_selected,
             DebugScenario.values().map { it.label }
-        )
+        ).apply {
+            setDropDownViewResource(R.layout.item_debug_spinner_dropdown)
+        }
+        val defaultDemoIndex = DebugScenario.values().indexOf(DebugScenario.DEMO_PREDICTIVE_HYPO_CATCH)
+        if (defaultDemoIndex >= 0) {
+            scenarioSpinner.setSelection(defaultDemoIndex)
+        }
         debugEventTagSpinner.adapter = ArrayAdapter(
             this,
-            android.R.layout.simple_spinner_dropdown_item,
+            R.layout.item_debug_spinner_selected,
             com.aheadt1d.app.events.EventTag.entries.map { "${it.glyph} ${it.label}" }
-        )
+        ).apply {
+            setDropDownViewResource(R.layout.item_debug_spinner_dropdown)
+        }
 
         setupSilenceKillswitch()
         setupResetAll()

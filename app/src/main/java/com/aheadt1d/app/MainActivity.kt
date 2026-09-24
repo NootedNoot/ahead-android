@@ -128,6 +128,8 @@ class MainActivity : AppCompatActivity() {
         setupChart()
         setupDrawer()
 
+        com.aheadt1d.app.legal.LegalWaiverDialog.showMandatory(this) {}
+
         findViewById<View>(R.id.glucoseTrendCard).setOnClickListener {
             startActivity(GraphActivity.createIntent(this))
         }
@@ -245,6 +247,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.drawerAboutItem).setOnClickListener {
             drawerLayout.closeDrawer(GravityCompat.START)
             showAboutDialog()
+        }
+        findViewById<View>(R.id.drawerTermsItem)?.setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            com.aheadt1d.app.legal.LegalWaiverDialog.showReview(this)
         }
         val userLabel = AuthPrefs.displayLabel(this)?.takeIf { it.isNotBlank() } ?: "Active Patient"
         val roleSuffix = if (AuthPrefs.isOwner(this)) " (Owner)" else ""
@@ -846,14 +852,13 @@ class MainActivity : AppCompatActivity() {
         chart.legend.isEnabled = false
         chart.setBackgroundColor(Color.TRANSPARENT)
         chart.setDrawGridBackground(false)
-        // Time-axis zoom/pan uses MPAndroidChart's built-in gestures - pinch
-        // to zoom, drag to pan. Y stays fixed (full 40-400 range, matching
-        // the old default "Full" mode - see activity_main.xml's doc on why
-        // this card no longer has its own range/window controls).
-        chart.setPinchZoom(true)
+        // Dashboard preview chart: touch is disabled so tapping anywhere on the
+        // card opens full GraphActivity smoothly without intercepting scrolls or taps.
+        chart.setTouchEnabled(false)
+        chart.setPinchZoom(false)
         chart.isDoubleTapToZoomEnabled = false
-        chart.isDragEnabled = true
-        chart.isScaleXEnabled = true
+        chart.isDragEnabled = false
+        chart.isScaleXEnabled = false
         chart.isScaleYEnabled = false
         chart.axisRight.isEnabled = false
 

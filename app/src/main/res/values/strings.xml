@@ -19,9 +19,11 @@
     <string name="status_hc_missing">Health Connect isn\'t installed. Install it from the Play Store, then reopen this app.</string>
     <string name="no_reading_yet">—</string>
     <string name="glucose_trend_label">GLUCOSE TREND</string>
-    <string name="window_1h">1 hr</string>
-    <string name="window_3h">3 hr</string>
-    <string name="window_6h">6 hr</string>
+    <string name="window_1h">1h</string>
+    <string name="window_3h">3h</string>
+    <string name="window_6h">6h</string>
+    <string name="window_12h">12h</string>
+    <string name="window_24h">24h</string>
     <string name="chart_no_data">No readings in the last %1$s</string>
     <string name="status_no_data">No glucose data yet. Make sure your CGM app is syncing to Health Connect.</string>
     <!-- Guidance sentence (blame the CGM vs. fix app permissions) is appended

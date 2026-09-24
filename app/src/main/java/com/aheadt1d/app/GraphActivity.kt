@@ -3,19 +3,17 @@ package com.aheadt1d.app
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewTreeObserver
 import android.widget.Button
 import android.widget.FrameLayout
-import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -23,19 +21,16 @@ import com.aheadt1d.app.chart.AxisTicks
 import com.aheadt1d.app.chart.ChartDataSource
 import com.aheadt1d.app.chart.ChartRange
 import com.aheadt1d.app.chart.GapSegmenter
-import com.aheadt1d.app.chart.RangeMode
 import com.aheadt1d.app.chart.SeverityColoring
 import com.aheadt1d.app.events.EventCsvExporter
 import com.aheadt1d.app.events.EventEditHelper
 import com.aheadt1d.app.events.EventLogDialogs
 import com.aheadt1d.app.events.EventTag
 import com.aheadt1d.app.events.UserEvent
-import com.aheadt1d.app.events.UserEventRepository
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
 import com.aheadt1d.app.report.ReportExportActivity
 import com.aheadt1d.app.state.LatestTrendRepository
-import com.aheadt1d.app.ui.GlucoseBucket
 import com.github.mikephil.charting.charts.LineChart
 import com.github.mikephil.charting.components.LimitLine
 import com.github.mikephil.charting.components.XAxis
@@ -44,6 +39,7 @@ import com.github.mikephil.charting.data.Entry
 import com.github.mikephil.charting.data.LineData
 import com.github.mikephil.charting.data.LineDataSet
 import com.github.mikephil.charting.formatter.ValueFormatter
+import com.github.mikephil.charting.interfaces.datasets.ILineDataSet
 import com.google.android.material.datepicker.MaterialDatePicker
 import java.time.Duration
 import java.time.Instant
@@ -51,116 +47,118 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.Locale
+import kotlin.math.ceil
+import kotlin.math.floor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.aheadt1d.ratemath.RateMath
+import org.aheadt1d.ratemath.RatePoint
+import org.aheadt1d.ratemath.TrajectoryKind
 
 /**
- * Full-screen glucose graph, reached from the home dashboard's GLUCOSE TREND
- * card (a real back-stack entry, not a dialog). Deliberately reads from the
- * same HealthConnectManager/LatestTrendRepository sources as MainActivity's
- * card instead of any new polling loop - this screen is just a bigger view
- * onto the same on-device data.
+ * Modern, dynamic full-screen glucose graph for Ahead.
  *
- * Two modes:
- *  - Live ([viewRange] == null): the original 1h/3h/6h window ending at
- *    "now", auto-refreshing.
- *  - Historical ([viewRange] != null): an arbitrary past [ChartRange] picked
- *    via swipe-paging or the date-range picker, no auto-refresh, no "now"
- *    marker. All data fetching (live or historical) goes through the shared
- *    ChartDataSource so this screen, the doctor report, and (soon) the
- *    interactive export can never disagree about what a given range
- *    contains.
+ * Features:
+ *  - Dynamic time range selection (1h, 3h, 6h, 12h, 24h) with responsive segmented pill styling.
+ *  - Real-time clinical summary metrics (Time in Range % and Average Glucose) computed per window.
+ *  - Full-screen responsive layout without artificial aspect-ratio squishing.
+ *  - RateMath predictive trajectory ("ghost line") in live mode.
+ *  - Intelligent auto-scaling Y-axis snapped to 25 mg/dL increments.
+ *  - Interactive point inspection (GlucoseMarkerView) and backdated event logging via long-press.
+ *  - Seamless single-tap day-by-day navigation (◀ Day / Day ▶) and date range picker.
  */
 class GraphActivity : AppCompatActivity() {
 
     private lateinit var chart: LineChart
     private lateinit var chartContainer: FrameLayout
-    private lateinit var legendContainer: LinearLayout
+
+    // Hero metric views
+    private lateinit var heroGlucoseValueText: TextView
+    private lateinit var heroTrendArrowText: TextView
+    private lateinit var heroRateText: TextView
+    private lateinit var heroTirBadge: TextView
+    private lateinit var heroAvgText: TextView
+
+    // Window selector buttons
     private lateinit var window1hButton: Button
     private lateinit var window3hButton: Button
     private lateinit var window6hButton: Button
-    private lateinit var rangeTightButton: Button
-    private lateinit var rangeFullButton: Button
-    private lateinit var rangeAutoButton: Button
+    private lateinit var window12hButton: Button
+    private lateinit var window24hButton: Button
+
+    // Date navigation views
+    private lateinit var prevDayButton: TextView
+    private lateinit var nextDayButton: TextView
     private lateinit var dateRangeLabel: TextView
-    private lateinit var pickDateRangeButton: Button
-    private lateinit var backToLiveButton: Button
+    private lateinit var dateSelectorContainer: View
+    private lateinit var backToLiveButton: TextView
 
     private var cachedPoints: List<GlucosePoint> = emptyList()
     private var cachedEvents: List<UserEvent> = emptyList()
-    private var selectedWindowMinutes = WINDOW_1H
+    private var selectedWindowMinutes = WINDOW_3H
     private val eventIconViews = mutableListOf<View>()
     private val axisTickViews = mutableListOf<View>()
 
-    // Set at the top of every renderChart() call - needed to convert a
-    // long-pressed pixel's Entry.x (minutes-from-anchor) back into a real
-    // Instant for the backdated event log.
     private var chartAnchor: Instant? = null
-
-    // Snapshot of what the overlays (event icons, historical-mode axis tick
-    // labels) were last drawn from - event icons and tick labels are plain
-    // absolute-positioned Views computed once per renderChart() call from the
-    // chart's pixel transform at that instant. MPAndroidChart's own
-    // pinch-zoom/pan is still enabled for scrubbing within the loaded window,
-    // and it does NOT re-run our overlay code on its own - left unhandled,
-    // panning/zooming natively (not the day-paging fling) leaves these
-    // overlays stuck at their pre-gesture screen position while the
-    // underlying curve moves under them, so they end up visually detached
-    // from (or entirely off) the data they're meant to mark. repositionOverlays()
-    // (wired to the chart's gesture listener below) redraws them from this
-    // snapshot on every pan/zoom step, with no data refetch needed.
     private var lastVisibleEvents: List<UserEvent> = emptyList()
     private var lastHistoricalRange: ChartRange? = null
 
     private var refreshJob: kotlinx.coroutines.Job? = null
 
-    // null = live (window-ending-at-now); non-null = viewing an arbitrary
-    // past range, set via swipe-paging or the date-range picker.
+    // null = live (window-ending-at-now); non-null = viewing an arbitrary past range
     private var viewRange: ChartRange? = null
-
-    private var rangeMode = RangeMode.FULL
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_graph)
 
         findViewById<android.widget.ImageButton>(R.id.graphBackButton).setOnClickListener { finish() }
-        findViewById<Button>(R.id.exportEventsButton).setOnClickListener { exportEvents() }
-        findViewById<Button>(R.id.doctorReportButton).setOnClickListener {
+        findViewById<View>(R.id.exportEventsButton).setOnClickListener { exportEvents() }
+        findViewById<View>(R.id.doctorReportButton).setOnClickListener {
             startActivity(ReportExportActivity.createIntent(this))
         }
-        findViewById<Button>(R.id.notesHistoryButton).setOnClickListener {
+        findViewById<View>(R.id.notesHistoryButton).setOnClickListener {
             startActivity(com.aheadt1d.app.events.EventHistoryActivity.createIntent(this))
         }
 
         chart = findViewById(R.id.glucoseChart)
         chartContainer = findViewById(R.id.chartContainer)
-        legendContainer = findViewById(R.id.legendContainer)
+
+        heroGlucoseValueText = findViewById(R.id.heroGlucoseValueText)
+        heroTrendArrowText = findViewById(R.id.heroTrendArrowText)
+        heroRateText = findViewById(R.id.heroRateText)
+        heroTirBadge = findViewById(R.id.heroTirBadge)
+        heroAvgText = findViewById(R.id.heroAvgText)
+
         window1hButton = findViewById(R.id.window1hButton)
         window3hButton = findViewById(R.id.window3hButton)
         window6hButton = findViewById(R.id.window6hButton)
-        rangeTightButton = findViewById(R.id.rangeTightButton)
-        rangeFullButton = findViewById(R.id.rangeFullButton)
-        rangeAutoButton = findViewById(R.id.rangeAutoButton)
+        window12hButton = findViewById(R.id.window12hButton)
+        window24hButton = findViewById(R.id.window24hButton)
+
+        prevDayButton = findViewById(R.id.prevDayButton)
+        nextDayButton = findViewById(R.id.nextDayButton)
         dateRangeLabel = findViewById(R.id.dateRangeLabel)
-        pickDateRangeButton = findViewById(R.id.pickDateRangeButton)
+        dateSelectorContainer = findViewById(R.id.dateSelectorContainer)
         backToLiveButton = findViewById(R.id.backToLiveButton)
 
-        loadRangePrefs()
+        loadWindowPrefs()
         setupChart()
         setupPointLongPress()
-        setupAspectRatioCap()
-        buildLegend()
+
         window1hButton.setOnClickListener { selectWindow(WINDOW_1H) }
         window3hButton.setOnClickListener { selectWindow(WINDOW_3H) }
         window6hButton.setOnClickListener { selectWindow(WINDOW_6H) }
-        rangeTightButton.setOnClickListener { setRangeMode(RangeMode.TIGHT) }
-        rangeFullButton.setOnClickListener { setRangeMode(RangeMode.FULL) }
-        rangeAutoButton.setOnClickListener { setRangeMode(RangeMode.AUTO) }
-        pickDateRangeButton.setOnClickListener { openDateRangePicker() }
+        window12hButton.setOnClickListener { selectWindow(WINDOW_12H) }
+        window24hButton.setOnClickListener { selectWindow(WINDOW_24H) }
+
+        prevDayButton.setOnClickListener { pageDay(forward = false) }
+        nextDayButton.setOnClickListener { pageDay(forward = true) }
+        dateSelectorContainer.setOnClickListener { openDateRangePicker() }
         backToLiveButton.setOnClickListener { backToLive() }
+
         updateWindowButtonStyles()
-        updateRangeButtonStyles()
         updateDateRangeLabel()
 
         refreshChart()
@@ -168,71 +166,8 @@ class GraphActivity : AppCompatActivity() {
         autoRefreshChart()
     }
 
-    /**
-     * Caps the chart's height to a landscape-leaning aspect ratio (width *
-     * ASPECT_RATIO) instead of letting it stretch to fill whatever vertical
-     * space the screen happens to have left. On a tall phone that stretch is
-     * what made ordinary glucose swings look artificially steep - a wider,
-     * shorter frame reads calmer for the same data. Horizontal pan/zoom
-     * (already enabled in setupChart) still covers long time windows within
-     * that frame. Runs once after the container's first layout pass, since
-     * its width isn't known before then.
-     */
-    private fun setupAspectRatioCap() {
-        chartContainer.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
-            override fun onGlobalLayout() {
-                chartContainer.viewTreeObserver.removeOnGlobalLayoutListener(this)
-                val width = chartContainer.width
-                val containerHeight = chartContainer.height
-                if (width <= 0 || containerHeight <= 0) return
-                val desiredHeight = (width * ASPECT_RATIO).toInt().coerceAtMost(containerHeight)
-                chart.layoutParams = (chart.layoutParams as FrameLayout.LayoutParams).apply {
-                    height = desiredHeight
-                    gravity = Gravity.CENTER
-                }
-            }
-        })
-    }
-
-    /** Same severity ladder as everywhere else (GlucoseSeverity) - a dot on
-     *  the curve and a legend swatch can never disagree about what a colour
-     *  means. HIGH and CRITICAL_HIGH share the display label "HIGH", so only
-     *  the first (lighter) one is shown to keep the row from listing "HIGH"
-     *  twice. */
-    private fun buildLegend() {
-        GlucoseBucket.entries.distinctBy { it.label }.forEach { bucket ->
-            val dot = View(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(9), dp(9)).apply { rightMargin = dp(5) }
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL
-                    setColor(ContextCompat.getColor(this@GraphActivity, bucket.colorRes))
-                }
-            }
-            val label = TextView(this).apply {
-                text = bucket.label
-                setTextColor(ContextCompat.getColor(this@GraphActivity, R.color.muted))
-                textSize = 10f
-            }
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { marginStart = dp(10); marginEnd = dp(10) }
-            }
-            row.addView(dot)
-            row.addView(label)
-            legendContainer.addView(row)
-        }
-    }
-
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
-    // Same trigger MainActivity uses: a fresh Worker run means new Health
-    // Connect data may have landed, so re-fetch. Only while live - a
-    // historical view shouldn't jump back to "now" just because a worker
-    // tick fired in the background.
     private fun observeWorkerRuns() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -254,17 +189,9 @@ class GraphActivity : AppCompatActivity() {
 
     private fun refreshChart() {
         if (!HealthConnectManager.isAvailable(this)) return
-        val range = viewRange ?: ChartRange(Instant.now().minus(Duration.ofMinutes(WINDOW_6H)), Instant.now())
-        // Cancel any still-in-flight fetch from a previous refreshChart() call
-        // before starting a new one - swiping/paging quickly (back a day,
-        // then immediately forward again) fires refreshChart() repeatedly,
-        // and without this an earlier, slower request (e.g. querying a wider
-        // historical range) can finish AFTER a later, faster one and
-        // overwrite cachedPoints/cachedEvents with stale data - rendered
-        // against the CURRENT viewRange, which no longer matches what was
-        // actually fetched. That mismatch is exactly what silently drops
-        // event icons: the stale events don't fall within the now-current
-        // window's filter.
+        val now = Instant.now()
+        val range = viewRange ?: ChartRange(now.minus(Duration.ofMinutes(selectedWindowMinutes)), now)
+
         refreshJob?.cancel()
         refreshJob = lifecycleScope.launch {
             val data = ChartDataSource.load(applicationContext, range)
@@ -283,8 +210,7 @@ class GraphActivity : AppCompatActivity() {
 
     private fun selectWindow(minutes: Long) {
         selectedWindowMinutes = minutes
-        // The 1h/3h/6h buttons are a live-view concept - picking one always
-        // returns to live, same as backToLiveButton.
+        saveWindowPrefs()
         viewRange = null
         updateWindowButtonStyles()
         updateDateRangeLabel()
@@ -295,6 +221,8 @@ class GraphActivity : AppCompatActivity() {
         setButtonActive(window1hButton, selectedWindowMinutes == WINDOW_1H)
         setButtonActive(window3hButton, selectedWindowMinutes == WINDOW_3H)
         setButtonActive(window6hButton, selectedWindowMinutes == WINDOW_6H)
+        setButtonActive(window12hButton, selectedWindowMinutes == WINDOW_12H)
+        setButtonActive(window24hButton, selectedWindowMinutes == WINDOW_24H)
     }
 
     private fun setButtonActive(button: Button, active: Boolean) {
@@ -302,42 +230,14 @@ class GraphActivity : AppCompatActivity() {
         button.setTextColor(ContextCompat.getColor(this, if (active) R.color.accent2 else R.color.muted))
     }
 
-    private fun setRangeMode(mode: RangeMode) {
-        rangeMode = mode
-        saveRangePrefs()
-        updateRangeButtonStyles()
-        renderChart()
+    private fun loadWindowPrefs() {
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        selectedWindowMinutes = prefs.getLong(KEY_WINDOW_MINUTES, WINDOW_3H)
     }
 
-    private fun updateRangeButtonStyles() {
-        setButtonActive(rangeTightButton, rangeMode == RangeMode.TIGHT)
-        setButtonActive(rangeFullButton, rangeMode == RangeMode.FULL)
-        setButtonActive(rangeAutoButton, rangeMode == RangeMode.AUTO)
-    }
-
-    /** TIGHT/FULL/AUTO all produce genuinely different bounds - AUTO's fit-to-
-     *  data bounds are snapped to the same 25 mg/dL grid the fixed TIGHT/FULL
-     *  bounds already land on by construction (70/180/40/400 are all
-     *  multiples of 25), so gridlines/labels stay locked to clean numbers
-     *  (50/75/100/125/150...) instead of drifting to whatever the data's
-     *  min/max happens to be. */
-    private fun applyYAxisRange(windowed: List<GlucosePoint>) {
-        val (minY, maxY) = rangeMode.yBounds(windowed)
-        chart.axisLeft.axisMinimum = minY
-        chart.axisLeft.axisMaximum = maxY
-    }
-
-    private fun loadRangePrefs() {
-        // Shares MainActivity's prefs file/key, so a range choice made on
-        // either screen is remembered on the other.
-        val prefs = getSharedPreferences(RANGE_PREFS_NAME, MODE_PRIVATE)
-        rangeMode = runCatching { RangeMode.valueOf(prefs.getString(KEY_RANGE_MODE, null) ?: "") }
-            .getOrDefault(RangeMode.FULL)
-    }
-
-    private fun saveRangePrefs() {
-        getSharedPreferences(RANGE_PREFS_NAME, MODE_PRIVATE).edit()
-            .putString(KEY_RANGE_MODE, rangeMode.name)
+    private fun saveWindowPrefs() {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putLong(KEY_WINDOW_MINUTES, selectedWindowMinutes)
             .apply()
     }
 
@@ -352,16 +252,6 @@ class GraphActivity : AppCompatActivity() {
         chart.isScaleXEnabled = true
         chart.isScaleYEnabled = false
         chart.axisRight.isEnabled = false
-        // A day-paging swipe is the same touch gesture MPAndroidChart's own
-        // drag handling sees, so it also kicks off the chart's native
-        // momentum/deceleration animation - that keeps adjusting the
-        // viewport for several frames after touch-up, running well past the
-        // single frame our post{}-scheduled icon placement waits for. The
-        // icons end up positioned against a transform that's still settling,
-        // so they land wrong (often off the visible plot) until some later,
-        // unrelated touch re-triggers repositionOverlays() once the chart
-        // has actually stopped moving. Disabling residual momentum makes the
-        // viewport settle immediately at touch-up, removing that race.
         chart.isDragDecelerationEnabled = false
 
         val mutedColor = ContextCompat.getColor(this, R.color.muted)
@@ -374,37 +264,21 @@ class GraphActivity : AppCompatActivity() {
             setDrawGridLines(true)
             gridColor = borderColor
             textColor = mutedColor
-            textSize = 11f
+            textSize = 10f
             setDrawAxisLine(false)
-            // granularity/labelCount are set per-render (axisGranularityMinutes/
-            // axisLabelCount) since the right density depends on the selected
-            // window, not a single fixed value for every zoom level.
         }
 
         chart.axisLeft.apply {
             setDrawGridLines(true)
             gridColor = borderColor
             textColor = mutedColor
-            textSize = 11f
+            textSize = 10f
             setDrawAxisLine(false)
-            // Explicit mg/dL gridline spacing (every 25) so the axis reads as
-            // real gridlines with labels, not just a floating trend line -
-            // and, combined with applyYAxisRange's grid-snapped AUTO bounds,
-            // gridlines always land on the same 50/75/100/125/150-style
-            // numbers regardless of window/range mode.
-            granularity = RangeMode.GRID_STEP
+            granularity = 25f
             isGranularityEnabled = true
         }
     }
 
-    /** Long-press on (or near) a plotted point opens the same "Log an event"
-     *  picker the home screen's FAB uses, but pre-filled with that point's
-     *  timestamp/value instead of "now" - for logging something after the
-     *  fact, at the moment it actually happened on the curve. A horizontal
-     *  fling instead pages the visible window back/forward a day (swipe left
-     *  = back, swipe right = forward, per spec). Both gestures only
-     *  *observe* touches (onTouch always returns false), so MPAndroidChart's
-     *  own pan/pinch-zoom handling on the same view is unaffected. */
     private fun setupPointLongPress() {
         val gestureDetector = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onLongPress(e: MotionEvent) {
@@ -423,13 +297,6 @@ class GraphActivity : AppCompatActivity() {
             false
         }
 
-        // Event icons and (in historical mode) axis tick labels are overlay
-        // Views positioned once from the chart's pixel transform when they're
-        // drawn - MPAndroidChart's own pinch-zoom/pan (still enabled for
-        // scrubbing within the loaded window) moves the curve under them
-        // without ever telling this code to recompute, so without this
-        // listener the overlays visually drift away from - or entirely off
-        // of - the data they're marking as soon as the user pans/zooms.
         chart.onChartGestureListener = object : com.github.mikephil.charting.listener.OnChartGestureListener {
             override fun onChartGestureStart(me: MotionEvent?, lastPerformedGesture: com.github.mikephil.charting.listener.ChartTouchListener.ChartGesture?) {}
             override fun onChartGestureEnd(me: MotionEvent?, lastPerformedGesture: com.github.mikephil.charting.listener.ChartTouchListener.ChartGesture?) { repositionOverlays() }
@@ -442,12 +309,6 @@ class GraphActivity : AppCompatActivity() {
         }
     }
 
-    /** Redraws the event-icon (and, in historical mode, axis-tick-label)
-     *  overlays from the last-loaded data and the chart's *current* pixel
-     *  transform - called after every native pan/zoom step so the overlays
-     *  track the curve instead of staying stuck at their pre-gesture screen
-     *  position. No data refetch: same [lastVisibleEvents]/[chartAnchor]
-     *  renderChart() already computed. */
     private fun repositionOverlays() {
         val anchor = chartAnchor ?: return
         clearEventIcons()
@@ -459,10 +320,6 @@ class GraphActivity : AppCompatActivity() {
         }
     }
 
-    /** Shifts [viewRange] by one full calendar day and reloads. From live
-     *  mode, swiping back enters historical mode at yesterday (a full local
-     *  midnight-to-midnight day); paging forward past today snaps back to
-     *  live instead of showing an empty "tomorrow". */
     private fun pageDay(forward: Boolean) {
         val zone = ZoneId.systemDefault()
         val currentStartDate = viewRange?.start?.atZone(zone)?.toLocalDate() ?: LocalDate.now(zone).minusDays(1)
@@ -507,7 +364,8 @@ class GraphActivity : AppCompatActivity() {
     private fun updateDateRangeLabel() {
         val range = viewRange
         if (range == null) {
-            dateRangeLabel.text = getString(R.string.graph_live_label)
+            dateRangeLabel.text = "● Live"
+            dateRangeLabel.setTextColor(ContextCompat.getColor(this, R.color.ok))
             backToLiveButton.visibility = View.GONE
         } else {
             val zone = ZoneId.systemDefault()
@@ -519,15 +377,11 @@ class GraphActivity : AppCompatActivity() {
             } else {
                 "${formatter.format(range.start)} – ${formatter.format(range.end.minusSeconds(1))}"
             }
+            dateRangeLabel.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
             backToLiveButton.visibility = View.VISIBLE
         }
     }
 
-    /** Finds the nearest plotted entry to a long-press in *pixel* space (not
-     *  data-unit space - X is minutes and Y is mg/dL, wildly different
-     *  scales, so comparing raw value deltas would favor whichever axis has
-     *  the bigger numbers). A generous ~24dp hit radius since a fingertip is
-     *  nowhere near pixel-precise. */
     private fun handleChartLongPress(touchX: Float, touchY: Float) {
         val anchor = chartAnchor ?: return
         val dataSets = chart.data?.dataSets.orEmpty()
@@ -563,6 +417,68 @@ class GraphActivity : AppCompatActivity() {
         )
     }
 
+    /** Updates the hero card with current reading, trend arrow, rate, TIR %, and average. */
+    private fun updateHeroStats(points: List<GlucosePoint>) {
+        if (points.isEmpty()) {
+            heroGlucoseValueText.text = "--"
+            heroGlucoseValueText.setTextColor(ContextCompat.getColor(this, R.color.muted))
+            heroTrendArrowText.text = ""
+            heroRateText.text = "No data"
+            heroTirBadge.text = "--% in Range"
+            heroAvgText.text = "Avg: -- mg/dL"
+            return
+        }
+
+        val latest = points.last()
+        heroGlucoseValueText.text = latest.sgv.toString()
+        heroGlucoseValueText.setTextColor(SeverityColoring.colorInt(latest.sgv))
+
+        val trend = LatestTrendRepository.latestTrend.value
+        if (trend != null && viewRange == null) {
+            val arrow = com.aheadt1d.app.notifications.GlucoseTrendArrow.fromRatePerMinute(trend.rate)
+            heroTrendArrowText.text = arrow.label
+            val rateVal = trend.rate
+            val rateFormatted = if (rateVal != null) String.format(Locale.US, "%+.1f/m", rateVal) else "Live"
+            heroRateText.text = rateFormatted
+        } else {
+            heroTrendArrowText.text = ""
+            heroRateText.text = if (viewRange == null) "Live" else "Historical"
+        }
+
+        val inRangeCount = points.count { it.sgv in 70..180 }
+        val tirPercent = (inRangeCount * 100) / points.size
+        val avgGlucose = points.map { it.sgv }.average().toInt()
+
+        heroTirBadge.text = "$tirPercent% in Range"
+        val tirColor = when {
+            tirPercent >= 70 -> ContextCompat.getColor(this, R.color.ok)
+            tirPercent >= 50 -> ContextCompat.getColor(this, R.color.high)
+            else -> ContextCompat.getColor(this, R.color.low)
+        }
+        heroTirBadge.setTextColor(tirColor)
+        heroAvgText.text = "Avg: $avgGlucose mg/dL"
+    }
+
+    /**
+     * Smart dynamic Y-axis bounds: guaranteed to comfortably frame the 70-180 mg/dL target zone,
+     * while cleanly expanding to fit highs or lows, snapped to clean 25 mg/dL grid increments.
+     */
+    private fun applyDynamicYAxisRange(windowed: List<GlucosePoint>) {
+        if (windowed.isEmpty()) {
+            chart.axisLeft.axisMinimum = 40f
+            chart.axisLeft.axisMaximum = 250f
+            return
+        }
+        val lo = windowed.minOf { it.sgv }.toFloat()
+        val hi = windowed.maxOf { it.sgv }.toFloat()
+
+        val desiredMin = (lo - 20f).coerceAtMost(60f).coerceAtLeast(30f)
+        val desiredMax = (hi + 25f).coerceAtLeast(200f).coerceAtMost(400f)
+
+        chart.axisLeft.axisMinimum = floor(desiredMin / 25f) * 25f
+        chart.axisLeft.axisMaximum = ceil(desiredMax / 25f) * 25f
+    }
+
     private fun renderChart() {
         val range = viewRange
         val now = Instant.now()
@@ -582,15 +498,12 @@ class GraphActivity : AppCompatActivity() {
             windowed = cachedPoints
         }
 
+        updateHeroStats(windowed)
         clearEventIcons()
         clearAxisTickLabels()
 
         if (windowed.isEmpty()) {
-            val label = if (range == null) {
-                windowLabel(selectedWindowMinutes)
-            } else {
-                dateRangeLabel.text.toString()
-            }
+            val label = if (range == null) windowLabel(selectedWindowMinutes) else dateRangeLabel.text.toString()
             chart.setNoDataText(
                 if (range == null) getString(R.string.chart_no_data, label)
                 else getString(R.string.graph_no_data_for_range, label)
@@ -599,12 +512,12 @@ class GraphActivity : AppCompatActivity() {
             return
         }
 
-        applyYAxisRange(windowed)
+        applyDynamicYAxisRange(windowed)
 
         val anchor = windowStart.atZone(zone).truncatedTo(ChronoUnit.HOURS).toInstant()
         chartAnchor = anchor
 
-        val dataSets = GapSegmenter.segment(windowed).map { segment ->
+        val baseDataSets = GapSegmenter.segment(windowed).map { segment ->
             val entries = segment.map { point -> Entry(minutesFromAnchor(anchor, point.time), point.sgv.toFloat()) }
             val pointColors = segment.map { SeverityColoring.colorInt(it.sgv) }
             LineDataSet(entries, "Glucose").apply {
@@ -616,23 +529,29 @@ class GraphActivity : AppCompatActivity() {
                 setDrawValues(false)
                 mode = LineDataSet.Mode.CUBIC_BEZIER
                 highLightColor = ContextCompat.getColor(this@GraphActivity, R.color.accent2)
-                // The tapped-point value/time is shown via our own MarkerView
-                // (chart.marker below) - MPAndroidChart's default highlight
-                // also draws its own vertical+horizontal indicator lines
-                // through the tapped point, which duplicated the "now"
-                // LimitLine near the right edge. Disabling these leaves
-                // exactly one line there.
                 setDrawHorizontalHighlightIndicator(false)
                 setDrawVerticalHighlightIndicator(false)
             }
         }
 
-        // Tapping a point shows its exact value + timestamp in a callout
-        // (GlucoseMarkerView, shared with MainActivity's home chart).
+        val allDataSets = mutableListOf<ILineDataSet>()
+        allDataSets.addAll(baseDataSets)
+
+        var axisMax = minutesFromAnchor(anchor, windowEnd)
+
+        // RateMath Predictive Trajectory ("Ghost Line") in Live Mode
+        if (range == null && windowed.isNotEmpty()) {
+            val ghostEntries = buildGhostLineEntries(windowed, anchor)
+            if (ghostEntries.isNotEmpty()) {
+                allDataSets.add(ghostLineDataSet(ghostEntries))
+                axisMax = ghostEntries.last().x
+            }
+        }
+
+        // Tapping a point shows exact value + timestamp in callout
         chart.marker = GlucoseMarkerView(this, anchor, zone)
 
-        // Threshold lines are Y-VALUE thresholds (70/180 mg/dL), so they
-        // belong on axisLeft as HORIZONTAL lines.
+        // Threshold lines: 70 mg/dL (Low) and 180 mg/dL (High)
         chart.axisLeft.removeAllLimitLines()
         chart.axisLeft.addLimitLine(LimitLine(70f, getString(R.string.chart_low_threshold_label)).apply {
             lineColor = ContextCompat.getColor(this@GraphActivity, R.color.low)
@@ -653,11 +572,6 @@ class GraphActivity : AppCompatActivity() {
 
         chart.xAxis.removeAllLimitLines()
         if (range == null) {
-            // Exactly one "now" indicator: a single thin dashed line, colour
-            // kept away from the severity ladder and the purple accent/curve
-            // colour so it can't be mistaken for either. Historical mode has
-            // no "now" line at all - it's viewing a fixed past range, not a
-            // live window.
             chart.xAxis.addLimitLine(LimitLine(minutesFromAnchor(anchor, now), getString(R.string.chart_now_label)).apply {
                 lineColor = ContextCompat.getColor(this@GraphActivity, R.color.muted)
                 textColor = ContextCompat.getColor(this@GraphActivity, R.color.muted)
@@ -674,7 +588,7 @@ class GraphActivity : AppCompatActivity() {
 
         chart.xAxis.apply {
             axisMinimum = minutesFromAnchor(anchor, windowStart)
-            axisMaximum = minutesFromAnchor(anchor, windowEnd)
+            axisMaximum = axisMax
             if (range == null) {
                 setDrawLabels(true)
                 granularity = axisGranularityMinutes(selectedWindowMinutes)
@@ -682,62 +596,57 @@ class GraphActivity : AppCompatActivity() {
                 setLabelCount(axisLabelCount(selectedWindowMinutes), true)
                 valueFormatter = HourAxisFormatter(anchor, zone)
             } else {
-                // Multi-day/custom-range view: MPAndroidChart's own
-                // granularity-based tick generation reads as either sparse or
-                // crowded once the window is more than a day or two, so day-
-                // boundary ticks (same logic the doctor report's PDF uses) are
-                // drawn as overlay labels instead (placeAxisTickLabels below)
-                // and the built-in axis text is turned off to avoid a second,
-                // disagreeing set of labels.
                 setDrawLabels(false)
             }
         }
-        // Clear any stale highlight/marker state before swapping data - the
-        // chart now draws a variable number of LineDataSets (one per
-        // gap-free segment), so a highlight left over from a previous render
-        // with a different dataset count can point at a dataSetIndex that no
-        // longer exists, crashing MPAndroidChart's own marker-drawing code.
+
         chart.highlightValues(null)
-        chart.data = LineData(dataSets)
+        chart.data = LineData(allDataSets)
         chart.notifyDataSetChanged()
-        // A pinch-zoom/pan from a previous interaction leaves the chart's
-        // internal viewport matrix scaled/translated - left as-is, every
-        // pixel-space computation done after this render (event icons, axis
-        // tick overlay labels, long-press hit-testing) would be transformed
-        // through that stale matrix instead of the fresh axisMinimum/Maximum
-        // just set above, silently misplacing them. Resetting to the default
-        // full-range view on every render keeps pixel transforms predictable;
-        // the user's zoom/pan within *this* render is still fully available
-        // via setPinchZoom/isDragEnabled afterwards.
         chart.fitScreen()
         chart.invalidate()
 
-        // Icon/label placement needs the chart's pixel transform from this
-        // layout pass, which isn't ready until after invalidate() actually
-        // draws - post() defers until then.
         chart.post {
             placeEventIcons(visibleEvents, anchor)
             if (range != null) placeAxisTickLabels(windowStart, windowEnd, anchor, zone)
         }
     }
 
-    /** A tappable glyph per logged event, positioned above the chart at the
-     *  event's x-position - tapping opens its tag/note in an editable bottom
-     *  sheet. Plain overlay Views (not chart Entries/markers) since
-     *  MPAndroidChart has no built-in tap target that isn't a data point.
-     *
-     *  Icons whose natural x-position would land within one icon-width of
-     *  the "now" line are nudged sideways (away from the chart's right edge,
-     *  i.e. left) so the glyph never sits directly on top of that line -
-     *  it's still positioned close to its real timestamp, just not exactly
-     *  overlapping the one thing on the chart it would otherwise obscure. */
+    /**
+     * Builds the RateMath predictive ghost trajectory into the next 20-30 minutes.
+     */
+    private fun buildGhostLineEntries(windowed: List<GlucosePoint>, anchor: Instant): List<Entry> {
+        val last = windowed.lastOrNull() ?: return emptyList()
+        val ratePoints = windowed.map { RatePoint(it.time.toEpochMilli(), it.sgv) }
+        val rates = RateMath.recentRates(ratePoints, GHOST_RATE_SAMPLES)
+        val currentRate = rates.lastOrNull() ?: return emptyList()
+        val trajectory = RateMath.assessRateTrajectory(rates)
+        val decayPerStep = if (trajectory.kind == TrajectoryKind.DECELERATING) {
+            trajectory.avgDeltaPerStep
+        } else {
+            0.0
+        }
+        val decayed = RateMath.projectWithDecay(last.sgv, currentRate, decayPerStep, GHOST_PROJECTION_MINUTES)
+
+        val entries = mutableListOf(Entry(minutesFromAnchor(anchor, last.time), last.sgv.toFloat()))
+        decayed.forEach { point ->
+            val t = last.time.plusSeconds(point.minutesAhead * 60L)
+            entries.add(Entry(minutesFromAnchor(anchor, t), point.value.toFloat()))
+        }
+        return entries
+    }
+
+    private fun ghostLineDataSet(entries: List<Entry>): LineDataSet = LineDataSet(entries, "Projected").apply {
+        color = ColorUtils.setAlphaComponent(ContextCompat.getColor(this@GraphActivity, R.color.accent2), 120)
+        lineWidth = 2f
+        enableDashedLine(12f, 8f, 0f)
+        setDrawCircles(false)
+        setDrawValues(false)
+        mode = LineDataSet.Mode.LINEAR
+    }
+
     private fun placeEventIcons(events: List<UserEvent>, anchor: Instant) {
         val transformer = chart.getTransformer(YAxis.AxisDependency.LEFT)
-        // chart.top: the aspect-ratio cap (setupAspectRatioCap) can leave
-        // chartContainer taller than the capped chart, vertically centering
-        // it - viewPortHandler's offsets are relative to the chart's own
-        // origin, not chartContainer's, so that gap must be added before
-        // using them as chartContainer margins.
         val topOffsetPx = chart.top + chart.viewPortHandler.offsetTop().toInt() + dp(2)
         val iconSizePx = dp(22)
         val nowPixelX = transformer.getPixelForValues(minutesFromAnchor(anchor, Instant.now()), chart.axisLeft.axisMaximum).x
@@ -770,29 +679,12 @@ class GraphActivity : AppCompatActivity() {
         eventIconViews.clear()
     }
 
-    /** Day-boundary x-axis labels for historical/multi-day mode, using the
-     *  same tick-generation logic (AxisTicks.xAxisTicks) as the doctor
-     *  report's PDF chart - same overlay-View technique as placeEventIcons,
-     *  since MPAndroidChart's own axis text is turned off for this mode. */
     private fun placeAxisTickLabels(start: Instant, end: Instant, anchor: Instant, zone: ZoneId) {
         val transformer = chart.getTransformer(YAxis.AxisDependency.LEFT)
         val bottomY = chart.top + chart.viewPortHandler.contentBottom().toInt() + dp(2)
         val mutedColor = ContextCompat.getColor(this, R.color.muted)
         val measurePaint = android.graphics.Paint().apply { textSize = 11f * resources.displayMetrics.scaledDensity }
 
-        // AxisTicks' cadence (day-boundary ticks, or 6 hour-labeled ticks for
-        // ranges <=2 days) was tuned for the doctor report's wide printed
-        // page, not a narrow phone screen - the same 6 "MMM d, h a" labels
-        // that fit comfortably on a PDF can overlap each other here. Skip a
-        // label if it would render closer than TICK_LABEL_MIN_GAP_PX to the
-        // previously placed one, same collision-avoidance approach the PDF's
-        // own y-axis labels use.
-        // Clamp each label's left edge to stay on-screen BEFORE the collision
-        // check (not after) - a tick at the very edge of the plot naturally
-        // wants to center past the screen edge, and clamping that only at
-        // render time (after collision bookkeeping used the unclamped
-        // position) let the actual on-screen label sit further right than
-        // the math assumed, overlapping the next surviving label.
         val maxLeft = (chartContainer.width - 1).toFloat()
         var lastLabelRight = Float.NEGATIVE_INFINITY
         AxisTicks.xAxisTicks(start, end, zone).forEach { tick ->
@@ -827,28 +719,28 @@ class GraphActivity : AppCompatActivity() {
     private fun minutesFromAnchor(anchor: Instant, instant: Instant): Float =
         Duration.between(anchor, instant).toMillis() / 60_000f
 
-    // 1hr shows a tick every 15 min (5 labels), 3hr every 30 min (7 labels),
-    // 6hr every hour (7 labels) - density scales down as the window widens
-    // instead of a single fixed tick count that reads sparse on a short
-    // window and crowded on a long one. labelCount is forced (see
-    // renderChart) so the density is guaranteed rather than left to
-    // MPAndroidChart's own thin-to-fit heuristic.
     private fun axisGranularityMinutes(windowMinutes: Long): Float = when (windowMinutes) {
         WINDOW_1H -> 15f
         WINDOW_3H -> 30f
-        else -> 60f
+        WINDOW_6H -> 60f
+        WINDOW_12H -> 120f
+        else -> 240f
     }
 
     private fun axisLabelCount(windowMinutes: Long): Int = when (windowMinutes) {
         WINDOW_1H -> 5
         WINDOW_3H -> 7
+        WINDOW_6H -> 7
+        WINDOW_12H -> 7
         else -> 7
     }
 
     private fun windowLabel(windowMinutes: Long): String = when (windowMinutes) {
-        WINDOW_1H -> "hour"
-        WINDOW_3H -> "3 hours"
-        else -> "6 hours"
+        WINDOW_1H -> "1h"
+        WINDOW_3H -> "3h"
+        WINDOW_6H -> "6h"
+        WINDOW_12H -> "12h"
+        else -> "24h"
     }
 
     private class HourAxisFormatter(
@@ -870,10 +762,15 @@ class GraphActivity : AppCompatActivity() {
         private const val WINDOW_1H = 60L
         private const val WINDOW_3H = 180L
         private const val WINDOW_6H = 360L
+        private const val WINDOW_12H = 720L
+        private const val WINDOW_24H = 1440L
+
+        private const val GHOST_RATE_SAMPLES = 4
+        private const val GHOST_PROJECTION_MINUTES = 25
+
         private const val CHART_AUTO_REFRESH_MS = 5 * 60 * 1000L
-        private const val ASPECT_RATIO = 0.68f
-        private const val RANGE_PREFS_NAME = "ahead_chart_range"
-        private const val KEY_RANGE_MODE = "range_mode"
+        private const val PREFS_NAME = "ahead_graph_settings"
+        private const val KEY_WINDOW_MINUTES = "selected_window_minutes"
         private const val FLING_VELOCITY_THRESHOLD = 800f
         private const val TICK_LABEL_MIN_GAP_PX = 16f
 

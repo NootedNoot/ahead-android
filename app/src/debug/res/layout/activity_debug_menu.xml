@@ -148,7 +148,9 @@
                     <Spinner
                         android:id="@+id/scenarioSpinner"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
+                        android:layout_height="wrap_content"
+                        android:spinnerMode="dropdown"
+                        android:popupBackground="@color/surface" />
                 </FrameLayout>
 
                 <TextView
@@ -165,7 +167,7 @@
                         android:id="@+id/speed1x"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="1x (Real-time)"
+                        android:text="1x Real-time"
                         android:textColor="@color/text_primary"
                         android:buttonTint="@color/accent2"
                         android:checked="true" />
@@ -174,8 +176,8 @@
                         android:id="@+id/speed10x"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginStart="24dp"
-                        android:text="10x (Accelerated)"
+                        android:layout_marginStart="16dp"
+                        android:text="10x Accelerated"
                         android:textColor="@color/text_primary"
                         android:buttonTint="@color/accent2" />
                 </RadioGroup>
@@ -541,7 +543,9 @@
                     <Spinner
                         android:id="@+id/debugEventTagSpinner"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content" />
+                        android:layout_height="wrap_content"
+                        android:spinnerMode="dropdown"
+                        android:popupBackground="@color/surface" />
                 </FrameLayout>
 
                 <LinearLayout
