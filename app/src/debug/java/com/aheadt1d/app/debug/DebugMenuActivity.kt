@@ -66,6 +66,8 @@ class DebugMenuActivity : AppCompatActivity() {
     private lateinit var debugEventNoteInput: EditText
     private lateinit var debugEventHoursAgoInput: EditText
     private lateinit var silenceStatusText: TextView
+    private lateinit var currentServerStatusText: TextView
+    private lateinit var customServerUrlInput: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,6 +90,8 @@ class DebugMenuActivity : AppCompatActivity() {
         debugEventNoteInput = findViewById(R.id.debugEventNoteInput)
         debugEventHoursAgoInput = findViewById(R.id.debugEventHoursAgoInput)
         silenceStatusText = findViewById(R.id.silenceStatusText)
+        currentServerStatusText = findViewById(R.id.currentServerStatusText)
+        customServerUrlInput = findViewById(R.id.customServerUrlInput)
 
         scenarioSpinner.adapter = ArrayAdapter(
             this,
@@ -104,6 +108,7 @@ class DebugMenuActivity : AppCompatActivity() {
         setupResetAll()
         setupGlucoseInjection()
         setupNotificationTesting()
+        setupServerConfig()
         setupChartTesting()
         setupSystemState()
         setupNotesHistoryTest()
@@ -231,6 +236,8 @@ class DebugMenuActivity : AppCompatActivity() {
             injectManual(ageMinOverride = staleThresholdMinutesSafe() + 5)
         }
         findViewById<Button>(R.id.playScenarioButton).setOnClickListener { playScenario() }
+        findViewById<Button>(R.id.stepScenarioButton).setOnClickListener { stepScenario() }
+        findViewById<Button>(R.id.injectFullDemoButton).setOnClickListener { injectFullDemoScenario() }
         findViewById<Button>(R.id.stopScenarioButton).setOnClickListener { stopScenario("Playback stopped") }
         findViewById<Button>(R.id.injectRandomButton).setOnClickListener { injectRandomPoints() }
         findViewById<Button>(R.id.clearInjectionButton).setOnClickListener {
@@ -377,6 +384,8 @@ class DebugMenuActivity : AppCompatActivity() {
         scenarioProgressText.text = "Injected $value mg/dL, rate ${"%.1f".format(rate)}, age ${ageMin}m"
     }
 
+    private var currentScenarioStep = -1
+
     private fun playScenario() {
         stopScenario(null)
         val scenario = DebugScenario.values()[scenarioSpinner.selectedItemPosition]
@@ -385,26 +394,96 @@ class DebugMenuActivity : AppCompatActivity() {
 
         scenarioJob = lifecycleScope.launch {
             for (i in fullSeries.indices) {
-                val visible = fullSeries.subList(0, i + 1)
-                DebugGlucoseOverride.setPoints(visible)
-                DebugGlucoseOverride.notifyStateChanged(this@DebugMenuActivity)
-                val latest = visible.last()
-                val rate = HealthConnectManager.calculateRatePerMinute(visible) ?: 0.0
-                val severity = simpleSeverityFor(latest.sgv)
-                // Flatline scenario deliberately stops pushing fresh repo updates
-                // partway through so the real staleness path can be exercised
-                // without also having to wait out the full 5-min-per-point delay.
-                if (scenario != DebugScenario.FLATLINE_STALE || i == 0) {
-                    DebugInjection.apply(this@DebugMenuActivity, severity, latest.sgv, null, null, rate)
-                }
-                scenarioProgressText.text =
-                    "Playing ${scenario.label}: ${i + 1}/${fullSeries.size} (${latest.sgv} mg/dL)"
+                currentScenarioStep = i
+                applyScenarioStep(scenario, fullSeries, i)
                 if (i < fullSeries.size - 1) {
-                    val realIntervalMs = Duration.between(latest.time, fullSeries[i + 1].time).toMillis()
+                    val realIntervalMs = Duration.between(fullSeries[i].time, fullSeries[i + 1].time).toMillis()
                     delay((realIntervalMs / speedFactor).toLong())
                 }
             }
-            scenarioProgressText.text = "Finished ${scenario.label}"
+            val desc = scenario.demoDescription?.let { "\n$it" } ?: ""
+            scenarioProgressText.text = "Finished ${scenario.label}$desc"
+        }
+    }
+
+    private fun stepScenario() {
+        val scenario = DebugScenario.values()[scenarioSpinner.selectedItemPosition]
+        val fullSeries = scenario.points()
+        currentScenarioStep = (currentScenarioStep + 1) % fullSeries.size
+        applyScenarioStep(scenario, fullSeries, currentScenarioStep)
+    }
+
+    private fun injectFullDemoScenario() {
+        stopScenario(null)
+        val scenario = DebugScenario.values()[scenarioSpinner.selectedItemPosition]
+        val fullSeries = scenario.points()
+        val targetIndex = when (scenario) {
+            DebugScenario.DEMO_PREDICTIVE_HYPO_CATCH -> 4 // 96 mg/dL, rate -2.2/m, early warning
+            DebugScenario.DEMO_TREATED_RECOVERY_SMART_MUTE -> 3 // 78 mg/dL, rising, treated tier
+            DebugScenario.DEMO_UNEXPLAINED_FALSE_REBOUND -> 3 // 88 mg/dL peak of bounce, unexplained tier
+            DebugScenario.DEMO_POST_MEAL_INSULIN_DECAY -> 5 // 230 mg/dL peak rollover
+            DebugScenario.DEMO_DELAYED_EXERCISE_RISK -> 5 // 86 mg/dL nocturnal drop
+            else -> fullSeries.size - 1
+        }
+        currentScenarioStep = targetIndex
+        applyScenarioStep(scenario, fullSeries, targetIndex)
+    }
+
+    private fun applyScenarioStep(scenario: DebugScenario, fullSeries: List<com.aheadt1d.app.health.GlucosePoint>, i: Int) {
+        val visible = fullSeries.subList(0, i + 1)
+        DebugGlucoseOverride.setPoints(visible)
+        DebugGlucoseOverride.notifyStateChanged(this@DebugMenuActivity)
+        val latest = visible.last()
+        val rate = scenario.customRateForPoint(i, fullSeries.size)
+            ?: (HealthConnectManager.calculateRatePerMinute(visible) ?: 0.0)
+        val severity = scenario.customSeverityForPoint(i, fullSeries.size, latest.sgv)
+            ?: simpleSeverityFor(latest.sgv)
+        val causeTier = scenario.causeTierForPoint(i, fullSeries.size)
+        val projectedPair = scenario.customProjectedForPoint(i, fullSeries.size, latest.sgv, rate)
+        val projected = projectedPair?.first
+        val projectedExtended = projectedPair?.second
+
+        if (scenario != DebugScenario.FLATLINE_STALE || i == 0) {
+            DebugInjection.apply(
+                this@DebugMenuActivity,
+                severity = severity,
+                value = latest.sgv,
+                projected = projected,
+                projectedExtended = projectedExtended,
+                rate = rate,
+                causeTier = causeTier
+            )
+        }
+        val tierStr = causeTier?.let { " [Tier: ${it.name}]" } ?: ""
+        val desc = scenario.demoDescription?.let { "\n$it" } ?: ""
+        scenarioProgressText.text =
+            "Step ${i + 1}/${fullSeries.size}: ${latest.sgv} mg/dL, ${"%.1f".format(rate)}/m, sev: $severity$tierStr$desc"
+    }
+
+    private fun setupServerConfig() {
+        refreshServerConfig()
+        findViewById<Button>(R.id.setCustomServerButton).setOnClickListener {
+            val url = customServerUrlInput.text.toString().trim()
+            if (url.isNotEmpty()) {
+                com.aheadt1d.app.network.ServerConfig.setCustomBaseUrl(this, url)
+                refreshServerConfig()
+                scenarioProgressText.text = "Custom backend URL applied: $url"
+            }
+        }
+        findViewById<Button>(R.id.resetServerButton).setOnClickListener {
+            com.aheadt1d.app.network.ServerConfig.setCustomBaseUrl(this, null)
+            customServerUrlInput.setText("")
+            refreshServerConfig()
+            scenarioProgressText.text = "Reset backend to default URL."
+        }
+    }
+
+    private fun refreshServerConfig() {
+        val current = com.aheadt1d.app.network.ServerConfig.getBaseUrl(this)
+        val isCustom = com.aheadt1d.app.network.ServerConfig.isCustomUrl(this)
+        currentServerStatusText.text = if (isCustom) "Active Server (CUSTOM): $current" else "Active Server (DEFAULT): $current"
+        if (isCustom && customServerUrlInput.text.isNullOrBlank()) {
+            customServerUrlInput.setText(current)
         }
     }
 

@@ -6,19 +6,52 @@ import java.time.Instant
 import kotlin.math.sin
 import kotlin.random.Random
 
+import org.aheadt1d.ratemath.CauseTier
+
 /**
  * Preset glucose scenarios for the debug menu's chart/notification testing.
  * Each generator returns points spaced 5 minutes apart (matching a typical
  * CGM cadence) ending at `now`, so DebugGlucoseOverride.setPoints() + the
  * last point's rate can drive both the chart and the live alert chain.
  */
-enum class DebugScenario(val label: String) {
+enum class DebugScenario(
+    val label: String,
+    val isDemo: Boolean = false,
+    val demoDescription: String? = null
+) {
     SLOW_RISE("Slow rise"),
     FAST_DROP("Fast drop"),
     POST_MEAL_SPIKE("Post-meal spike"),
     TODAYS_ACTUAL_SWING("Today's actual swing (82→319)"),
     FLATLINE_STALE("Flatline / stale sensor"),
-    SUSTAINED_HIGH_PLATEAU("Sustained high plateau (flat 320, 3h)");
+    SUSTAINED_HIGH_PLATEAU("Sustained high plateau (flat 320, 3h)"),
+
+    // ==================== CANONICAL CLINICAL DEMO SCENARIOS ====================
+    DEMO_PREDICTIVE_HYPO_CATCH(
+        label = "★ DEMO: Predictive Hypo Catch (125→62 mg/dL)",
+        isDemo = true,
+        demoDescription = "Ahead alerts at 96 mg/dL (-2.2/m) with an 18-min early warning (proj 56 mg/dL) while Dexcom is still silent."
+    ),
+    DEMO_TREATED_RECOVERY_SMART_MUTE(
+        label = "★ DEMO: Treatment Recovery Smart Mute (65→118 mg/dL)",
+        isDemo = true,
+        demoDescription = "Patient consumes fast carbs; Ahead applies TREATED tier to suppress alarm fatigue while tracking recovery."
+    ),
+    DEMO_UNEXPLAINED_FALSE_REBOUND(
+        label = "★ DEMO: Unexplained False Rebound (75→88→68 mg/dL)",
+        isDemo = true,
+        demoDescription = "Replays uncorrected bounce; UNEXPLAINED tier holds alert state across bounce so patient is not misled."
+    ),
+    DEMO_POST_MEAL_INSULIN_DECAY(
+        label = "★ DEMO: Post-Meal Spike & Decay (130→230 mg/dL)",
+        isDemo = true,
+        demoDescription = "Post-meal spike rolls over as bolus acts; prevents panic rage-bolusing by projecting safe stabilization."
+    ),
+    DEMO_DELAYED_EXERCISE_RISK(
+        label = "★ DEMO: Delayed Exercise Hypo (135→72 mg/dL)",
+        isDemo = true,
+        demoDescription = "Delayed nocturnal drop highlighting post-workout insulin sensitivity window."
+    );
 
     /** Total span the scenario plays out over, used to scale playback timing. */
     fun durationMinutes(): Long = when (this) {
@@ -28,6 +61,11 @@ enum class DebugScenario(val label: String) {
         TODAYS_ACTUAL_SWING -> 180L
         FLATLINE_STALE -> 60L
         SUSTAINED_HIGH_PLATEAU -> 180L
+        DEMO_PREDICTIVE_HYPO_CATCH -> 40L
+        DEMO_TREATED_RECOVERY_SMART_MUTE -> 35L
+        DEMO_UNEXPLAINED_FALSE_REBOUND -> 40L
+        DEMO_POST_MEAL_INSULIN_DECAY -> 55L
+        DEMO_DELAYED_EXERCISE_RISK -> 45L
     }
 
     /** Values only, oldest to newest, 5 minutes apart - the caller stamps times. */
@@ -59,7 +97,85 @@ enum class DebugScenario(val label: String) {
             // dead line - real sensor noise, not a slope PlateauMath should
             // ever mistake for "trending down."
             SUSTAINED_HIGH_PLATEAU -> (0..steps).map { i -> 320 + ((i * 7) % 5) - 2 }
+            DEMO_PREDICTIVE_HYPO_CATCH -> listOf(125, 120, 114, 105, 96, 88, 78, 70, 62)
+            DEMO_TREATED_RECOVERY_SMART_MUTE -> listOf(65, 66, 70, 78, 88, 98, 108, 118)
+            DEMO_UNEXPLAINED_FALSE_REBOUND -> listOf(75, 76, 82, 88, 86, 80, 72, 68)
+            DEMO_POST_MEAL_INSULIN_DECAY -> listOf(130, 150, 175, 205, 225, 230, 222, 205, 185, 160, 140, 130)
+            DEMO_DELAYED_EXERCISE_RISK -> listOf(135, 130, 122, 110, 98, 86, 78, 72, 68)
         }
+    }
+
+    fun causeTierForPoint(index: Int, total: Int): CauseTier? = when (this) {
+        DEMO_TREATED_RECOVERY_SMART_MUTE -> CauseTier.TREATED
+        DEMO_UNEXPLAINED_FALSE_REBOUND -> CauseTier.UNEXPLAINED
+        DEMO_DELAYED_EXERCISE_RISK -> CauseTier.EXERCISE_RISK
+        else -> null
+    }
+
+    fun customRateForPoint(index: Int, total: Int): Double? = when (this) {
+        DEMO_PREDICTIVE_HYPO_CATCH -> if (index >= 3) -2.2 else -1.2
+        DEMO_TREATED_RECOVERY_SMART_MUTE -> 1.8
+        DEMO_UNEXPLAINED_FALSE_REBOUND -> if (index < 4) 1.5 else -1.8
+        DEMO_POST_MEAL_INSULIN_DECAY -> if (index < 5) 2.4 else -1.5
+        DEMO_DELAYED_EXERCISE_RISK -> -1.4
+        else -> null
+    }
+
+    fun customSeverityForPoint(index: Int, total: Int, sgv: Int): String? = when (this) {
+        DEMO_PREDICTIVE_HYPO_CATCH -> {
+            if (sgv <= 70) "red"
+            else if (index >= 3) "yellow"
+            else "none"
+        }
+        DEMO_TREATED_RECOVERY_SMART_MUTE -> {
+            if (sgv <= 70) "red"
+            else if (sgv < 90) "yellow"
+            else "none"
+        }
+        DEMO_UNEXPLAINED_FALSE_REBOUND -> {
+            if (sgv <= 70) "red"
+            else "yellow"
+        }
+        DEMO_POST_MEAL_INSULIN_DECAY -> {
+            if (sgv >= 250) "red"
+            else if (sgv >= 180) "yellow"
+            else "none"
+        }
+        DEMO_DELAYED_EXERCISE_RISK -> {
+            if (sgv <= 70) "red"
+            else if (sgv <= 90) "yellow"
+            else "none"
+        }
+        else -> null
+    }
+
+    fun customProjectedForPoint(index: Int, total: Int, sgv: Int, rate: Double): Pair<Int?, Int?>? = when (this) {
+        DEMO_PREDICTIVE_HYPO_CATCH -> {
+            val p18 = (sgv + (rate * 18)).toInt().coerceIn(30, 400)
+            val p30 = (sgv + (rate * 30)).toInt().coerceIn(30, 400)
+            p18 to p30
+        }
+        DEMO_TREATED_RECOVERY_SMART_MUTE -> {
+            val p18 = (sgv + (rate * 18)).toInt().coerceIn(30, 400)
+            val p30 = (sgv + (rate * 30)).toInt().coerceIn(30, 400)
+            p18 to p30
+        }
+        DEMO_UNEXPLAINED_FALSE_REBOUND -> {
+            val p18 = (sgv + (rate * 18)).toInt().coerceIn(30, 400)
+            val p30 = (sgv + (rate * 30)).toInt().coerceIn(30, 400)
+            p18 to p30
+        }
+        DEMO_POST_MEAL_INSULIN_DECAY -> {
+            val p18 = if (index < 5) 235 else 190
+            val p30 = if (index < 5) 240 else 170
+            p18 to p30
+        }
+        DEMO_DELAYED_EXERCISE_RISK -> {
+            val p18 = (sgv + (rate * 18)).toInt().coerceIn(30, 400)
+            val p30 = (sgv + (rate * 30)).toInt().coerceIn(30, 400)
+            p18 to p30
+        }
+        else -> null
     }
 
     /** Full [GlucosePoint] series ending at `now`. */

@@ -4,6 +4,7 @@ import android.content.Context
 import com.aheadt1d.app.BuildConfig
 import com.aheadt1d.app.auth.AuthPrefs
 import com.aheadt1d.app.network.AuthClient
+import com.aheadt1d.app.network.ServerConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -30,7 +31,7 @@ import org.json.JSONObject
 object SharingClient {
     private val client = OkHttpClient()
     private val JSON = "application/json; charset=utf-8".toMediaType()
-    private val baseUrl get() = BuildConfig.BACKEND_BASE_URL
+    private fun baseUrl(context: Context? = null) = ServerConfig.getBaseUrl(context)
 
     private fun callRaw(builder: Request.Builder): String {
         client.newCall(builder.build()).execute().use { response ->
@@ -49,7 +50,7 @@ object SharingClient {
     /** Everyone I've granted access to my data - the manage-sharing list. */
     suspend fun fetchShares(context: Context): JSONArray = withContext(Dispatchers.IO) {
         val builder = Request.Builder()
-            .url("$baseUrl/api/shares")
+            .url("${baseUrl(context)}/api/shares")
             .addHeader("Authorization", "Bearer ${requireJwt(context)}")
             .get()
         JSONArray(callRaw(builder))
@@ -61,7 +62,7 @@ object SharingClient {
     suspend fun createShare(context: Context, viewerEmail: String): JSONObject = withContext(Dispatchers.IO) {
         val body = JSONObject().apply { put("viewerEmail", viewerEmail) }
         val builder = Request.Builder()
-            .url("$baseUrl/api/shares")
+            .url("${baseUrl(context)}/api/shares")
             .addHeader("Authorization", "Bearer ${requireJwt(context)}")
             .post(body.toString().toRequestBody(JSON))
         JSONObject(callRaw(builder))
@@ -69,7 +70,7 @@ object SharingClient {
 
     suspend fun revokeShare(context: Context, shareId: String): JSONObject = withContext(Dispatchers.IO) {
         val builder = Request.Builder()
-            .url("$baseUrl/api/shares/$shareId")
+            .url("${baseUrl(context)}/api/shares/$shareId")
             .addHeader("Authorization", "Bearer ${requireJwt(context)}")
             .delete()
         JSONObject(callRaw(builder))

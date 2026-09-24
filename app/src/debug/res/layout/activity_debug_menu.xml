@@ -189,9 +189,16 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal">
-                <Button android:id="@+id/playScenarioButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="8dp" android:text="Play scenario" />
+                <Button android:id="@+id/playScenarioButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" android:text="Play" />
+                <Button android:id="@+id/stepScenarioButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="6dp" android:text="Step &gt;&gt;" />
                 <Button android:id="@+id/stopScenarioButton" style="@style/DebugButton.Ghost" android:layout_width="0dp" android:layout_weight="1" android:text="Stop" />
             </LinearLayout>
+
+            <Button
+                android:id="@+id/injectFullDemoButton"
+                style="@style/DebugButton"
+                android:layout_marginTop="6dp"
+                android:text="⚡ Fire Demo Alert (Instant Climax)" />
 
             <TextView
                 android:id="@+id/scenarioProgressText"
@@ -344,7 +351,36 @@
                 <TextView style="@style/DebugToggleLabel" android:text="Send app to background after forcing an alert" />
                 <Switch android:id="@+id/autoBackgroundSwitch" android:layout_width="wrap_content" android:layout_height="wrap_content" android:thumbTint="@color/accent2" android:trackTint="@color/border" />
             </LinearLayout>
+        </LinearLayout>
 
+        <!-- ===================== Local Server Configuration ($0/mo) ===================== -->
+
+        <LinearLayout style="@style/DebugCard">
+            <TextView style="@style/DebugCardTitle" android:text="🌐 BACKEND SERVER CONFIG ($0/mo)" />
+            <TextView
+                style="@style/DebugStatusText"
+                android:text="Switch Ahead between Railway production and your free local Windows PC backend (via Cloudflare Tunnel or local LAN Wi-Fi)." />
+
+            <TextView
+                android:id="@+id/currentServerStatusText"
+                style="@style/DebugSubheading"
+                android:textColor="@color/accent2"
+                android:text="Active Server: ..." />
+
+            <TextView style="@style/DebugLabel" android:text="Custom Server URL" />
+            <EditText
+                android:id="@+id/customServerUrlInput"
+                style="@style/DebugInput"
+                android:hint="https://your-tunnel.trycloudflare.com"
+                android:inputType="textUri" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <Button android:id="@+id/setCustomServerButton" style="@style/DebugButton" android:layout_width="0dp" android:layout_weight="1" android:layout_marginEnd="8dp" android:text="Apply URL" />
+                <Button android:id="@+id/resetServerButton" style="@style/DebugButton.Ghost" android:layout_width="0dp" android:layout_weight="1" android:text="Reset Default" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- ===================== Chart / UI testing ===================== -->

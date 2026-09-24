@@ -109,4 +109,80 @@ class AgpMetricsCalculatorTest {
         assertClose(1.0 / 3 * 100, m.timeInRangePercent)
         assertClose(1.0 / 3 * 100, m.timeAboveRangeL2Percent)
     }
+
+    @Test
+    fun `14-day standard dataset with 4033 continuous readings aligns with ADA consensus metrics`() {
+        val count = 14 * 288 + 1 // 14 full days of 5-min intervals
+        val readings = mutableListOf<GlucosePoint>()
+        for (i in 0 until count) {
+            val t = start.plus(i * 5L, ChronoUnit.MINUTES)
+            val step = i % 288
+            val hour = step / 12.0
+            val diurnal = 120 + 25 * kotlin.math.sin((hour - 8) * Math.PI / 12) +
+                    15 * kotlin.math.sin((hour - 13) * Math.PI / 6)
+            readings.add(GlucosePoint(t, diurnal.toInt()))
+        }
+        val m = AgpMetricsCalculator.calculate(readings)
+        assertEquals(count, m.readingsCount)
+        assertFalse(m.isBelowRecommendedCoverage)
+        assertFalse(m.isBelowMinimumUsableCoverage)
+        assertTrue("Days of data should be 14 days", m.daysOfData >= 14.0)
+        assertTrue("Mean glucose should be within 110-150 mg/dL", m.meanGlucose in 110.0..150.0)
+        assertTrue("CV should be well within <= 36% stability target", m.coefficientOfVariation <= 36.0)
+        assertTrue("Time in range (70-180) should meet ADA > 70% target", m.timeInRangePercent >= 70.0)
+        assertTrue("Time below range should be low (< 4%)", m.timeBelowRangeL1Percent + m.timeBelowRangeL2Percent < 4.0)
+        assertTrue("GMI should be plausible", m.gmi in 5.8..6.8)
+    }
+
+    @Test
+    fun `90-day large scale dataset with 25920 readings executes rapidly without overflow`() {
+        val count = 90 * 288
+        val readings = (0 until count).map { i ->
+            val sgv = 110 + (i % 60)
+            GlucosePoint(start.plus(i * 5L, ChronoUnit.MINUTES), sgv)
+        }
+        val t0 = System.currentTimeMillis()
+        val m = AgpMetricsCalculator.calculate(readings)
+        val elapsed = System.currentTimeMillis() - t0
+
+        assertEquals(count, m.readingsCount)
+        assertTrue("Days of data should reflect 90 days", m.daysOfData >= 89.9)
+        assertTrue("Calculation of 25,920 points should take under 500ms", elapsed < 500)
+        assertEquals(100.0, m.timeInRangePercent, 0.001)
+    }
+
+    @Test
+    fun `sensor compression drops and sudden rebounds are calculated accurately without NaN`() {
+        val readings = mutableListOf<GlucosePoint>()
+        for (i in 0 until 10) readings.add(GlucosePoint(start.plus(i * 5L, ChronoUnit.MINUTES), 120))
+        for (i in 10 until 13) readings.add(GlucosePoint(start.plus(i * 5L, ChronoUnit.MINUTES), 42))
+        for (i in 13 until 20) readings.add(GlucosePoint(start.plus(i * 5L, ChronoUnit.MINUTES), 120))
+
+        val m = AgpMetricsCalculator.calculate(readings)
+        assertEquals(20, m.readingsCount)
+        assertFalse(m.meanGlucose.isNaN())
+        assertFalse(m.coefficientOfVariation.isNaN())
+        assertFalse(m.gmi.isNaN())
+        assertEquals(3.0 / 20.0 * 100.0, m.timeBelowRangeL2Percent, 0.001)
+        assertEquals(17.0 / 20.0 * 100.0, m.timeInRangePercent, 0.001)
+    }
+
+    @Test
+    fun `multi-day sensor warmup outage gaps do not corrupt daysOfData or bucket percentages`() {
+        val readings = mutableListOf<GlucosePoint>()
+        for (i in 0 until 288 * 3) {
+            readings.add(GlucosePoint(start.plus(i * 5L, ChronoUnit.MINUTES), 110))
+        }
+        val resumeStart = start.plus(7 * 24 * 60L, ChronoUnit.MINUTES)
+        for (i in 0 until 288 * 3) {
+            readings.add(GlucosePoint(resumeStart.plus(i * 5L, ChronoUnit.MINUTES), 130))
+        }
+
+        val m = AgpMetricsCalculator.calculate(readings)
+        assertEquals(288 * 6, m.readingsCount)
+        assertTrue("Days of data spans entire period ~10 days", m.daysOfData >= 9.9)
+        assertEquals(100.0, m.timeInRangePercent, 0.001)
+        assertEquals(0.0, m.timeBelowRangeL1Percent, 0.001)
+        assertEquals(0.0, m.timeAboveRangeL1Percent, 0.001)
+    }
 }

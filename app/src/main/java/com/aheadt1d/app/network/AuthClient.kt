@@ -26,7 +26,7 @@ import org.json.JSONObject
 object AuthClient {
     private val client = OkHttpClient()
     private val JSON = "application/json; charset=utf-8".toMediaType()
-    private val baseUrl get() = BuildConfig.BACKEND_BASE_URL
+    private fun baseUrl(context: Context? = null) = ServerConfig.getBaseUrl(context)
 
     class AuthException(message: String) : IOException(message)
 
@@ -58,25 +58,25 @@ object AuthClient {
         }
     }
 
-    private fun postBlocking(path: String, body: JSONObject, authHeader: String? = null): JSONObject {
+    private fun postBlocking(context: Context?, path: String, body: JSONObject, authHeader: String? = null): JSONObject {
         val requestBuilder = Request.Builder()
-            .url("$baseUrl$path")
+            .url("${baseUrl(context)}$path")
             .post(body.toString().toRequestBody(JSON))
         if (authHeader != null) requestBuilder.addHeader("Authorization", "Bearer $authHeader")
         return JSONObject(callRaw(requestBuilder))
     }
 
-    private fun getBlocking(path: String, authHeader: String): String {
+    private fun getBlocking(context: Context, path: String, authHeader: String): String {
         val requestBuilder = Request.Builder()
-            .url("$baseUrl$path")
+            .url("${baseUrl(context)}$path")
             .addHeader("Authorization", "Bearer $authHeader")
             .get()
         return callRaw(requestBuilder)
     }
 
-    private fun deleteBlocking(path: String, body: JSONObject, authHeader: String): JSONObject {
+    private fun deleteBlocking(context: Context, path: String, body: JSONObject, authHeader: String): JSONObject {
         val requestBuilder = Request.Builder()
-            .url("$baseUrl$path")
+            .url("${baseUrl(context)}$path")
             .addHeader("Authorization", "Bearer $authHeader")
             .delete(body.toString().toRequestBody(JSON))
         return JSONObject(callRaw(requestBuilder))
@@ -93,7 +93,7 @@ object AuthClient {
                 put("password", password)
                 if (!displayName.isNullOrBlank()) put("displayName", displayName)
             }
-            val result = postBlocking("/api/auth/signup", body)
+            val result = postBlocking(context, "/api/auth/signup", body)
             persistSession(context, result)
             result
         }
@@ -104,7 +104,7 @@ object AuthClient {
                 put("email", email)
                 put("password", password)
             }
-            val result = postBlocking("/api/auth/login", body)
+            val result = postBlocking(context, "/api/auth/login", body)
             persistSession(context, result)
             result
         }
@@ -115,7 +115,7 @@ object AuthClient {
     suspend fun mintDevice(context: Context, label: String?): JSONObject = withContext(Dispatchers.IO) {
         val jwt = AuthPrefs.jwt(context) ?: throw AuthException("Not logged in")
         val body = JSONObject().apply { if (!label.isNullOrBlank()) put("label", label) }
-        val result = postBlocking("/api/devices", body, authHeader = jwt)
+        val result = postBlocking(context, "/api/devices", body, authHeader = jwt)
         AuthPrefs.saveDevice(context, result.getString("deviceId"), result.getString("apiKey"))
         result
     }
@@ -123,7 +123,7 @@ object AuthClient {
     /** Every device currently authorized to upload for the logged-in
      *  account - drives AccountSettingsActivity's device list. */
     suspend fun fetchDevices(context: Context): org.json.JSONArray = withContext(Dispatchers.IO) {
-        org.json.JSONArray(getBlocking("/api/devices", requireJwt(context)))
+        org.json.JSONArray(getBlocking(context, "/api/devices", requireJwt(context)))
     }
 
     /** Revoking THIS device's own key (the one currently stored in
@@ -134,7 +134,7 @@ object AuthClient {
      *  can't get out" state). Revoking any OTHER device (from the list)
      *  just calls this with that device's id and refreshes the list. */
     suspend fun revokeDevice(context: Context, deviceId: String): JSONObject = withContext(Dispatchers.IO) {
-        postBlocking("/api/devices/$deviceId/revoke", JSONObject(), authHeader = requireJwt(context))
+        postBlocking(context, "/api/devices/$deviceId/revoke", JSONObject(), authHeader = requireJwt(context))
     }
 
     /** Requires password re-entry, mirroring the backend's own
@@ -142,14 +142,14 @@ object AuthClient {
      *  is deliberately not enough to wipe an account. */
     suspend fun deleteAccount(context: Context, password: String): JSONObject = withContext(Dispatchers.IO) {
         val body = JSONObject().apply { put("password", password) }
-        deleteBlocking("/api/auth/account", body, authHeader = requireJwt(context))
+        deleteBlocking(context, "/api/auth/account", body, authHeader = requireJwt(context))
     }
 
     /** Requests a password-reset email from the backend for the given address.
      *  Deliberately unauthenticated - can be called before login. */
-    suspend fun requestPasswordReset(email: String): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun requestPasswordReset(email: String, context: Context? = null): JSONObject = withContext(Dispatchers.IO) {
         val body = JSONObject().apply { put("email", email) }
-        postBlocking("/api/auth/password-reset/request", body)
+        postBlocking(context, "/api/auth/password-reset/request", body)
     }
 
     private fun persistSession(context: Context, result: JSONObject) {

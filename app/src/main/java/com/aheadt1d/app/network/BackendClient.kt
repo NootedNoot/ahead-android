@@ -28,8 +28,9 @@ object BackendClient {
         val apiKey = AuthPrefs.deviceApiKey(context)
             ?: throw IOException("No device key stored - not logged in")
 
+        val baseUrl = ServerConfig.getBaseUrl(context)
         val request = Request.Builder()
-            .url("${BuildConfig.BACKEND_BASE_URL}/api/check-trend")
+            .url("$baseUrl/api/check-trend")
             .addHeader("X-Ahead-Api-Key", apiKey)
             .post(body.toString().toRequestBody(JSON))
             .build()
@@ -52,10 +53,11 @@ object BackendClient {
      */
     fun deleteRecentReadings(context: Context, sinceEpochMs: Long? = null) {
         val apiKey = AuthPrefs.deviceApiKey(context) ?: return
+        val baseUrl = ServerConfig.getBaseUrl(context)
         val url = if (sinceEpochMs != null) {
-            "${BuildConfig.BACKEND_BASE_URL}/api/readings?since=$sinceEpochMs"
+            "$baseUrl/api/readings?since=$sinceEpochMs"
         } else {
-            "${BuildConfig.BACKEND_BASE_URL}/api/readings"
+            "$baseUrl/api/readings"
         }
         val request = Request.Builder()
             .url(url)
@@ -73,12 +75,13 @@ object BackendClient {
      */
     fun postAlertAction(context: Context, readingTimeMs: Long, action: String) {
         val apiKey = runCatching { AuthPrefs.deviceApiKey(context) }.getOrNull() ?: return
+        val baseUrl = ServerConfig.getBaseUrl(context)
         val json = JSONObject().apply {
             put("readingTime", readingTimeMs)
             put("action", action)
         }
         val request = Request.Builder()
-            .url("${BuildConfig.BACKEND_BASE_URL}/api/alerts/action")
+            .url("$baseUrl/api/alerts/action")
             .addHeader("X-Ahead-Api-Key", apiKey)
             .post(json.toString().toRequestBody(JSON))
             .build()
