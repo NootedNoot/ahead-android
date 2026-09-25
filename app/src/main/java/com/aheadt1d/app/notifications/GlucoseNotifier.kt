@@ -74,14 +74,11 @@ object GlucoseNotifier {
                 // (tap/swipe to expand). Severity "none" is unchanged - no
                 // alert to explain, so the technical line stays as-is.
                 if (state.severity == "yellow") {
-                    val waitMsg = if ((state.ratePerMinute ?: 0.0) < 0) {
-                        " · ⏳ Wait for 2nd reading before treating"
-                    } else {
-                        " · ⏳ Wait for 2nd reading before correcting"
-                    }
-                    "${AlertExplainer.oneLiner(state.value, state.ratePerMinute, state.projected, state.projectedExtended)}$waitMsg · as of ${timeFormatter.format(state.readingTime)}"
+                    val checkNum = state.yellowCheckNumber.coerceIn(1, 3)
+                    val progTag = if (checkNum < 3) " [Check $checkNum/3]" else ""
+                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}$progTag · as of ${timeFormatter.format(state.readingTime)}"
                 } else if (state.severity == "red") {
-                    "${AlertExplainer.oneLiner(state.value, state.ratePerMinute, state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
+                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
                 } else {
                     "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
                 }

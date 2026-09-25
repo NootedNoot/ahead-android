@@ -1,0 +1,297 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="#160D27"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="12dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⏰"
+                android:textSize="22sp" />
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="Safety &amp; Wake Alarm"
+                android:textColor="#E2D9F3"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/btnDialogClose"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✕"
+                android:textColor="#7C6FA0"
+                android:textSize="18sp"
+                android:padding="6dp" />
+        </LinearLayout>
+
+        <!-- Armed Status Card (Shown only when alarm is currently active) -->
+        <LinearLayout
+            android:id="@+id/alarmArmedStatusCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#2E1C4E"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="ALARM ACTIVE &amp; ARMED"
+                android:textColor="#34D399"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.06" />
+
+            <TextView
+                android:id="@+id/tvActiveCountdown"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="2h 15m remaining"
+                android:textColor="#FFFFFF"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:layout_marginTop="2dp" />
+
+            <TextView
+                android:id="@+id/tvActiveMsgPreview"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Voice: Time to wake up and check blood sugar."
+                android:textColor="#C084FC"
+                android:textSize="12sp"
+                android:layout_marginTop="4dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="12dp">
+
+                <Button
+                    android:id="@+id/btnCancelActiveAlarm"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Cancel Alarm"
+                    android:textColor="#F87171"
+                    android:backgroundTint="#3B1828"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnAdd15mActiveAlarm"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:text="+15 Min"
+                    android:textColor="#E2D9F3"
+                    android:backgroundTint="#4C2D7E"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Alarm Configuration Container -->
+        <LinearLayout
+            android:id="@+id/alarmConfigContainer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <!-- Presets Section -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="QUICK REASONS &amp; DURATIONS"
+                android:textColor="#7C6FA0"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05"
+                android:layout_marginBottom="8dp" />
+
+            <!-- Preset Reason Chips -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="6dp">
+
+                <Button
+                    android:id="@+id/chipAlcohol"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:text="🍺 Alcohol (2h)"
+                    android:textColor="#E2D9F3"
+                    android:backgroundTint="#2A1A4A"
+                    android:textSize="11sp"
+                    android:padding="2dp" />
+
+                <Button
+                    android:id="@+id/chipAllergy"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:text="💊 Allergy Pill (3h)"
+                    android:textColor="#E2D9F3"
+                    android:backgroundTint="#2A1A4A"
+                    android:textSize="11sp"
+                    android:padding="2dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="14dp">
+
+                <Button
+                    android:id="@+id/chipLowCheck"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:text="🍪 Low Check (15m)"
+                    android:textColor="#E2D9F3"
+                    android:backgroundTint="#2A1A4A"
+                    android:textSize="11sp"
+                    android:padding="2dp" />
+
+                <Button
+                    android:id="@+id/chipPostMeal"
+                    android:layout_width="0dp"
+                    android:layout_height="42dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="6dp"
+                    android:text="🍕 Post-Meal (1h)"
+                    android:textColor="#E2D9F3"
+                    android:backgroundTint="#2A1A4A"
+                    android:textSize="11sp"
+                    android:padding="2dp" />
+            </LinearLayout>
+
+            <!-- Duration Selection -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="TIME FROM NOW"
+                android:textColor="#7C6FA0"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05"
+                android:layout_marginBottom="6dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:id="@+id/btnTimeMinus15"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="#2A1A4A"
+                    android:gravity="center"
+                    android:text="-"
+                    android:textColor="#E2D9F3"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvDurationDisplay"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="2 Hours (120 min)"
+                    android:textColor="#FBBF24"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btnTimePlus15"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="#2A1A4A"
+                    android:gravity="center"
+                    android:text="+"
+                    android:textColor="#E2D9F3"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <!-- Custom TTS Spoken Message -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="SPOKEN VOICE MESSAGE (TTS)"
+                android:textColor="#7C6FA0"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.05"
+                android:layout_marginBottom="6dp" />
+
+            <EditText
+                android:id="@+id/etCustomTtsMessage"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#0D0618"
+                android:textColor="#E2D9F3"
+                android:textColorHint="#7C6FA0"
+                android:textSize="13sp"
+                android:padding="12dp"
+                android:hint="e.g. Wake up and check blood sugar after allergy medicine"
+                android:maxLines="3"
+                android:layout_marginBottom="14dp" />
+
+            <!-- Pierces DND Callout -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🔊 Pierces Do Not Disturb &amp; silent mode. Uses high-priority alarm volume with pulsing vibration and spoken voice until dismissed."
+                android:textColor="#A78BFA"
+                android:textSize="11sp"
+                android:background="#23143E"
+                android:padding="10dp"
+                android:layout_marginBottom="18dp" />
+
+            <!-- Arm Alarm Button -->
+            <Button
+                android:id="@+id/btnArmSafetyAlarm"
+                android:layout_width="match_parent"
+                android:layout_height="52dp"
+                android:text="ARM WAKE-UP ALARM"
+                android:textColor="#0D0618"
+                android:backgroundTint="#34D399"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

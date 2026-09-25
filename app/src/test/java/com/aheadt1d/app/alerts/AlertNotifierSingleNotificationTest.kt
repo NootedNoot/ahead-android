@@ -8,6 +8,7 @@ import com.aheadt1d.app.notifications.GlucoseDisplayState
 import com.aheadt1d.app.notifications.GlucoseNotifier
 import com.aheadt1d.app.notifications.GlucoseTrendArrow
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -77,11 +78,13 @@ class AlertNotifierSingleNotificationTest {
         val textFalling = fallingNotification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
         assertNotNull(textFalling)
         assertTrue(
-            "Main notification must guide user to wait for 2nd reading before treating. Got: $textFalling",
-            textFalling!!.contains("Wait for 2nd reading before treating")
+            "Main notification must show rate and check tag in 1-swipe text. Got: $textFalling",
+            textFalling!!.contains("-1.8/min") && textFalling.contains("[Check 1/3]")
         )
+        // Verify notification progress bar is NOT present (no ugly line, shows in 1 swipe)
+        assertEquals(0, fallingNotification.extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0))
 
-        // Rising yellow
+        // Rising yellow (reading 2 of 3)
         val risingYellow = GlucoseDisplayState.Reading(
             value = 185,
             arrow = GlucoseTrendArrow.SLOWLY_RISING,
@@ -91,15 +94,17 @@ class AlertNotifierSingleNotificationTest {
             trendIsComputed = true,
             severity = "yellow",
             projected = 210,
-            projectedExtended = 235
+            projectedExtended = 235,
+            yellowCheckNumber = 2
         )
 
         val risingNotification = GlucoseNotifier.buildNotification(context, risingYellow)
         val textRising = risingNotification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
         assertNotNull(textRising)
         assertTrue(
-            "Main notification must guide user to wait for 2nd reading before correcting. Got: $textRising",
-            textRising!!.contains("Wait for 2nd reading before correcting")
+            "Main notification must show rate and check tag in 1-swipe text. Got: $textRising",
+            textRising!!.contains("+1.8/min") && textRising.contains("[Check 2/3]")
         )
+        assertEquals(0, risingNotification.extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0))
     }
 }

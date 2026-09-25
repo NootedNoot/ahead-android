@@ -141,11 +141,22 @@ class MainActivity : AppCompatActivity() {
             runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
         }
 
-        findViewById<View>(R.id.yellowGuidanceBanner)?.setOnClickListener {
-            startActivity(com.aheadt1d.app.tutorial.InteractiveTutorialActivity.createIntent(this))
-        }
         findViewById<View>(R.id.btnBannerLearnWhy)?.setOnClickListener {
             startActivity(com.aheadt1d.app.tutorial.InteractiveTutorialActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.btnBannerReviewCurve)?.setOnClickListener {
+            startActivity(GraphActivity.createIntent(this))
+        }
+
+        findViewById<View>(R.id.btnSafetyAlarmQuick)?.setOnClickListener {
+            com.aheadt1d.app.alarm.SafetyAlarmDialog.show(this) { updateSafetyAlarmUI() }
+        }
+        findViewById<View>(R.id.safetyAlarmActiveBanner)?.setOnClickListener {
+            com.aheadt1d.app.alarm.SafetyAlarmDialog.show(this) { updateSafetyAlarmUI() }
+        }
+        findViewById<View>(R.id.drawerSafetyAlarmItem)?.setOnClickListener {
+            drawerLayout.closeDrawer(androidx.core.view.GravityCompat.START)
+            com.aheadt1d.app.alarm.SafetyAlarmDialog.show(this) { updateSafetyAlarmUI() }
         }
 
         findViewById<View>(R.id.uploadRevokedBanner).setOnClickListener {
@@ -531,6 +542,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateSilenceUI()
+        updateSafetyAlarmUI()
         // Catches a DND-access revocation that happened while the app wasn't
         // in the foreground (system "clean up permissions" prompt, an OEM
         // auto-revoke, the user toggling it off in Settings) - the wizard
@@ -545,6 +557,30 @@ class MainActivity : AppCompatActivity() {
                 WorkScheduler.schedulePeriodic(applicationContext)
                 refreshChart()
             }
+        }
+    }
+
+    private fun updateSafetyAlarmUI() {
+        val armed = com.aheadt1d.app.alarm.SafetyAlarmPrefs.isArmed(this)
+        val banner = findViewById<View>(R.id.safetyAlarmActiveBanner)
+        val tvBannerText = findViewById<TextView>(R.id.tvSafetyAlarmBannerText)
+        val tvQuickStatus = findViewById<TextView>(R.id.tvSafetyAlarmHeaderStatus)
+        val drawerBadge = findViewById<TextView>(R.id.drawerSafetyAlarmBadge)
+
+        if (armed) {
+            val label = com.aheadt1d.app.alarm.SafetyAlarmPrefs.getPresetLabel(this)
+            val remaining = com.aheadt1d.app.alarm.SafetyAlarmPrefs.getRemainingFormatted(this)
+            banner?.visibility = View.VISIBLE
+            tvBannerText?.text = "⏰ Wake Alarm: $label ($remaining)"
+            tvQuickStatus?.text = remaining
+            tvQuickStatus?.setTextColor(ContextCompat.getColor(this, R.color.ok))
+            drawerBadge?.visibility = View.VISIBLE
+            drawerBadge?.text = remaining
+        } else {
+            banner?.visibility = View.GONE
+            tvQuickStatus?.text = "Alarm"
+            tvQuickStatus?.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
+            drawerBadge?.visibility = View.GONE
         }
     }
 
@@ -1098,10 +1134,12 @@ class MainActivity : AppCompatActivity() {
         val tvYellowGuidanceText = findViewById<TextView>(R.id.tvYellowGuidanceText)
         if (reading.severity == "yellow") {
             yellowGuidanceBanner?.visibility = View.VISIBLE
-            val guidance = when {
-                rate != null && rate < 0 -> "⏳ Yellow Alert: Wait for 2nd or 3rd reading before treating."
-                rate != null && rate > 0 -> "⏳ Yellow Alert: Wait for 2nd reading before correcting."
-                else -> "⏳ Yellow Alert: Wait for 2nd reading to confirm trend."
+            val prefs = getSharedPreferences("ahead_alert_state", MODE_PRIVATE)
+            val checkCount = prefs.getInt("yellow_check_count", 1).coerceIn(1, 3)
+            val guidance = when (checkCount) {
+                1 -> "⏳ Yellow Alert: Reading 1 of 3 (10 min left) — confirming trend."
+                2 -> "⏳ Yellow Alert: Reading 2 of 3 (5 min left) — observing rate."
+                else -> "⏳ Yellow Alert: Reading 3 of 3 (Trend confirmed) — review curve."
             }
             tvYellowGuidanceText?.text = guidance
         } else {

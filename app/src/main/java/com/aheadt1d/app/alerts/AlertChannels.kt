@@ -181,10 +181,31 @@ object AlertChannels {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_CUSTOM_CHANNEL_ID, DEFAULT_CUSTOM_CHANNEL_ID) ?: DEFAULT_CUSTOM_CHANNEL_ID
 
+    const val SAFETY_ALARM_CHANNEL_ID = "ahead_safety_alarm_v1"
+
+    fun ensureSafetyAlarmChannel(context: Context) {
+        val nm = context.getSystemService(NotificationManager::class.java) ?: return
+        if (nm.getNotificationChannel(SAFETY_ALARM_CHANNEL_ID) == null) {
+            val channel = NotificationChannel(
+                SAFETY_ALARM_CHANNEL_ID,
+                "Ahead Wake-Up & Safety Alarm",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Loud wake-up alarms for BG checks during sleep, alcohol, or medication"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 800, 300, 800, 300, 1200, 400)
+                setBypassDnd(true)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
+            }
+            nm.createNotificationChannel(channel)
+        }
+    }
+
     /** Idempotent and cheap - safe to call from Application.onCreate, before
      *  every alert post, and after returning from the DND-access settings
      *  screen (that last one is what actually triggers the DND migration). */
     fun ensure(context: Context) {
+        ensureSafetyAlarmChannel(context)
         context.getSystemService(NotificationManager::class.java).let { quietNm ->
             if (quietNm.getNotificationChannel(QUIET_CHANNEL_ID) == null) {
                 quietNm.createNotificationChannel(buildQuietChannel())

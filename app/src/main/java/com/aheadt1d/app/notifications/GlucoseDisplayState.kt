@@ -53,7 +53,9 @@ sealed class GlucoseDisplayState {
         // what null vs. each tier means) so AlertCoordinator can read it off the same Reading it
         // already has in hand, rather than reaching back into LatestTrendRepository's raw
         // reading itself. Feeds AlertCoordinator.stabilityReadingsRequired.
-        val causeTier: org.aheadt1d.ratemath.CauseTier? = null
+        val causeTier: org.aheadt1d.ratemath.CauseTier? = null,
+        // Tracks reading count (1, 2, or 3) during a Yellow alert progression
+        val yellowCheckNumber: Int = 1
     ) : GlucoseDisplayState()
 
     /** A reading exists but is older than the staleness threshold. lastArrow is
@@ -161,6 +163,38 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
     val finalProjected = decision.projected15m
     val finalExtended = decision.projectedExtended ?: rate?.let { (raw.value + it * 30).roundToInt() }
 
+    val prefs = context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE)
+    val yellowCheck = if (finalSeverity == "yellow") {
+        val lastCount = prefs.getInt("yellow_check_count", 0)
+        val lastTime = prefs.getLong("yellow_check_last_time", 0L)
+        val lastSeenSeverity = prefs.getString("yellow_last_seen_severity", "none") ?: "none"
+        if (raw.time != lastTime) {
+            val elapsedMs = if (lastTime > 0L) raw.time - lastTime else Long.MAX_VALUE
+            // If previous check was yellow and within 15 minutes, advance progression (1 -> 2 -> 3)
+            val isContinuous = (lastSeenSeverity == "yellow" || lastCount > 0) && elapsedMs in 1L..(15 * 60_000L)
+            val next = if (isContinuous) minOf(3, (if (lastCount > 0) lastCount else 1) + 1) else 1
+            prefs.edit()
+                .putInt("yellow_check_count", next)
+                .putLong("yellow_check_last_time", raw.time)
+                .putString("yellow_last_seen_severity", "yellow")
+                .apply()
+            next
+        } else {
+            if (lastCount > 0) lastCount else 1
+        }
+    } else {
+        val lastTime = prefs.getLong("yellow_check_last_time", 0L)
+        // Only reset check count on a fresh, confirmed non-yellow reading timestamp
+        if (raw.time != lastTime && prefs.getInt("yellow_check_count", 0) != 0) {
+            prefs.edit()
+                .putInt("yellow_check_count", 0)
+                .putLong("yellow_check_last_time", raw.time)
+                .putString("yellow_last_seen_severity", finalSeverity ?: "none")
+                .apply()
+        }
+        1
+    }
+
     return GlucoseDisplayState.Reading(
         value = raw.value,
         arrow = GlucoseTrendArrow.fromRatePerMinute(rate),
@@ -171,6 +205,7 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
         projected = finalProjected,
         projectedExtended = finalExtended,
         ratePerMinute = rate,
-        causeTier = raw.causeTier
+        causeTier = raw.causeTier,
+        yellowCheckNumber = yellowCheck
     )
 }

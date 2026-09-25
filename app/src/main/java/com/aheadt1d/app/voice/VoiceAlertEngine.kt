@@ -24,6 +24,15 @@ import java.util.Locale
  */
 object VoiceAlertEngine {
     private const val TAG = "VoiceAlertEngine"
+    const val HIGH_VOICE_COOLDOWN_MS = 30 * 60_000L // 30 minutes between repeat high voice announcements
+
+    @Volatile private var lastHighSpokenAtMs: Long = 0L
+    @Volatile private var lastHighSpokenValue: Int = 0
+
+    fun resetHighThrottle() {
+        lastHighSpokenAtMs = 0L
+        lastHighSpokenValue = 0
+    }
 
     /**
      * Categories that ignore BOTH the master and per-category voice toggles.
@@ -51,7 +60,7 @@ object VoiceAlertEngine {
     private var focusRequest: AudioFocusRequest? = null
 
     private val speechAttributes: AudioAttributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+        .setUsage(AudioAttributes.USAGE_MEDIA)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
 
@@ -85,12 +94,52 @@ object VoiceAlertEngine {
      * evaluated before anything else touches the audio system.
      *
      * EMERGENCY and RED skip both gates entirely (see [UNGATED_CATEGORIES]).
+     *
+     * High alerts enforce a minimum 30-minute voice silence between spoken
+     * announcements to prevent alarm fatigue, unless glucose is doing an extreme swing
+     * (|rate| >= 3.0 mg/dL/min) or jumps >= 30 mg/dL. Low alerts are NEVER throttled.
      */
-    fun speak(context: Context, category: VoiceAlertCategory, text: String) {
+    fun speak(
+        context: Context,
+        category: VoiceAlertCategory,
+        text: String,
+        isHighSide: Boolean = false,
+        glucoseValue: Int? = null,
+        rate: Double? = null,
+    ) {
         if (com.aheadt1d.app.alerts.AlertSilenceManager.isSilenced(context)) {
             Log.d(TAG, "Skipping voice $category: alerts silenced")
             return
         }
+
+        // High-side voice alert throttling:
+        // Type 1 diabetics resting or sleeping with insulin on board should not be badgered by voice
+        // repeatedly speaking every few minutes for a continuing or gently moving high.
+        // Enforce a 30-minute minimum throttle unless:
+        // 1. Extreme rate swing (|rate| >= 3.0 mg/dL/min, e.g. +3.0 or -4.7)
+        // 2. Severe upward jump (>= +30 mg/dL above the last spoken value)
+        // 3. First time speaking for this high episode
+        val isHigh = isHighSide || category == VoiceAlertCategory.PLATEAU ||
+            (category == VoiceAlertCategory.YELLOW && (glucoseValue ?: 200) >= 140) ||
+            (category == VoiceAlertCategory.RED && (glucoseValue ?: 0) >= 180)
+
+        if (isHigh) {
+            val now = System.currentTimeMillis()
+            val timeSinceLast = now - lastHighSpokenAtMs
+            val isCrazyRate = rate != null && kotlin.math.abs(rate) >= 3.0
+            val isSevereJump = glucoseValue != null && lastHighSpokenValue > 0 && (glucoseValue - lastHighSpokenValue) >= 30
+            val isFirstHigh = lastHighSpokenAtMs == 0L
+
+            if (!isFirstHigh && !isCrazyRate && !isSevereJump && timeSinceLast < HIGH_VOICE_COOLDOWN_MS) {
+                Log.d(TAG, "Skipping high voice $category: throttled (${timeSinceLast / 60_000}m elapsed < 30m cooldown, val=$glucoseValue, rate=$rate)")
+                return
+            }
+            lastHighSpokenAtMs = now
+            if (glucoseValue != null && glucoseValue > 0) {
+                lastHighSpokenValue = glucoseValue
+            }
+        }
+
         if (category !in UNGATED_CATEGORIES) {
             if (!VoiceAlertPrefs.isMasterEnabled(context)) {
                 Log.d(TAG, "Skipped $category: master voice toggle off")
@@ -104,10 +153,21 @@ object VoiceAlertEngine {
 
         val engine = tts
         if (engine == null || !ready) {
-            // Cold start before TTS finished initializing - warm it for next time
-            // and drop this one rather than blocking or queuing stale speech.
-            Log.w(TAG, "TTS not ready; skipping $category utterance")
+            Log.w(TAG, "TTS not ready; warming up and scheduling utterance")
             init(context)
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                val readyEngine = tts
+                if (readyEngine != null && ready) {
+                    readyEngine.setPitch(category.pitch)
+                    readyEngine.setSpeechRate(category.rate)
+                    requestFocus()
+                    val retryParams = Bundle().apply {
+                        putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "ahead-$category")
+                        putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+                    }
+                    readyEngine.speak(text, TextToSpeech.QUEUE_FLUSH, retryParams, "ahead-$category-${System.currentTimeMillis()}")
+                }
+            }, 750)
             return
         }
 
@@ -118,6 +178,7 @@ object VoiceAlertEngine {
         Log.d(TAG, "Speaking $category: \"$text\"")
         val params = Bundle().apply {
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "ahead-$category")
+            putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
         }
         engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, "ahead-$category-${System.currentTimeMillis()}")
     }

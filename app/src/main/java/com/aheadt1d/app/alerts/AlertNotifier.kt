@@ -216,10 +216,18 @@ object AlertNotifier {
             },
         )
 
+        val isLow = isLowSide(value, projected)
         // Voice is independent of the visual notification (and its permission):
         // the engine gates itself on the voice settings and does nothing more.
         val spokenText = SpokenAlertText.red(value, rate, projected, projectedExtended, lowPhase)
-        VoiceAlertEngine.speak(context, VoiceAlertCategory.RED, spokenText)
+        VoiceAlertEngine.speak(
+            context,
+            VoiceAlertCategory.RED,
+            spokenText,
+            isHighSide = !isLow,
+            glucoseValue = value,
+            rate = rate,
+        )
     }
 
     /** Yellow never escalates: no full-screen intent, no DND bypass (its
@@ -294,7 +302,10 @@ object AlertNotifier {
         VoiceAlertEngine.speak(
             context,
             VoiceAlertCategory.YELLOW,
-            SpokenAlertText.yellow(value, rate, projected, projectedExtended)
+            SpokenAlertText.yellow(value, rate, projected, projectedExtended),
+            isHighSide = !isLow,
+            glucoseValue = value,
+            rate = rate,
         )
     }
 
@@ -490,16 +501,20 @@ object AlertNotifier {
 
         AlertTones.play(context, AlertTones.Tone.CALM_HIGH)
 
-        // Spoken separately from the visual `text` above - that copy reads
-        // dense/awkward aloud ("has been at or above X mg/dL for over Y
-        // minutes"); this is the same information in a shorter, more natural
-        // spoken cadence.
-        val spokenText = if (tier <= 1) {
-            "Heads up. Glucose has been elevated for over $highDurationMinutes minutes and hasn't started coming down."
-        } else {
-            "Heads up. Glucose is still elevated, now over $durationMinutes minutes — longer than before."
+        // Spoken separately from the visual `text` above.
+        // To prevent annoying repetitive voice chatter when resting or sleeping,
+        // only speak aloud on initial plateau entry (tier <= 1). Repeat cooldown
+        // firings update the tray quietly without repetitive TTS speech.
+        if (tier <= 1) {
+            val spokenText = "Heads up. Glucose has been elevated for over $highDurationMinutes minutes and hasn't started coming down."
+            VoiceAlertEngine.speak(
+                context,
+                VoiceAlertCategory.PLATEAU,
+                spokenText,
+                isHighSide = true,
+                glucoseValue = value,
+            )
         }
-        VoiceAlertEngine.speak(context, VoiceAlertCategory.PLATEAU, spokenText)
     }
 
     fun cancelPlateau(context: Context) {
@@ -569,7 +584,13 @@ object AlertNotifier {
         // Spoken separately from the visual `text` above for the same
         // reason showPlateauAlert's is - shorter, more natural aloud.
         val spokenText = "Heads up. It's been $minutesSinceCorrection minutes since your correction, and glucose hasn't started $verb yet — still $value."
-        VoiceAlertEngine.speak(context, VoiceAlertCategory.CORRECTION, spokenText)
+        VoiceAlertEngine.speak(
+            context,
+            VoiceAlertCategory.CORRECTION,
+            spokenText,
+            isHighSide = !isLow,
+            glucoseValue = value,
+        )
     }
 
     /**
@@ -619,7 +640,12 @@ object AlertNotifier {
         AlertTones.play(context, if (isLow) AlertTones.Tone.CALM_LOW else AlertTones.Tone.CALM_HIGH)
 
         val spokenText = "Just a note — another correction was logged $minutesSinceFirstCorrection minutes after the first, glucose still $direction."
-        VoiceAlertEngine.speak(context, VoiceAlertCategory.CORRECTION, spokenText)
+        VoiceAlertEngine.speak(
+            context,
+            VoiceAlertCategory.CORRECTION,
+            spokenText,
+            isHighSide = !isLow,
+        )
     }
 
     fun cancelCorrection(context: Context) {

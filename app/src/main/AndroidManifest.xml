@@ -49,6 +49,7 @@
          through a notification channel (see its class doc) - that direct
          call needs its own permission independent of POST_NOTIFICATIONS. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Required alongside foregroundServiceType="specialUse" on API 34+. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
@@ -168,6 +169,33 @@
         <activity
             android:name=".tutorial.InteractiveTutorialActivity"
             android:exported="true" />
+
+        <activity
+            android:name=".alarm.SafetyAlarmActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.Ahead" />
+
+        <service
+            android:name=".alarm.SafetyAlarmRingingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Plays wake-up alarm audio for blood glucose check" />
+        </service>
+
+        <receiver
+            android:name=".alarm.SafetyAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.aheadt1d.app.alarm.ACTION_SAFETY_ALARM_FIRE" />
+                <action android:name="com.aheadt1d.app.alarm.ACTION_SAFETY_ALARM_DISMISS" />
+                <action android:name="com.aheadt1d.app.alarm.ACTION_SAFETY_ALARM_SNOOZE" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".notifications.GlucoseStatusService"

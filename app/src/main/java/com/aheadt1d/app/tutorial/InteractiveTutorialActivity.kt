@@ -205,10 +205,15 @@ class InteractiveTutorialActivity : AppCompatActivity() {
                 tvSeverityBadge.text = "YELLOW ALERT"
                 tvSeverityBadge.setTextColor(ContextCompat.getColor(this, R.color.high))
                 simulatedYellowBanner.visibility = View.VISIBLE
-                if (step.ratePerMinute < 0) {
-                    tvSimulatedBannerText.text = "⏳ Yellow Alert: Wait for 2nd reading before treating."
-                } else {
-                    tvSimulatedBannerText.text = "⏳ Yellow Alert: Wait for 2nd reading before correcting."
+                val checkNum = when (step.readingIndex) {
+                    1 -> 1
+                    2 -> 2
+                    else -> 3
+                }
+                tvSimulatedBannerText.text = when (checkNum) {
+                    1 -> "⏳ Yellow Alert: Reading 1 of 3 (10 min left) — confirming trend."
+                    2 -> "⏳ Yellow Alert: Reading 2 of 3 (5 min left) — observing rate."
+                    else -> "⏳ Yellow Alert: Reading 3 of 3 (Trend confirmed) — curve leveled."
                 }
             }
             "red" -> {

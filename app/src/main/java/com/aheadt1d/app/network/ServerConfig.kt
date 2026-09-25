@@ -26,6 +26,10 @@ object ServerConfig {
         return BuildConfig.BACKEND_BASE_URL
     }
 
+    fun clearStaleUrl(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().remove(KEY_CUSTOM_BACKEND_URL).apply()
+    }
+
     fun setCustomBaseUrl(context: Context, url: String?) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (url.isNullOrBlank()) {

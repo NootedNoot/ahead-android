@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0D0618"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/tvAlarmPulsingIcon"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="⏰"
+        android:textSize="64sp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="WAKE-UP ALARM"
+        android:textColor="#F43F5E"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.08"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/tvAlarmPresetLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Blood Sugar Check"
+        android:textColor="#FBBF24"
+        android:textSize="17sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="12dp" />
+
+    <TextView
+        android:id="@+id/tvAlarmCustomMessage"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Time to wake up and verify blood sugar."
+        android:textColor="#E2D9F3"
+        android:textSize="15sp"
+        android:gravity="center"
+        android:background="#160D27"
+        android:padding="14dp"
+        android:layout_marginBottom="24dp" />
+
+    <!-- Current Live Glucose Box -->
+    <LinearLayout
+        android:id="@+id/bgCurrentBox"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#1F1238"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="16dp"
+        android:layout_marginBottom="32dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="LATEST READING"
+            android:textColor="#7C6FA0"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.05" />
+
+        <TextView
+            android:id="@+id/tvAlarmCurrentGlucose"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="-- mg/dL"
+            android:textColor="#34D399"
+            android:textSize="32sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Dismiss Button -->
+    <Button
+        android:id="@+id/btnAlarmDismiss"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:text="DISMISS &amp; CHECK BG"
+        android:textColor="#0D0618"
+        android:backgroundTint="#34D399"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="12dp" />
+
+    <!-- Snooze Button -->
+    <Button
+        android:id="@+id/btnAlarmSnooze"
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:text="SNOOZE (10 MIN)"
+        android:textColor="#E2D9F3"
+        android:backgroundTint="#2A1A4A"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

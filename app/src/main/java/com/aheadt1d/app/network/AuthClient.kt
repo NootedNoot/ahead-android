@@ -59,11 +59,23 @@ object AuthClient {
     }
 
     private fun postBlocking(context: Context?, path: String, body: JSONObject, authHeader: String? = null): JSONObject {
-        val requestBuilder = Request.Builder()
-            .url("${baseUrl(context)}$path")
-            .post(body.toString().toRequestBody(JSON))
-        if (authHeader != null) requestBuilder.addHeader("Authorization", "Bearer $authHeader")
-        return JSONObject(callRaw(requestBuilder))
+        try {
+            val requestBuilder = Request.Builder()
+                .url("${baseUrl(context)}$path")
+                .post(body.toString().toRequestBody(JSON))
+            if (authHeader != null) requestBuilder.addHeader("Authorization", "Bearer $authHeader")
+            return JSONObject(callRaw(requestBuilder))
+        } catch (e: IOException) {
+            if (e !is AuthException && e !is SessionExpiredException && context != null && ServerConfig.isCustomUrl(context)) {
+                ServerConfig.clearStaleUrl(context)
+                val fallbackBuilder = Request.Builder()
+                    .url("${BuildConfig.BACKEND_BASE_URL}$path")
+                    .post(body.toString().toRequestBody(JSON))
+                if (authHeader != null) fallbackBuilder.addHeader("Authorization", "Bearer $authHeader")
+                return JSONObject(callRaw(fallbackBuilder))
+            }
+            throw e
+        }
     }
 
     private fun getBlocking(context: Context, path: String, authHeader: String): String {

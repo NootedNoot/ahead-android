@@ -553,10 +553,34 @@ object AlertCoordinator {
                 )
             }
             else -> {
+                // Yellow clear hysteresis:
+                // If dipping slightly under 200 (e.g. 198 mg/dL) while not actively falling,
+                // do NOT flap between none and yellow. Hold the yellow state quietly in the tray.
+                val rate = reading.ratePerMinute
+                val isActivelyFalling = rate != null && rate <= -0.5
+                if (prevSeverity == "yellow" && reading.value >= 185 && !isActivelyFalling) {
+                    if (!suppressAlert) {
+                        AlertNotifier.showYellowAlert(
+                            context, reading.value, reading.projected, reading.ratePerMinute,
+                            projectedExtended = reading.projectedExtended,
+                            silent = true,
+                        )
+                    }
+                    prefs.edit {
+                        putString(KEY_LAST_SEVERITY, "yellow")
+                        putLong(KEY_LAST_DATE, date)
+                    }
+                    recordAlertAction(context, date, "held_yellow")
+                    return
+                }
+
                 AlertNotifier.cancelAlerts(context)
                 if (prevSeverity == "red") clearRedEpisodeState(prefs)
                 prefs.edit { remove(KEY_YELLOW_LAST_ALERTED_PROJECTED) }
                 recordAlertAction(context, date, "none")
+                if (reading.value in 81..179) {
+                    com.aheadt1d.app.voice.VoiceAlertEngine.resetHighThrottle()
+                }
             }
         }
 
@@ -937,20 +961,22 @@ object AlertCoordinator {
 
         if (forceFire) {
             val isHighSide = (reading.projected ?: reading.value) >= YELLOW_MID_POINT
-            val isFastRise = reading.ratePerMinute != null && reading.ratePerMinute >= 1.5
-            val isEscalatedHigh = (reading.projected ?: reading.value) >= 240 || reading.value >= 240
-            // Any downgrade from red on the high side is an improvement or leveling off from a
-            // prior critical alert. Never blast an audible tone or TTS speech on a high-side downgrade!
-            val shouldAudiblyAlert = if (downgradedFromRed && isHighSide) {
-                false
-            } else {
-                !isHighSide || isFastRise || isEscalatedHigh
+            val rate = reading.ratePerMinute
+            val isFastRise = rate != null && rate >= 2.0
+            val isCrazyRate = rate != null && kotlin.math.abs(rate) >= 3.0
+            val isEscalatedHigh = (reading.projected ?: reading.value) >= RECOVERY_REBOUND_CEILING_MGDL || reading.value >= RECOVERY_REBOUND_CEILING_MGDL
+
+            // Only audibly alert on initial yellow entry if it's an extreme rate swing, an escalated high (>=240), a fast rise (>=2.0), or a low-side drop
+            val shouldAudiblyAlert = when {
+                downgradedFromRed -> false
+                isCrazyRate -> true
+                isEscalatedHigh -> true
+                !isHighSide -> true
+                isFastRise -> true
+                else -> false // Gentle rises (e.g. +0.6 at 200 mg/dL) stay completely quiet audibly
             }
 
-            // Minimum gap between audible yellows - see MIN_YELLOW_REALERT_GAP_MS. Without it a
-            // value wobbling across the boundary re-entered yellow (and so force-fired) every
-            // single cycle. The state bookkeeping below still runs either way, so a genuinely
-            // worsening episode is never mis-tracked, it just doesn't re-interrupt.
+            // Minimum gap between audible yellows - see MIN_YELLOW_REALERT_GAP_MS
             val floorCleared = now - prefs.getLong(KEY_LAST_YELLOW_FIRED_AT, 0L) >= MIN_YELLOW_REALERT_GAP_MS
             if (!suppressAlert) {
                 if (shouldAudiblyAlert && floorCleared) {
@@ -988,36 +1014,6 @@ object AlertCoordinator {
         val isLowSide = projected < YELLOW_MID_POINT
         val worsenedBy = if (isLowSide) lastAlertedProjected - projected else projected - lastAlertedProjected
 
-        // 2026-09-23 (Ticket 017 follow-up): correction-aware re-alert grace, mirroring
-        // fireRedIfWarranted's one tier down (see that function's own correctionAnchor/
-        // inCorrectionGrace/correctionHolding block, and the class doc's item 2) - found while
-        // wiring up cause-tier awareness for the low-side stability buffer above that yellow had
-        // NO equivalent check at all: a logged correction changed nothing about whether a yellow
-        // (re-)fired here. Same asymmetric grace windows as red (LOW_CORRECTION_GRACE_MS,
-        // fixed/30m from the FIRST low correction; HIGH_CORRECTION_GRACE_MS, rolling/70m from
-        // the MOST RECENT high correction - reusing those exact constants, not new ones) and the
-        // same "only while it looks like it's working" rule: a correction never holds off a
-        // re-alert while the projection is still moving further into danger on this episode's
-        // own side. Deliberately does NOT touch the forceFire branch above (already returned by
-        // this point) - a correction never suppresses the FIRST alert of an episode, matching
-        // the existing red-side rule.
-        //
-        // CORRECTED 2026-09-23, same day - adversarial review caught a real gap in the first
-        // version: "still worsening" was checked against reading.ratePerMinute's instantaneous
-        // sign, but this function's whole re-alert decision is driven by worsenedBy (the
-        // PROJECTION's movement vs. the last-alerted baseline) - a different, independently
-        // computed quantity (GlucoseDisplayState.toDisplayState feeds severity/projection from
-        // raw.severityRatePerMinute, a RateConsensus median plus decay/trajectory history, NOT the
-        // plain 2-point raw.ratePerMinute this file's Reading.ratePerMinute actually carries - see
-        // that function's own comment). A flat/positive instantaneous rate could sit next to a
-        // still-collapsing projection, and the old check would call that "not worsening," hold the
-        // re-alert, AND silently re-anchor the baseline to the new, worse value every cycle -
-        // letting a real, large drift disappear in sub-threshold bites for the whole grace window
-        // with zero re-alert, ever (not even a delayed catch-up once the grace expired, since the
-        // ratcheted baseline had already absorbed it). Checking worsenedBy itself - the exact
-        // quantity this function already alerts on - closes that gap: a correction only ever holds
-        // when the projection is flat or has genuinely improved since the last alert, never merely
-        // because the instantaneous rate happens to read calm.
         val correctionAnchor = if (isLowSide) {
             PlateauCoordinator.activeLowCorrectionAnchorMs(context)
         } else {
@@ -1028,21 +1024,38 @@ object AlertCoordinator {
         val stillWorseningProjection = worsenedBy > 0
         val correctionHolding = inCorrectionGrace && !stillWorseningProjection
 
-        if (worsenedBy >= YELLOW_MATERIAL_WORSENING_MGDL && !correctionHolding) {
-            // Deliberately NOT gated by MIN_YELLOW_REALERT_GAP_MS: the projection moving 20+
-            // further into danger is real new information, not a flap.
-            AlertNotifier.showYellowAlert(context, reading.value, reading.projected, reading.ratePerMinute, projectedExtended = reading.projectedExtended)
+        val rate = reading.ratePerMinute
+        val isCrazyRate = rate != null && kotlin.math.abs(rate) >= 3.0
+
+        // On continuing checks (check 2 and 3):
+        // On low side: material worsening (worsenedBy >= 20) or crazy rate re-alerts
+        // On high side: only re-alert audibly if crazy spike (|rate| >= 3.0) or severe jump into red (>= 250 with +30 jump)
+        val shouldRealert = if (isLowSide) {
+            (worsenedBy >= YELLOW_MATERIAL_WORSENING_MGDL || isCrazyRate) && !correctionHolding
+        } else {
+            (isCrazyRate || ((reading.projected ?: reading.value) >= SeverityEngine.DEFAULT_RED_HIGH && worsenedBy >= 30)) && !correctionHolding
+        }
+
+        if (shouldRealert) {
+            AlertNotifier.showYellowAlert(
+                context, reading.value, reading.projected, reading.ratePerMinute,
+                projectedExtended = reading.projectedExtended,
+                silent = false,
+            )
             prefs.edit {
                 putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected)
                 putLong(KEY_LAST_YELLOW_FIRED_AT, now)
             }
             recordAlertAction(context, readingDate, "audible_yellow")
         } else {
-            // A correction holding this re-alert off still moves the comparison baseline forward
-            // - same reasoning as fireRedIfWarranted's held-state tracking - so a LATER reading
-            // that's still worsening despite the correction is judged against where the
-            // projection was NOW, not against a stale pre-correction number that would otherwise
-            // make worsenedBy balloon the moment the grace window lapses.
+            // Update tray notification quietly on material changes so status stays accurate without audio/TTS fatigue
+            if (worsenedBy > 0 && !suppressAlert) {
+                AlertNotifier.showYellowAlert(
+                    context, reading.value, reading.projected, reading.ratePerMinute,
+                    projectedExtended = reading.projectedExtended,
+                    silent = true,
+                )
+            }
             if (correctionHolding) prefs.edit { putInt(KEY_YELLOW_LAST_ALERTED_PROJECTED, projected) }
             recordAlertAction(context, readingDate, "suppressed_cooldown")
         }
