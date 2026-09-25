@@ -101,6 +101,46 @@
                 android:textStyle="bold"
                 android:visibility="gone" />
 
+            <!-- Shown during Yellow Alert to encourage waiting for 2nd/3rd reading before acting -->
+            <LinearLayout
+                android:id="@+id/yellowGuidanceBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#2E2405"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:layout_marginBottom="6dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tvYellowGuidanceText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="⏳ Yellow Alert: Wait for 2nd reading before treating."
+                    android:textColor="#FDE047"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btnBannerLearnWhy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp"
+                    android:paddingTop="4dp"
+                    android:paddingBottom="4dp"
+                    android:text="Learn Why ▶"
+                    android:textColor="#FACC15"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:background="?attr/selectableItemBackgroundBorderless" />
+            </LinearLayout>
+
             <!-- Shown only when Do Not Disturb access was previously granted and has
                  since been revoked (see AlertChannels.dndAccessRegressed) -->
             <TextView
@@ -496,6 +536,10 @@
 
             <LinearLayout android:id="@+id/drawerVoiceItem" style="@style/DrawerItem">
                 <TextView style="@style/DrawerItemLabel" android:text="🗣️ Voice Alerts" />
+            </LinearLayout>
+
+            <LinearLayout android:id="@+id/drawerTutorialItem" style="@style/DrawerItem">
+                <TextView style="@style/DrawerItemLabel" android:text="🎓 Alert Guide &amp; Practice" />
             </LinearLayout>
 
             <!-- ================= SECTION 3: SETTINGS & DATA ================= -->

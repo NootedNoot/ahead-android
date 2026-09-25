@@ -73,7 +73,14 @@ object GlucoseNotifier {
                 // notification's own "why am I seeing this" affordance
                 // (tap/swipe to expand). Severity "none" is unchanged - no
                 // alert to explain, so the technical line stays as-is.
-                if (state.severity == "red" || state.severity == "yellow") {
+                if (state.severity == "yellow") {
+                    val waitMsg = if ((state.ratePerMinute ?: 0.0) < 0) {
+                        " · ⏳ Wait for 2nd reading before treating"
+                    } else {
+                        " · ⏳ Wait for 2nd reading before correcting"
+                    }
+                    "${AlertExplainer.oneLiner(state.value, state.ratePerMinute, state.projected, state.projectedExtended)}$waitMsg · as of ${timeFormatter.format(state.readingTime)}"
+                } else if (state.severity == "red") {
                     "${AlertExplainer.oneLiner(state.value, state.ratePerMinute, state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
                 } else {
                     "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
@@ -182,9 +189,16 @@ object GlucoseNotifier {
                     "$prefix$ONGOING_MARKER${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}"
                 )
                 views.setTextViewText(R.id.tv_time, "As of ${timeFormatter.format(state.readingTime)}")
+                val waitMsg = if (state.severity == "yellow") {
+                    if ((state.ratePerMinute ?: 0.0) < 0) {
+                        " · ⏳ Wait for 2nd reading before treating"
+                    } else {
+                        " · ⏳ Wait for 2nd reading before correcting"
+                    }
+                } else ""
                 views.setTextViewText(
                     R.id.tv_delta,
-                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}"
+                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}$waitMsg"
                 )
             }
             is GlucoseDisplayState.Stale -> {

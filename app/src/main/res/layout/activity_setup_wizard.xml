@@ -137,6 +137,14 @@
             <LinearLayout style="@style/WizardCard">
                 <TextView style="@style/WizardTitle" android:text="@string/wizard_done_title" />
                 <TextView style="@style/WizardBody" android:text="@string/wizard_done_body" />
+
+                <Button
+                    android:id="@+id/btn_take_tutorial"
+                    style="@style/WizardButtonGhost"
+                    android:layout_width="match_parent"
+                    android:layout_marginTop="20dp"
+                    android:text="🎓 Take 2-Minute Alert Tour"
+                    android:textColor="@color/accent2" />
             </LinearLayout>
         </ScrollView>
     </ViewFlipper>

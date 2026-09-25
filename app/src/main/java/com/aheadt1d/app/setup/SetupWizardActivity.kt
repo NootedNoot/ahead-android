@@ -321,6 +321,9 @@ class SetupWizardActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_notif_dnd).setOnClickListener {
             runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
         }
+        findViewById<Button>(R.id.btn_take_tutorial).setOnClickListener {
+            startActivity(com.aheadt1d.app.tutorial.InteractiveTutorialActivity.createIntent(this))
+        }
     }
 
     private fun selectPath(path: String) {

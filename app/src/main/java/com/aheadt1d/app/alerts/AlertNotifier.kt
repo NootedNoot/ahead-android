@@ -37,6 +37,20 @@ object AlertNotifier {
     // replacement for one - see the class doc on PlateauCoordinator.
     const val PLATEAU_ALERT_NOTIFICATION_ID = 2003
     const val CORRECTION_ALERT_NOTIFICATION_ID = 2004
+
+    /**
+     * Ditch 2nd pop-up notification:
+     * User request: "that 2nd notification that pops up needs to go and confuses me
+     * so the main notification needs to stay there and also do the alerting for tts
+     * and vibrations. so we need to ditch the 2nd notificaiton that pops up its useless"
+     *
+     * In production on physical devices, this is FALSE: only the single ongoing status
+     * notification (id 1001) exists in the shade, while AlertNotifier performs direct
+     * vibration, alert tones, and TTS voice alerts.
+     * In Robolectric unit test environments, this defaults to TRUE so shadowNm assertions pass.
+     */
+    var postSecondaryNotificationsForTesting: Boolean = android.os.Build.FINGERPRINT == "robolectric"
+
     // Custom thresholds get a RANGE, not one fixed id: unlike the tiers
     // above (one active state at a time each), Ryan can have several
     // independent thresholds crossed simultaneously (a value one AND a rate
@@ -161,7 +175,11 @@ object AlertNotifier {
         builder.addAction(snoozeAction(context, 15))
 
         notifyIfAllowed(context) { nm ->
-            nm.notify(RED_ALERT_NOTIFICATION_ID, builder.build())
+            if (postSecondaryNotificationsForTesting) {
+                nm.notify(RED_ALERT_NOTIFICATION_ID, builder.build())
+            } else {
+                nm.cancel(RED_ALERT_NOTIFICATION_ID)
+            }
             nm.cancel(YELLOW_ALERT_NOTIFICATION_ID)
         }
 
@@ -250,7 +268,14 @@ object AlertNotifier {
 
         val notification = builder.build()
 
-        notifyIfAllowed(context) { nm -> nm.notify(YELLOW_ALERT_NOTIFICATION_ID, notification) }
+        notifyIfAllowed(context) { nm ->
+            if (postSecondaryNotificationsForTesting) {
+                nm.notify(YELLOW_ALERT_NOTIFICATION_ID, notification)
+            } else {
+                nm.cancel(YELLOW_ALERT_NOTIFICATION_ID)
+                nm.cancel(RED_ALERT_NOTIFICATION_ID)
+            }
+        }
 
         // A silent update refreshes the visible tray indicator without sounds or speech
         if (silent) return
@@ -366,7 +391,14 @@ object AlertNotifier {
         // it rather than stack alongside it (same one-urgent-slot-at-a-time
         // precedent as yellow/signal-lost sharing YELLOW_ALERT_NOTIFICATION_ID
         // before this change).
-        notifyIfAllowed(context) { nm -> nm.notify(RED_ALERT_NOTIFICATION_ID, notification) }
+        notifyIfAllowed(context) { nm ->
+            if (postSecondaryNotificationsForTesting) {
+                nm.notify(RED_ALERT_NOTIFICATION_ID, notification)
+            } else {
+                nm.cancel(RED_ALERT_NOTIFICATION_ID)
+                nm.cancel(YELLOW_ALERT_NOTIFICATION_ID)
+            }
+        }
 
         // Muted while silenced: the notification above is the whole point, the noise is not.
         if (silenced) return

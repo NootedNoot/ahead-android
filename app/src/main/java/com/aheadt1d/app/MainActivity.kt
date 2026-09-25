@@ -141,6 +141,13 @@ class MainActivity : AppCompatActivity() {
             runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
         }
 
+        findViewById<View>(R.id.yellowGuidanceBanner)?.setOnClickListener {
+            startActivity(com.aheadt1d.app.tutorial.InteractiveTutorialActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.btnBannerLearnWhy)?.setOnClickListener {
+            startActivity(com.aheadt1d.app.tutorial.InteractiveTutorialActivity.createIntent(this))
+        }
+
         findViewById<View>(R.id.uploadRevokedBanner).setOnClickListener {
             startActivity(LoginActivity.createIntent(this))
         }
@@ -223,6 +230,10 @@ class MainActivity : AppCompatActivity() {
         findViewById<View>(R.id.drawerVoiceItem).setOnClickListener {
             drawerLayout.closeDrawer(GravityCompat.START)
             startActivity(VoiceAlertsActivity.createIntent(this))
+        }
+        findViewById<View>(R.id.drawerTutorialItem)?.setOnClickListener {
+            drawerLayout.closeDrawer(GravityCompat.START)
+            startActivity(com.aheadt1d.app.tutorial.InteractiveTutorialActivity.createIntent(this))
         }
         findViewById<View>(R.id.drawerCustomThresholdsItem).setOnClickListener {
             drawerLayout.closeDrawer(GravityCompat.START)
@@ -1082,6 +1093,20 @@ class MainActivity : AppCompatActivity() {
         }
         val rate = reading.ratePerMinute
         severityView.text = describe(reading.severity, rate)
+
+        val yellowGuidanceBanner = findViewById<View>(R.id.yellowGuidanceBanner)
+        val tvYellowGuidanceText = findViewById<TextView>(R.id.tvYellowGuidanceText)
+        if (reading.severity == "yellow") {
+            yellowGuidanceBanner?.visibility = View.VISIBLE
+            val guidance = when {
+                rate != null && rate < 0 -> "⏳ Yellow Alert: Wait for 2nd or 3rd reading before treating."
+                rate != null && rate > 0 -> "⏳ Yellow Alert: Wait for 2nd reading before correcting."
+                else -> "⏳ Yellow Alert: Wait for 2nd reading to confirm trend."
+            }
+            tvYellowGuidanceText?.text = guidance
+        } else {
+            yellowGuidanceBanner?.visibility = View.GONE
+        }
 
         if (rate == null || reading.projected == null) {
             projectionContainer.visibility = View.GONE
