@@ -29,6 +29,9 @@ import com.aheadt1d.app.events.EventTag
 import com.aheadt1d.app.events.UserEvent
 import com.aheadt1d.app.health.GlucosePoint
 import com.aheadt1d.app.health.HealthConnectManager
+import com.aheadt1d.app.notifications.GlucoseDisplayState
+import com.aheadt1d.app.notifications.GlucoseTrendArrow
+import com.aheadt1d.app.notifications.toDisplayState
 import com.aheadt1d.app.report.ReportExportActivity
 import com.aheadt1d.app.state.LatestTrendRepository
 import com.github.mikephil.charting.charts.LineChart
@@ -171,7 +174,15 @@ class GraphActivity : AppCompatActivity() {
     private fun observeWorkerRuns() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                LatestTrendRepository.lastCheckedAt.collect { if (viewRange == null) refreshChart() }
+                launch {
+                    LatestTrendRepository.lastCheckedAt.collect { if (viewRange == null) refreshChart() }
+                }
+                launch {
+                    LatestTrendRepository.latestRawReading.collect { if (viewRange == null) refreshChart() }
+                }
+                launch {
+                    LatestTrendRepository.latestTrend.collect { if (viewRange == null) refreshChart() }
+                }
             }
         }
     }
@@ -433,16 +444,33 @@ class GraphActivity : AppCompatActivity() {
         heroGlucoseValueText.text = latest.sgv.toString()
         heroGlucoseValueText.setTextColor(SeverityColoring.colorInt(latest.sgv))
 
-        val trend = LatestTrendRepository.latestTrend.value
-        if (trend != null && viewRange == null) {
-            val arrow = com.aheadt1d.app.notifications.GlucoseTrendArrow.fromRatePerMinute(trend.rate)
-            heroTrendArrowText.text = arrow.label
-            val rateVal = trend.rate
-            val rateFormatted = if (rateVal != null) String.format(Locale.US, "%+.1f/m", rateVal) else "Live"
-            heroRateText.text = rateFormatted
+        if (viewRange == null) {
+            val rawReading = LatestTrendRepository.latestRawReading.value
+            val trend = LatestTrendRepository.latestTrend.value
+            val blocked = LatestTrendRepository.readBlocked.value
+            val displayState = toDisplayState(applicationContext, rawReading, trend, blocked)
+            when (displayState) {
+                is GlucoseDisplayState.Reading -> {
+                    heroTrendArrowText.text = displayState.arrow.label
+                    val rateVal = displayState.ratePerMinute
+                    heroRateText.text = if (rateVal != null) {
+                        String.format(Locale.US, "%+.1f mg/dL/min", rateVal)
+                    } else {
+                        "Live"
+                    }
+                }
+                is GlucoseDisplayState.Stale -> {
+                    heroTrendArrowText.text = displayState.lastArrow.label
+                    heroRateText.text = "Stale"
+                }
+                GlucoseDisplayState.NoData -> {
+                    heroTrendArrowText.text = ""
+                    heroRateText.text = "Live"
+                }
+            }
         } else {
             heroTrendArrowText.text = ""
-            heroRateText.text = if (viewRange == null) "Live" else "Historical"
+            heroRateText.text = "Historical"
         }
 
         val inRangeCount = points.count { it.sgv in 70..180 }
