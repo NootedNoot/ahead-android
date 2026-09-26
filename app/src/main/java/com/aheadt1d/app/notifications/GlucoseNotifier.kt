@@ -75,7 +75,7 @@ object GlucoseNotifier {
                 // alert to explain, so the technical line stays as-is.
                 if (state.severity == "yellow") {
                     val checkNum = state.yellowCheckNumber.coerceIn(1, 3)
-                    val progTag = if (checkNum < 3) " [Check $checkNum/3]" else ""
+                    val progTag = if (checkNum < 3) " [Check $checkNum/3]" else " [Confirmed]"
                     "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}$progTag · as of ${timeFormatter.format(state.readingTime)}"
                 } else if (state.severity == "red") {
                     "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
@@ -187,10 +187,13 @@ object GlucoseNotifier {
                 )
                 views.setTextViewText(R.id.tv_time, "As of ${timeFormatter.format(state.readingTime)}")
                 val waitMsg = if (state.severity == "yellow") {
-                    if ((state.ratePerMinute ?: 0.0) < 0) {
-                        " · ⏳ Wait for 2nd reading before treating"
-                    } else {
-                        " · ⏳ Wait for 2nd reading before correcting"
+                    val checkNum = state.yellowCheckNumber.coerceIn(1, 3)
+                    val isDrop = (state.ratePerMinute ?: 0.0) < 0
+                    val verb = if (isDrop) "treating" else "correcting"
+                    when (checkNum) {
+                        1 -> " · ⏳ Check 1/3 (10m left) · Observe reading 2 before $verb"
+                        2 -> " · ⏳ Check 2/3 (5m left) · Observing curve braking"
+                        else -> " · ⏳ Check 3/3 · Trend confirmed · Review curve"
                     }
                 } else ""
                 views.setTextViewText(
