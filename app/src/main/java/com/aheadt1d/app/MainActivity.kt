@@ -520,7 +520,7 @@ class MainActivity : AppCompatActivity() {
                 "• Version: $buildLabel\n" +
                 "• Engine: RateMath v1.2 (Real-time velocity & acceleration analysis)\n" +
                 "• CGM Sources: Health Connect, Dexcom, Juggluco, AheadBLE\n" +
-                "• Cloud Sync: mouse-jessica-hazardous-praise.trycloudflare.com\n\n" +
+                "• Cloud Sync: ${android.net.Uri.parse(BuildConfig.BACKEND_BASE_URL).host ?: BuildConfig.BACKEND_BASE_URL}\n\n" +
                 "CLINICAL DECISION SUPPORT NOTICE:\n" +
                 "Ahead provides algorithmic decision support and predictive alerts for T1D management. Ahead does NOT replace professional medical advice, clinical diagnosis, or emergency care. Always perform a fingerstick blood glucose check before taking clinical action if symptoms disagree with readings."
             )
