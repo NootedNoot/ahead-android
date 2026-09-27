@@ -54,6 +54,7 @@ sealed class GlucoseDisplayState {
         // already has in hand, rather than reaching back into LatestTrendRepository's raw
         // reading itself. Feeds AlertCoordinator.stabilityReadingsRequired.
         val causeTier: org.aheadt1d.ratemath.CauseTier? = null,
+        val recoveringFromLow: Boolean = false,
         // Tracks reading count (1, 2, or 3) during a Yellow alert progression
         val yellowCheckNumber: Int = 1
     ) : GlucoseDisplayState()
@@ -206,6 +207,7 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
         projectedExtended = finalExtended,
         ratePerMinute = rate,
         causeTier = raw.causeTier,
+        recoveringFromLow = raw.recoveringFromLow,
         yellowCheckNumber = yellowCheck
     )
 }

@@ -126,11 +126,11 @@ object VoiceAlertEngine {
         if (isHigh) {
             val now = System.currentTimeMillis()
             val timeSinceLast = now - lastHighSpokenAtMs
-            val isCrazyRate = rate != null && kotlin.math.abs(rate) >= 3.0
-            val isSevereJump = glucoseValue != null && lastHighSpokenValue > 0 && (glucoseValue - lastHighSpokenValue) >= 30
+            val isCrazyHighRate = rate != null && kotlin.math.abs(rate) >= 3.0 && (glucoseValue ?: 0) >= 180
+            val isSevereJump = glucoseValue != null && lastHighSpokenValue > 0 && (glucoseValue - lastHighSpokenValue) >= 30 && glucoseValue >= 180
             val isFirstHigh = lastHighSpokenAtMs == 0L
 
-            if (!isFirstHigh && !isCrazyRate && !isSevereJump && timeSinceLast < HIGH_VOICE_COOLDOWN_MS) {
+            if (!isFirstHigh && !isCrazyHighRate && !isSevereJump && timeSinceLast < HIGH_VOICE_COOLDOWN_MS) {
                 Log.d(TAG, "Skipping high voice $category: throttled (${timeSinceLast / 60_000}m elapsed < 30m cooldown, val=$glucoseValue, rate=$rate)")
                 return
             }

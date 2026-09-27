@@ -72,6 +72,7 @@ class AlertCoordinatorTest {
         severity: String,
         ratePerMinute: Double? = 0.0,
         projected: Int? = null,
+        recoveringFromLow: Boolean = false,
     ) = GlucoseDisplayState.Reading(
         value = value,
         arrow = GlucoseTrendArrow.FLAT,
@@ -82,6 +83,7 @@ class AlertCoordinatorTest {
         projected = projected,
         projectedExtended = null,
         ratePerMinute = ratePerMinute,
+        recoveringFromLow = recoveringFromLow,
     )
 
     private fun trend(date: Long, currentValue: Int, severity: String) = LatestTrend(
@@ -647,12 +649,12 @@ class AlertCoordinatorTest {
     }
 
     @Test
-    fun `post-hypo recovery rise inside 40 minutes is suppressed under 240 ceiling`() {
+    fun `post-hypo recovery rise inside 60 minutes is suppressed under 240 ceiling`() {
         // Step 1: Caught a low early at 82 mg/dL -> yellow alert fires
         AlertCoordinator.evaluate(context, reading(value = 80, severity = "yellow", ratePerMinute = -1.5), trend(1L, 80, "yellow"))
         
         // Step 2: Treated with juice, now climbing fast (+3.5 mg/dL/min, value 110, projected 157)
-        // Inside the 40-minute recovery window, this must NOT fire another yellow alert.
+        // Inside the 60-minute recovery window, this must NOT fire another yellow alert.
         val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
         context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
 
@@ -663,7 +665,7 @@ class AlertCoordinatorTest {
         )
 
         val yellowNotif = shadowNm.getNotification(yellowNotificationId)
-        assertNull("expected yellow alert to be suppressed during 40-minute post-hypo recovery", yellowNotif)
+        assertNull("expected yellow alert to be suppressed during 60-minute post-hypo recovery", yellowNotif)
 
         // Step 3: If glucose blows past the 240 ceiling (e.g. 245), alert is allowed
         AlertCoordinator.evaluate(
@@ -673,6 +675,25 @@ class AlertCoordinatorTest {
         )
         val ceilingNotif = shadowNm.getNotification(yellowNotificationId)
         assertTrue("expected alert once crossing the 240 mg/dL recovery ceiling", ceilingNotif != null)
+    }
+
+    @Test
+    fun `post-hypo recovery at 129 rising fast does not fire repeated audible alerts on 60-second ticks`() {
+        // Step 1: Low event was recorded
+        AlertCoordinator.evaluate(context, reading(value = 75, severity = "yellow", ratePerMinute = -1.0), trend(1L, 75, "yellow"))
+        val yellowNotificationId = AlertNotifier.YELLOW_ALERT_NOTIFICATION_ID
+        context.getSystemService(NotificationManager::class.java).cancel(yellowNotificationId)
+
+        // Step 2: 129 rising fast (+3.8 mg/dL/min) with recoveringFromLow
+        val r = reading(value = 129, severity = "yellow", ratePerMinute = 3.8, projected = 186, recoveringFromLow = true)
+        AlertCoordinator.evaluate(context, r, trend(2L, 129, "yellow"))
+
+        // Alert must be suppressed
+        assertNull("must stay quiet during post-hypo recovery at 129", shadowNm.getNotification(yellowNotificationId))
+
+        // Step 3: 60-second heartbeat tick with same reading date
+        AlertCoordinator.evaluate(context, r, trend(2L, 129, "yellow"))
+        assertNull("must not fire on 60-second heartbeat tick", shadowNm.getNotification(yellowNotificationId))
     }
 
     @Test

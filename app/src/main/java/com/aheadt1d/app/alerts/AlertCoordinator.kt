@@ -119,7 +119,7 @@ object AlertCoordinator {
     // Post-hypo recovery grace period: for 40 minutes after a treated low
     // (<= 80 mg/dL), intentional fast rises (+2.5, +3.5 mg/dL/min) and expected
     // rebound spikes stay completely silent unless glucose breaches 240 mg/dL.
-    private const val POST_HYPO_RECOVERY_GRACE_WINDOW_MS = 40 * 60_000L
+    private const val POST_HYPO_RECOVERY_GRACE_WINDOW_MS = 60 * 60_000L
     private const val RECOVERY_REBOUND_CEILING_MGDL = 240
     // Floor under the low-side "recovery just stopped" instant re-fire below.
     // 2026-08-01: that rule had no minimum gap at all, so a low wobbling
@@ -403,7 +403,7 @@ object AlertCoordinator {
         // post-hypo recovery grace window below, which is deliberately about "a treated low just
         // happened" more broadly than the strict 70 mg/dL low/not-low label - unrelated to the
         // low-side red stability buffer (see stabilityReadingsRequired's doc).
-        if (reading.value <= SeverityEngine.DEFAULT_YELLOW_LOW || isLowSide(reading.value, reading.projected)) {
+        if (reading.value <= SeverityEngine.DEFAULT_YELLOW_LOW || reading.recoveringFromLow || isLowSide(reading.value, reading.projected)) {
             prefs.edit { putLong(KEY_LAST_LOW_EVENT_AT, now) }
         }
 
@@ -929,16 +929,16 @@ object AlertCoordinator {
     ) {
         val projected = reading.projected
 
-        // Post-hypo recovery grace period: 40 minutes after treating a low,
+        // Post-hypo recovery grace period: 60 minutes after treating a low,
         // intentional rises out of the low (e.g. drinking juice) are healthy
         // and expected. Mute yellow alerts while climbing under 240 mg/dL.
         val lastLowAt = prefs.getLong(KEY_LAST_LOW_EVENT_AT, 0L)
-        val inPostHypoGraceWindow = now - lastLowAt <= POST_HYPO_RECOVERY_GRACE_WINDOW_MS
+        val inPostHypoGraceWindow = (now - lastLowAt <= POST_HYPO_RECOVERY_GRACE_WINDOW_MS) || reading.recoveringFromLow
         val isRecoveringRise = reading.ratePerMinute != null && reading.ratePerMinute > 0 && reading.value < RECOVERY_REBOUND_CEILING_MGDL
 
         if (inPostHypoGraceWindow && isRecoveringRise) {
             if (BuildConfig.DEBUG) {
-                Log.d("AlertCoordinator", "Yellow alert suppressed: in 40m post-hypo recovery grace window (value=${reading.value}, rate=${reading.ratePerMinute})")
+                Log.d("AlertCoordinator", "Yellow alert suppressed: in post-hypo recovery grace window (value=${reading.value}, rate=${reading.ratePerMinute})")
             }
             // 2026-09-23: a downgrade from red must still leave SOMETHING visible, even muted -
             // AlertCoordinator's caller already cancelled the red notification right before this
@@ -966,12 +966,13 @@ object AlertCoordinator {
             val isCrazyRate = rate != null && kotlin.math.abs(rate) >= 3.0
             val isEscalatedHigh = (reading.projected ?: reading.value) >= RECOVERY_REBOUND_CEILING_MGDL || reading.value >= RECOVERY_REBOUND_CEILING_MGDL
 
-            // Only audibly alert on initial yellow entry if it's an extreme rate swing, an escalated high (>=240), a fast rise (>=2.0), or a low-side drop
+            // Only audibly alert on initial yellow entry if it's an escalated high (>=240), an extreme rate swing on an actual high (>=160), a fast rise in vulnerable high range (>=160), or a low-side drop
             val shouldAudiblyAlert = when {
                 downgradedFromRed -> false
-                isCrazyRate -> true
-                isEscalatedHigh -> true
                 !isHighSide -> true
+                isEscalatedHigh -> true
+                reading.value < 160 -> false // In-range readings (<160) stay quiet on high side!
+                isCrazyRate -> true
                 isFastRise -> true
                 else -> false // Gentle rises (e.g. +0.6 at 200 mg/dL) stay completely quiet audibly
             }
@@ -1027,16 +1028,22 @@ object AlertCoordinator {
         val rate = reading.ratePerMinute
         val isCrazyRate = rate != null && kotlin.math.abs(rate) >= 3.0
 
-        // On continuing checks (check 2 and 3):
-        // On low side: material worsening (worsenedBy >= 20) or crazy rate re-alerts
-        // On high side: only re-alert audibly if crazy spike (|rate| >= 3.0) or severe jump into red (>= 250 with +30 jump)
+        // On continuing checks (check 2 and 3, and 60-second service heartbeat):
+        // On low side: material worsening (worsenedBy >= 20) or crazy rate drop re-alerts
+        // On high side: only re-alert audibly if crazy spike (|rate| >= 3.0) on an actual high (value >= 180 or projected >= 250),
+        // or severe jump into red (>= 250 with +30 jump) - NEVER for in-range climbs or post-hypo rebounds!
+        val isHighCrazySpike = isCrazyRate && (reading.value >= 180 || (reading.projected ?: reading.value) >= SeverityEngine.DEFAULT_RED_HIGH) && !inPostHypoGraceWindow
+        val isSevereHighJump = (reading.projected ?: reading.value) >= SeverityEngine.DEFAULT_RED_HIGH && worsenedBy >= 30 && !inPostHypoGraceWindow
+
         val shouldRealert = if (isLowSide) {
             (worsenedBy >= YELLOW_MATERIAL_WORSENING_MGDL || isCrazyRate) && !correctionHolding
         } else {
-            (isCrazyRate || ((reading.projected ?: reading.value) >= SeverityEngine.DEFAULT_RED_HIGH && worsenedBy >= 30)) && !correctionHolding
+            (isHighCrazySpike || isSevereHighJump) && !correctionHolding
         }
 
-        if (shouldRealert) {
+        val floorCleared = now - prefs.getLong(KEY_LAST_YELLOW_FIRED_AT, 0L) >= MIN_YELLOW_REALERT_GAP_MS
+
+        if (shouldRealert && floorCleared) {
             AlertNotifier.showYellowAlert(
                 context, reading.value, reading.projected, reading.ratePerMinute,
                 projectedExtended = reading.projectedExtended,
