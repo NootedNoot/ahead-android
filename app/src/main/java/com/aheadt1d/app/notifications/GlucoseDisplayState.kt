@@ -56,7 +56,8 @@ sealed class GlucoseDisplayState {
         val causeTier: org.aheadt1d.ratemath.CauseTier? = null,
         val recoveringFromLow: Boolean = false,
         // Tracks reading count (1, 2, or 3) during a Yellow alert progression
-        val yellowCheckNumber: Int = 1
+        val yellowCheckNumber: Int = 1,
+        val trendPhase: org.aheadt1d.ratemath.TrendPhase? = null
     ) : GlucoseDisplayState()
 
     /** A reading exists but is older than the staleness threshold. lastArrow is
@@ -161,8 +162,12 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
         decision.severity.takeIf { it != "none" }
     }
 
-    val finalProjected = decision.projected15m
-    val finalExtended = decision.projectedExtended ?: rate?.let { (raw.value + it * 30).roundToInt() }
+    val displayRate = raw.displayRate ?: rate
+    val trendPhaseEnum = raw.trendPhase?.let {
+        runCatching { org.aheadt1d.ratemath.TrendPhase.valueOf(it) }.getOrNull()
+    }
+    val finalProjected = raw.projectedPhysiological15m ?: decision.projected15m
+    val finalExtended = raw.projectedPhysiological30m ?: decision.projectedExtended ?: displayRate?.let { (raw.value + it * 30).roundToInt() }
 
     val prefs = context.getSharedPreferences("ahead_alert_state", Context.MODE_PRIVATE)
     val yellowCheck = if (finalSeverity == "yellow") {
@@ -198,16 +203,17 @@ fun toDisplayState(context: Context, raw: RawReading?, trend: LatestTrend?, bloc
 
     return GlucoseDisplayState.Reading(
         value = raw.value,
-        arrow = GlucoseTrendArrow.fromRatePerMinute(rate),
+        arrow = GlucoseTrendArrow.fromRatePerMinute(displayRate),
         readingTime = raw.time,
         deltaFromPrevious = raw.deltaFromPrevious,
-        trendIsComputed = rate != null,
+        trendIsComputed = displayRate != null,
         severity = finalSeverity,
         projected = finalProjected,
         projectedExtended = finalExtended,
-        ratePerMinute = rate,
+        ratePerMinute = displayRate,
         causeTier = raw.causeTier,
         recoveringFromLow = raw.recoveringFromLow,
-        yellowCheckNumber = yellowCheck
+        yellowCheckNumber = yellowCheck,
+        trendPhase = trendPhaseEnum
     )
 }

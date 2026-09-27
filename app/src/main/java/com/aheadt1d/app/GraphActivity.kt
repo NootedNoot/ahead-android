@@ -453,8 +453,9 @@ class GraphActivity : AppCompatActivity() {
                 is GlucoseDisplayState.Reading -> {
                     heroTrendArrowText.text = displayState.arrow.label
                     val rateVal = displayState.ratePerMinute
+                    val phaseTag = displayState.trendPhase?.let { " (${it.chipLabel})" } ?: ""
                     heroRateText.text = if (rateVal != null) {
-                        String.format(Locale.US, "%+.1f mg/dL/min", rateVal)
+                        String.format(Locale.US, "%+.1f mg/dL/min%s", rateVal, phaseTag)
                     } else {
                         "Live"
                     }
@@ -646,20 +647,18 @@ class GraphActivity : AppCompatActivity() {
     private fun buildGhostLineEntries(windowed: List<GlucosePoint>, anchor: Instant): List<Entry> {
         val last = windowed.lastOrNull() ?: return emptyList()
         val ratePoints = windowed.map { RatePoint(it.time.toEpochMilli(), it.sgv) }
-        val rates = RateMath.recentRates(ratePoints, GHOST_RATE_SAMPLES)
-        val currentRate = rates.lastOrNull() ?: return emptyList()
-        val trajectory = RateMath.assessRateTrajectory(rates)
-        val decayPerStep = if (trajectory.kind == TrajectoryKind.DECELERATING) {
-            trajectory.avgDeltaPerStep
-        } else {
-            0.0
-        }
-        val decayed = RateMath.projectWithDecay(last.sgv, currentRate, decayPerStep, GHOST_PROJECTION_MINUTES)
+        val analysis = org.aheadt1d.ratemath.TrendAnalysisEngine.analyze(ratePoints) ?: return emptyList()
 
         val entries = mutableListOf(Entry(minutesFromAnchor(anchor, last.time), last.sgv.toFloat()))
-        decayed.forEach { point ->
-            val t = last.time.plusSeconds(point.minutesAhead * 60L)
-            entries.add(Entry(minutesFromAnchor(anchor, t), point.value.toFloat()))
+        for (m in 5..GHOST_PROJECTION_MINUTES step 5) {
+            val proj = org.aheadt1d.ratemath.TrendAnalysisEngine.calculatePhysiologicalProjection(
+                last.sgv,
+                analysis.displayRate,
+                analysis.phase,
+                m
+            )
+            val t = last.time.plusSeconds(m * 60L)
+            entries.add(Entry(minutesFromAnchor(anchor, t), proj.toFloat()))
         }
         return entries
     }

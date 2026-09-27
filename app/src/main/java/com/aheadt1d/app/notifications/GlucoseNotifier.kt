@@ -63,26 +63,21 @@ object GlucoseNotifier {
             // Title: "142 mg/dL ↓ (-4 mg/dL)" - the parenthesized value is the
             // raw delta since the previous reading, deliberately labeled with
             // units to distinguish it from the per-minute rate on line two.
-            is GlucoseDisplayState.Reading -> Triple(
-                NotificationIconFactory.readingIcon(context, state.value, state.arrow),
-                "$ONGOING_MARKER${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}",
-                // Alert Transparency: during yellow/red, the collapsed line
-                // becomes the plain-language "why" (AlertExplainer) instead
-                // of the raw rate/projection numbers - those move to the
-                // expanded view below, which already exists as this
-                // notification's own "why am I seeing this" affordance
-                // (tap/swipe to expand). Severity "none" is unchanged - no
-                // alert to explain, so the technical line stays as-is.
-                if (state.severity == "yellow") {
+            is GlucoseDisplayState.Reading -> {
+                val phasePrefix = if (state.trendPhase != null) "${state.trendPhase.chipLabel} · " else ""
+                val lineText = if (state.severity == "yellow") {
                     val checkNum = state.yellowCheckNumber.coerceIn(1, 3)
                     val progTag = if (checkNum < 3) " [Check $checkNum/3]" else " [Confirmed]"
-                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}$progTag · as of ${timeFormatter.format(state.readingTime)}"
-                } else if (state.severity == "red") {
-                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
+                    "$phasePrefix${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}$progTag · as of ${timeFormatter.format(state.readingTime)}"
                 } else {
-                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
+                    "$phasePrefix${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
                 }
-            )
+                Triple(
+                    NotificationIconFactory.readingIcon(context, state.value, state.arrow),
+                    "$ONGOING_MARKER${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}",
+                    lineText
+                )
+            }
             is GlucoseDisplayState.Stale -> Triple(
                 NotificationIconFactory.warningIcon(context),
                 "⚠️ No new data — ${formatAge(state.ageMinutes)} ago",

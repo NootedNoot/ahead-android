@@ -250,7 +250,11 @@ data class RawReading(
     // computed by GlucoseCheckRunner. Both MainActivity and GlucoseCheckRunner now use
     // [withComputedCauseTier] to populate the true CauseTier before writing, and
     // LatestTrendRepository.updateRawReading preserves non-null tiers as defense in depth.
-    val causeTier: org.aheadt1d.ratemath.CauseTier? = null
+    val causeTier: org.aheadt1d.ratemath.CauseTier? = null,
+    val trendPhase: String? = null,
+    val displayRate: Double? = null,
+    val projectedPhysiological15m: Int? = null,
+    val projectedPhysiological30m: Int? = null,
 ) {
     companion object {
         fun fromPoints(
@@ -270,6 +274,7 @@ data class RawReading(
             val isLowSide = latest.sgv < 125
             val excursionDurationMinutes = org.aheadt1d.ratemath.TreatmentEffectWindow
                 .excursionDurationMinutes(ratePoints, isLow = isLowSide)
+            val trendAnalysis = org.aheadt1d.ratemath.TrendAnalysisEngine.analyze(ratePoints)
 
             return RawReading(
                 value = latest.sgv,
@@ -281,7 +286,11 @@ data class RawReading(
                 recentRates = recentRates,
                 severityRatePerMinute = severityRatePerMinute,
                 excursionDurationMinutes = excursionDurationMinutes,
-                rateMethodsAgree = rateMethodsAgree
+                rateMethodsAgree = rateMethodsAgree,
+                trendPhase = trendAnalysis?.phase?.name,
+                displayRate = trendAnalysis?.displayRate,
+                projectedPhysiological15m = trendAnalysis?.projected15m,
+                projectedPhysiological30m = trendAnalysis?.projected30m,
             )
         }
     }
@@ -413,6 +422,10 @@ object RawReadingStore {
     private const val KEY_EXCURSION_DURATION = "excursion_duration_minutes"
     private const val KEY_RATE_METHODS_AGREE = "rate_methods_agree"
     private const val KEY_CAUSE_TIER = "cause_tier"
+    private const val KEY_TREND_PHASE = "trend_phase"
+    private const val KEY_DISPLAY_RATE = "display_rate"
+    private const val KEY_PROJ_15M = "proj_15m"
+    private const val KEY_PROJ_30M = "proj_30m"
     private const val NO_DELTA = Int.MIN_VALUE
     private const val NO_EXCURSION_DURATION = -1L
 
@@ -449,6 +462,10 @@ object RawReadingStore {
             // (enum ordinal is NOT used - see load()'s own comment for why that matters across a
             // future reordering of the enum).
             if (reading.causeTier != null) putString(KEY_CAUSE_TIER, reading.causeTier.name) else remove(KEY_CAUSE_TIER)
+            if (reading.trendPhase != null) putString(KEY_TREND_PHASE, reading.trendPhase) else remove(KEY_TREND_PHASE)
+            putFloat(KEY_DISPLAY_RATE, reading.displayRate?.toFloat() ?: Float.NaN)
+            putInt(KEY_PROJ_15M, reading.projectedPhysiological15m ?: Int.MIN_VALUE)
+            putInt(KEY_PROJ_30M, reading.projectedPhysiological30m ?: Int.MIN_VALUE)
         }
     }
 
@@ -464,6 +481,10 @@ object RawReadingStore {
             ?.split(",")
             ?.mapNotNull { it.toDoubleOrNull() }
             ?: emptyList()
+        val displayRate = prefs.getFloat(KEY_DISPLAY_RATE, Float.NaN)
+        val proj15 = prefs.getInt(KEY_PROJ_15M, Int.MIN_VALUE)
+        val proj30 = prefs.getInt(KEY_PROJ_30M, Int.MIN_VALUE)
+
         return RawReading(
             value = prefs.getInt(KEY_VALUE, 0),
             time = prefs.getLong(KEY_TIME, 0L),
@@ -487,7 +508,11 @@ object RawReadingStore {
             // safe default (see TreatmentEffectWindow.projectWithPhysiologicalDecay's own doc).
             causeTier = prefs.getString(KEY_CAUSE_TIER, null)?.let { name ->
                 runCatching { org.aheadt1d.ratemath.CauseTier.valueOf(name) }.getOrNull()
-            }
+            },
+            trendPhase = prefs.getString(KEY_TREND_PHASE, null),
+            displayRate = if (displayRate.isNaN()) null else displayRate.toDouble(),
+            projectedPhysiological15m = if (proj15 == Int.MIN_VALUE) null else proj15,
+            projectedPhysiological30m = if (proj30 == Int.MIN_VALUE) null else proj30,
         )
     }
 

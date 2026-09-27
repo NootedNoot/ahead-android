@@ -17,18 +17,20 @@ enum class GlucoseTrendArrow(val rotationDegrees: Float, val isDouble: Boolean, 
     DOUBLE_DOWN(180f, true, "⇊");
 
     companion object {
-        // Boundaries are inclusive on both sides of each band so a rate of
-        // exactly ±1.0, ±2.0, or ±3.0 always maps to a determinate arrow
-        // rather than depending on floating-point epsilon.
+        // Unified Dexcom-compatible arrow thresholds:
+        // Flat: -0.5 to +0.5 mg/dL/min
+        // 45 deg: +-0.5 to +-1.5 mg/dL/min
+        // Single arrow: +-1.5 to +-3.0 mg/dL/min
+        // Double arrow: > +-3.0 mg/dL/min
         fun fromRatePerMinute(rate: Double?): GlucoseTrendArrow = when {
-            rate == null  -> FLAT
-            rate >= 3.0   -> DOUBLE_UP
-            rate >= 2.0   -> UP
-            rate >= 1.0   -> SLOWLY_RISING
-            rate >= -1.0  -> FLAT          // flat zone: -1.0 ≤ rate < 1.0
-            rate >= -2.0  -> SLOWLY_FALLING
-            rate >= -3.0  -> DOWN
-            else          -> DOUBLE_DOWN
+            rate == null -> FLAT
+            rate >= 3.0  -> DOUBLE_UP
+            rate >= 1.5  -> UP
+            rate >= 0.5  -> SLOWLY_RISING
+            rate > -0.5  -> FLAT
+            rate > -1.5  -> SLOWLY_FALLING
+            rate > -3.0  -> DOWN
+            else         -> DOUBLE_DOWN
         }
     }
 }
