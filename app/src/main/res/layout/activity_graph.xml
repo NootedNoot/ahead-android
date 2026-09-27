@@ -125,11 +125,16 @@
                 android:textStyle="bold"
                 android:includeFontPadding="false" />
 
+            <!-- Takes the leftover width (not wrap_content) so a long rate line
+                 like "+3.8 mg/dL/min (Turning up)" wraps here instead of
+                 shoving the TIR badge off the right edge. -->
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_weight="1"
                 android:orientation="vertical"
-                android:layout_marginStart="10dp">
+                android:layout_marginStart="10dp"
+                android:layout_marginEnd="8dp">
 
                 <LinearLayout
                     android:layout_width="wrap_content"
@@ -165,11 +170,6 @@
                     android:textSize="11sp" />
             </LinearLayout>
 
-            <View
-                android:layout_width="0dp"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
-
             <!-- Time In Range Badge -->
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -184,6 +184,7 @@
                     android:background="@drawable/time_btn_active"
                     android:paddingHorizontal="10dp"
                     android:paddingVertical="4dp"
+                    android:maxLines="1"
                     android:text="--% in Range"
                     android:textColor="@color/ok"
                     android:textSize="12sp"
