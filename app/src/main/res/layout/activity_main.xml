@@ -176,76 +176,7 @@
                     android:textStyle="bold" />
             </LinearLayout>
 
-            <!-- Shown during Yellow Alert to encourage waiting for 2nd/3rd reading before acting -->
-            <LinearLayout
-                android:id="@+id/yellowGuidanceBanner"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:background="#2E2405"
-                android:clickable="false"
-                android:focusable="false"
-                android:orientation="vertical"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:paddingTop="10dp"
-                android:paddingBottom="10dp"
-                android:layout_marginBottom="6dp"
-                android:visibility="gone">
 
-                <TextView
-                    android:id="@+id/tvYellowGuidanceText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="⏳ Yellow Alert: Wait for 2nd reading before treating."
-                    android:textColor="#FDE047"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="end|center_vertical"
-                    android:layout_marginTop="8dp">
-
-                    <TextView
-                        android:id="@+id/btnBannerReviewCurve"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:minHeight="48dp"
-                        android:gravity="center"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:layout_marginEnd="10dp"
-                        android:text="Review Curve ▶"
-                        android:textColor="#4ADE80"
-                        android:textSize="12sp"
-                        android:textStyle="bold"
-                        android:background="@drawable/bg_banner_btn_review" />
-
-                    <TextView
-                        android:id="@+id/btnBannerLearnWhy"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:minHeight="48dp"
-                        android:gravity="center"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:paddingStart="16dp"
-                        android:paddingEnd="16dp"
-                        android:paddingTop="8dp"
-                        android:paddingBottom="8dp"
-                        android:text="Learn Why ▶"
-                        android:textColor="#FACC15"
-                        android:textSize="12sp"
-                        android:textStyle="bold"
-                        android:background="@drawable/bg_banner_btn_learn" />
-                </LinearLayout>
-            </LinearLayout>
 
             <!-- Shown only when Do Not Disturb access was previously granted and has
                  since been revoked (see AlertChannels.dndAccessRegressed) -->
@@ -389,40 +320,105 @@
                  scrolling" layout goal (see the root LinearLayout's comment)
                  holds whether or not this card is showing. Purely informational,
                  never touches severity/alerts - see MainActivity's wiring. -->
+            <!-- Contextual Clinical Insights: "Why This Matters"
+                 Dynamically grounds peer-reviewed T1D education (resources.html)
+                 in the person's real-time metabolic and behavioral data. -->
             <LinearLayout
-                android:id="@+id/contextCard"
+                android:id="@+id/cardWhyThisMatters"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:layout_marginTop="12dp"
-                android:background="@drawable/card_background"
-                android:padding="14dp"
-                android:visibility="gone">
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_clinical_card"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="11dp"
+                android:paddingBottom="11dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:visibility="visible">
 
-                <TextView
-                    android:text="CONTEXT"
-                    android:textColor="@color/muted"
-                    android:textSize="11sp"
-                    android:letterSpacing="0.08"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content" />
-
-                <TextView
-                    android:id="@+id/contextInsightText"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/text_primary"
-                    android:textSize="13.5sp" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="4dp">
+
+                    <TextView
+                        android:id="@+id/tvClinicalBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="⚡ AUTONOMIC RESET"
+                        android:textColor="#FDE047"
+                        android:textSize="9.5sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="0.08"
+                        android:background="@drawable/bg_clinical_badge"
+                        android:paddingStart="6dp"
+                        android:paddingEnd="6dp"
+                        android:paddingTop="2dp"
+                        android:paddingBottom="2dp" />
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Why This Matters"
+                        android:textColor="#C084FC"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <TextView
-                    android:id="@+id/contextTipText"
+                    android:id="@+id/tvClinicalTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
-                    android:textColor="@color/muted"
-                    android:textSize="12.5sp"
-                    android:visibility="gone" />
+                    android:text="Hypoglycemia Unawareness &amp; Lost Warning Signs"
+                    android:textColor="#FFFFFF"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="3dp" />
+
+                <TextView
+                    android:id="@+id/tvClinicalSnippet"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="When frequent lows occur, the brain's autonomic alarm thermostat resets downward..."
+                    android:textColor="#D8B4FE"
+                    android:textSize="11.5sp"
+                    android:lineSpacingExtra="1.5dp"
+                    android:layout_marginBottom="6dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="end">
+
+                    <TextView
+                        android:id="@+id/btnWhyThisMatters"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:minHeight="36dp"
+                        android:gravity="center"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:paddingTop="4dp"
+                        android:paddingBottom="4dp"
+                        android:text="Why This Matters: Lows &amp; HAAF ▶"
+                        android:textColor="#2EE59D"
+                        android:textSize="11sp"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_banner_btn_review" />
+                </LinearLayout>
 
             </LinearLayout>
 

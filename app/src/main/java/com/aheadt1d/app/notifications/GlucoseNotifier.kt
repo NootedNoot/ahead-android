@@ -65,13 +65,7 @@ object GlucoseNotifier {
             // units to distinguish it from the per-minute rate on line two.
             is GlucoseDisplayState.Reading -> {
                 val phasePrefix = if (state.trendPhase != null) "${state.trendPhase.chipLabel} · " else ""
-                val lineText = if (state.severity == "yellow") {
-                    val checkNum = state.yellowCheckNumber.coerceIn(1, 3)
-                    val progTag = if (checkNum < 3) " [Check $checkNum/3]" else " [Confirmed]"
-                    "$phasePrefix${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}$progTag · as of ${timeFormatter.format(state.readingTime)}"
-                } else {
-                    "$phasePrefix${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
-                }
+                val lineText = "$phasePrefix${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)} · as of ${timeFormatter.format(state.readingTime)}"
                 Triple(
                     NotificationIconFactory.readingIcon(context, state.value, state.arrow),
                     "$ONGOING_MARKER${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}",
@@ -181,19 +175,9 @@ object GlucoseNotifier {
                     "$prefix$ONGOING_MARKER${state.value} mg/dL ${state.arrow.label}${deltaParen(state.deltaFromPrevious)}"
                 )
                 views.setTextViewText(R.id.tv_time, "As of ${timeFormatter.format(state.readingTime)}")
-                val waitMsg = if (state.severity == "yellow") {
-                    val checkNum = state.yellowCheckNumber.coerceIn(1, 3)
-                    val isDrop = (state.ratePerMinute ?: 0.0) < 0
-                    val verb = if (isDrop) "treating" else "correcting"
-                    when (checkNum) {
-                        1 -> " · ⏳ Check 1/3 (10m left) · Observe reading 2 before $verb"
-                        2 -> " · ⏳ Check 2/3 (5m left) · Observing curve braking"
-                        else -> " · ⏳ Check 3/3 · Trend confirmed · Review curve"
-                    }
-                } else ""
                 views.setTextViewText(
                     R.id.tv_delta,
-                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}$waitMsg"
+                    "${rateText(state.ratePerMinute)}${projectionText(state.projected, state.projectedExtended)}"
                 )
             }
             is GlucoseDisplayState.Stale -> {

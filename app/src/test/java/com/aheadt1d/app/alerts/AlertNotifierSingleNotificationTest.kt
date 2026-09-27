@@ -78,13 +78,13 @@ class AlertNotifierSingleNotificationTest {
         val textFalling = fallingNotification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
         assertNotNull(textFalling)
         assertTrue(
-            "Main notification must show rate and check tag in 1-swipe text. Got: $textFalling",
-            textFalling!!.contains("-1.8/min") && textFalling.contains("[Check 1/3]")
+            "Main notification must show rate cleanly in 1-swipe text. Got: $textFalling",
+            textFalling!!.contains("-1.8/min") && !textFalling.contains("[Check")
         )
         // Verify notification progress bar is NOT present (no ugly line, shows in 1 swipe)
         assertEquals(0, fallingNotification.extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0))
 
-        // Rising yellow (reading 2 of 3)
+        // Rising yellow
         val risingYellow = GlucoseDisplayState.Reading(
             value = 185,
             arrow = GlucoseTrendArrow.SLOWLY_RISING,
@@ -102,8 +102,8 @@ class AlertNotifierSingleNotificationTest {
         val textRising = risingNotification.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
         assertNotNull(textRising)
         assertTrue(
-            "Main notification must show rate and check tag in 1-swipe text. Got: $textRising",
-            textRising!!.contains("+1.8/min") && textRising.contains("[Check 2/3]")
+            "Main notification must show rate cleanly in 1-swipe text. Got: $textRising",
+            textRising!!.contains("+1.8/min") && !textRising.contains("[Check")
         )
         assertEquals(0, risingNotification.extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0))
     }

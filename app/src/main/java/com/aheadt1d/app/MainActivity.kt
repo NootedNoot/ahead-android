@@ -27,6 +27,12 @@ import androidx.health.connect.client.PermissionController
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import android.net.Uri
+import com.aheadt1d.app.education.ClinicalContextEngine
+import com.aheadt1d.app.events.UserEvent
+import com.aheadt1d.app.events.UserEventRepository
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 import com.aheadt1d.app.alerts.AlertChannels
 import com.aheadt1d.app.alerts.AlertSilenceManager
 import com.aheadt1d.app.alerts.CustomThresholdsActivity
@@ -80,6 +86,8 @@ class MainActivity : AppCompatActivity() {
     private var liveDotAnimators: List<ObjectAnimator> = emptyList()
 
     private var cachedPoints: List<GlucosePoint> = emptyList()
+    private var cachedEvents: List<UserEvent> = emptyList()
+    private var currentInsightUrl: String? = null
 
     private val requestHealthConnectPermissions = registerForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -141,11 +149,28 @@ class MainActivity : AppCompatActivity() {
             runCatching { startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
         }
 
-        findViewById<View>(R.id.btnBannerLearnWhy)?.setOnClickListener {
-            startActivity(com.aheadt1d.app.tutorial.InteractiveTutorialActivity.createIntent(this))
+        val cardWhyThisMatters = findViewById<View>(R.id.cardWhyThisMatters)
+        val btnWhyThisMatters = findViewById<View>(R.id.btnWhyThisMatters)
+        val openInsightAction = {
+            currentInsightUrl?.let { url ->
+                runCatching {
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                }
+            }
         }
-        findViewById<View>(R.id.btnBannerReviewCurve)?.setOnClickListener {
-            startActivity(GraphActivity.createIntent(this))
+        cardWhyThisMatters?.setOnClickListener { openInsightAction() }
+        btnWhyThisMatters?.setOnClickListener { openInsightAction() }
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                UserEventRepository.allEvents(applicationContext).collectLatest { events ->
+                    cachedEvents = events
+                    refreshClinicalContext()
+                }
+            }
         }
 
         findViewById<View>(R.id.btnSafetyAlarmQuick)?.setOnClickListener {
@@ -680,61 +705,55 @@ class MainActivity : AppCompatActivity() {
             // got its own staleness check.
             renderTrendState(LatestTrendRepository.latestTrend.value)
             renderChart()
-            refreshPassiveContext()
+            refreshClinicalContext()
         }
     }
 
     /**
-     * Surfaces PassiveContextEngine's insight (dawn surge, exercise-drop,
-     * stubborn-high/sticky-low, curvature) below the current-glucose card -
-     * see contextCard's layout comment for why it's wrap_content/GONE rather
-     * than taking weighted space. Deliberately built here, not in
-     * GlucoseStatusService's alert-critical render loop - this is a new,
-     * purely informational surface, and the engine itself never influences
-     * severity/AlertCoordinator either way. Built from the SAME display
-     * state the notification would show (toDisplayState, extracted from
-     * GlucoseStatusService for exactly this reuse) so this card and the
-     * notification can never quietly disagree about what "now" looks like.
+     * Contextual Clinical Insights: "Why This Matters"
+     * Dynamically grounds peer-reviewed T1D education (resources.html)
+     * in the person's real-time metabolic and behavioral data:
+     * - Sick day -> Ketone cascade (#dka)
+     * - Hypo / string of lows -> Autonomic reset & HAAF (#hypo)
+     * - Rapid rise / stacking -> Insulin kinetics (#cellular)
+     * - Rapid delta -> Interstitial sensor lag (#cgm)
+     * - Sustained high -> Microvascular glycocalyx (#complications)
+     * - In-range -> Normal cellular respiration (#cellular)
      */
-    private fun refreshPassiveContext() {
-        val cardView = findViewById<View>(R.id.contextCard)
-
-        // DISABLED 2026-09-13 at the owner's explicit request: the generated
-        // insights/tips ("Stubborn high (45m over 180)" -> "hydration
-        // helps") read as generic, situation-blind copy rather than
-        // anything actually tailored to what's really going on - "bullshit"
-        // in his own words. Not deleted - PassiveContextEngine itself is
-        // untouched and may come back in a reworked form later. Flip this
-        // back to false to re-enable; everything below is otherwise
-        // unchanged.
-        if (PASSIVE_CONTEXT_CARD_DISABLED) {
-            cardView.visibility = View.GONE
-            return
-        }
-
-        val insightView = findViewById<TextView>(R.id.contextInsightText)
-        val tipView = findViewById<TextView>(R.id.contextTipText)
+    private fun refreshClinicalContext() {
+        val cardView = findViewById<View>(R.id.cardWhyThisMatters) ?: return
+        val tvBadge = findViewById<TextView>(R.id.tvClinicalBadge)
+        val tvTitle = findViewById<TextView>(R.id.tvClinicalTitle)
+        val tvSnippet = findViewById<TextView>(R.id.tvClinicalSnippet)
+        val btnAction = findViewById<TextView>(R.id.btnWhyThisMatters)
 
         val raw = LatestTrendRepository.latestRawReading.value
         val trend = LatestTrendRepository.latestTrend.value
         val blocked = LatestTrendRepository.readBlocked.value
         val state = com.aheadt1d.app.notifications.toDisplayState(applicationContext, raw, trend, blocked)
-
         val reading = state as? com.aheadt1d.app.notifications.GlucoseDisplayState.Reading
-        val summary = reading?.let {
-            com.aheadt1d.app.health.PassiveContextEngine.evaluateContext(applicationContext, it, cachedPoints)
+
+        val now = System.currentTimeMillis()
+        val insight = ClinicalContextEngine.evaluate(
+            reading = reading,
+            recentReadings = cachedPoints,
+            recentEvents = cachedEvents,
+            nowMillis = now
+        )
+
+        currentInsightUrl = insight.targetUrl
+        tvBadge?.text = insight.badge
+        tvTitle?.text = insight.title
+        tvSnippet?.text = insight.snippet
+        btnAction?.text = insight.actionText
+
+        when (insight.severity) {
+            "red" -> tvBadge?.setTextColor(Color.parseColor("#FF4D4D"))
+            "yellow" -> tvBadge?.setTextColor(Color.parseColor("#FDE047"))
+            else -> tvBadge?.setTextColor(Color.parseColor("#2EE59D"))
         }
 
-        val insight = summary?.primaryInsight
-        if (insight == null) {
-            cardView.visibility = View.GONE
-            return
-        }
         cardView.visibility = View.VISIBLE
-        insightView.text = insight
-        val tip = summary.actionableTip
-        tipView.text = tip ?: ""
-        tipView.visibility = if (tip.isNullOrBlank()) View.GONE else View.VISIBLE
     }
 
     /**
@@ -1128,29 +1147,15 @@ class MainActivity : AppCompatActivity() {
         val rate = reading.ratePerMinute
         severityView.text = describe(reading.severity, rate, reading.trendPhase)
 
-        val yellowGuidanceBanner = findViewById<View>(R.id.yellowGuidanceBanner)
-        val tvYellowGuidanceText = findViewById<TextView>(R.id.tvYellowGuidanceText)
-        if (reading.severity == "yellow") {
-            yellowGuidanceBanner?.visibility = View.VISIBLE
-            val prefs = getSharedPreferences("ahead_alert_state", MODE_PRIVATE)
-            val checkCount = prefs.getInt("yellow_check_count", 1).coerceIn(1, 3)
-            val guidance = when (checkCount) {
-                1 -> "⏳ Yellow Alert: Reading 1 of 3 (10 min left) — confirming trend."
-                2 -> "⏳ Yellow Alert: Reading 2 of 3 (5 min left) — observing rate."
-                else -> "⏳ Yellow Alert: Reading 3 of 3 (Trend confirmed) — review curve."
-            }
-            tvYellowGuidanceText?.text = guidance
-        } else {
-            yellowGuidanceBanner?.visibility = View.GONE
-        }
-
         if (rate == null || reading.projected == null) {
             projectionContainer.visibility = View.GONE
+            refreshClinicalContext()
             return
         }
         val ext = reading.projectedExtended ?: (reading.value + rate * PROJECTION_30_MIN).roundToInt()
         projectionView.text = "${reading.projected} in ${PROJECTION_15_MIN}m · $ext in ${PROJECTION_30_MIN}m"
         projectionContainer.visibility = View.VISIBLE
+        refreshClinicalContext()
     }
 
     // Chart point colours route through the same severity ladder as the number,
@@ -1183,9 +1188,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        // See refreshPassiveContext()'s own doc - flip to false to bring the
-        // context/insight card back.
-        private const val PASSIVE_CONTEXT_CARD_DISABLED = true
         private const val WINDOW_1H = 60L
         private const val WINDOW_6H = 360L
         // 2026-08-04: was 5 min, the same cadence as the CGM's own HC sync
