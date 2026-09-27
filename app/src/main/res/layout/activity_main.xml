@@ -323,102 +323,69 @@
             <!-- Contextual Clinical Insights: "Why This Matters"
                  Dynamically grounds peer-reviewed T1D education (resources.html)
                  in the person's real-time metabolic and behavioral data. -->
+            <!-- Contextual Clinical Insights: "Why This Matters"
+                 Sleek, non-invasive banner that dynamically grounds peer-reviewed T1D
+                 education in real-time metabolic context without sacrificing graph height. -->
             <LinearLayout
                 android:id="@+id/cardWhyThisMatters"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:layout_marginTop="10dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="4dp"
                 android:background="@drawable/bg_clinical_card"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:paddingTop="11dp"
-                android:paddingBottom="11dp"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:paddingTop="7dp"
+                android:paddingBottom="7dp"
                 android:clickable="true"
                 android:focusable="true"
                 android:foreground="?attr/selectableItemBackground"
                 android:visibility="visible">
 
-                <LinearLayout
-                    android:layout_width="match_parent"
+                <TextView
+                    android:id="@+id/tvClinicalBadge"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginBottom="4dp">
-
-                    <TextView
-                        android:id="@+id/tvClinicalBadge"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="⚡ AUTONOMIC RESET"
-                        android:textColor="#FDE047"
-                        android:textSize="9.5sp"
-                        android:textStyle="bold"
-                        android:letterSpacing="0.08"
-                        android:background="@drawable/bg_clinical_badge"
-                        android:paddingStart="6dp"
-                        android:paddingEnd="6dp"
-                        android:paddingTop="2dp"
-                        android:paddingBottom="2dp" />
-
-                    <View
-                        android:layout_width="0dp"
-                        android:layout_height="1dp"
-                        android:layout_weight="1" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="Why This Matters"
-                        android:textColor="#C084FC"
-                        android:textSize="11sp"
-                        android:textStyle="bold" />
-                </LinearLayout>
+                    android:text="💡"
+                    android:textSize="13sp"
+                    android:includeFontPadding="false" />
 
                 <TextView
                     android:id="@+id/tvClinicalTitle"
-                    android:layout_width="match_parent"
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:text="Hypoglycemia Unawareness &amp; Lost Warning Signs"
-                    android:textColor="#FFFFFF"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="3dp" />
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:layout_marginEnd="6dp"
+                    android:singleLine="true"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:includeFontPadding="false"
+                    android:text="Why This Matters: Cellular Energy &amp; ATP"
+                    android:textColor="#F3E8FF"
+                    android:textSize="11.5sp"
+                    android:textStyle="bold" />
 
                 <TextView
+                    android:id="@+id/btnWhyThisMatters"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="2dp"
+                    android:paddingEnd="2dp"
+                    android:text="›"
+                    android:textColor="#C084FC"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:includeFontPadding="false" />
+
+                <!-- Retained GONE for backward compatibility -->
+                <TextView
                     android:id="@+id/tvClinicalSnippet"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="When frequent lows occur, the brain's autonomic alarm thermostat resets downward..."
-                    android:textColor="#D8B4FE"
-                    android:textSize="11.5sp"
-                    android:lineSpacingExtra="1.5dp"
-                    android:layout_marginBottom="6dp" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="end">
-
-                    <TextView
-                        android:id="@+id/btnWhyThisMatters"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:minHeight="36dp"
-                        android:gravity="center"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="4dp"
-                        android:paddingBottom="4dp"
-                        android:text="Why This Matters: Lows &amp; HAAF ▶"
-                        android:textColor="#2EE59D"
-                        android:textSize="11sp"
-                        android:textStyle="bold"
-                        android:background="@drawable/bg_banner_btn_review" />
-                </LinearLayout>
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:visibility="gone" />
 
             </LinearLayout>
 

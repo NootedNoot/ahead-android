@@ -28,7 +28,9 @@ data class ClinicalInsight(
     val snippet: String,
     val targetUrl: String,
     val actionText: String = "Read in Resources ▶",
-    val severity: String = "normal" // "normal", "yellow", "red"
+    val severity: String = "normal", // "normal", "yellow", "red"
+    val shortBadge: String = badge,
+    val shortTitle: String = "Why this matters: $title"
 )
 
 object ClinicalContextEngine {
@@ -72,7 +74,9 @@ object ClinicalContextEngine {
                 snippet = "Illness unleashes counter-regulatory cortisol and epinephrine, blocking GLUT4 transporters and driving sudden insulin resistance. In T1D, cells can starve and produce dangerous ketones even at near-normal glucose levels.",
                 targetUrl = "$BASE_RESOURCES_URL#dka",
                 actionText = "Read Sick Day Protocol ▶",
-                severity = if (isHigh) "red" else "yellow"
+                severity = if (isHigh) "red" else "yellow",
+                shortBadge = "🤒",
+                shortTitle = "Why This Matters: Ketone Cascade"
             )
         }
 
@@ -104,7 +108,9 @@ object ClinicalContextEngine {
                 snippet = snippet,
                 targetUrl = "$BASE_RESOURCES_URL#hypo",
                 actionText = "Why This Matters: Lows & HAAF ▶",
-                severity = if (isCurrentLow) "red" else "yellow"
+                severity = if (isCurrentLow) "red" else "yellow",
+                shortBadge = "⚡",
+                shortTitle = if (hasFrequentLows) "Why This Matters: Lost Warning Signs" else "Why This Matters: Hypo & The Brain"
             )
         }
 
@@ -126,7 +132,9 @@ object ClinicalContextEngine {
                 snippet = "Rapid-acting analog insulin takes 60–90 minutes to reach peak cellular absorption and up to 4–5 hours to clear. Correcting an early rise before peak activity stacks insulin doses on top of each other, setting up severe delayed crashes.",
                 targetUrl = "$BASE_RESOURCES_URL#cellular",
                 actionText = "Why This Matters: Insulin Stacking ▶",
-                severity = "yellow"
+                severity = "yellow",
+                shortBadge = "💉",
+                shortTitle = "Why This Matters: Insulin Stacking"
             )
         }
 
@@ -140,7 +148,9 @@ object ClinicalContextEngine {
                 snippet = "CGM sensors sample interstitial fluid surrounding fat cells, not blood. During rapid climbs or steep plunges, physiological glucose diffusion creates a 5 to 15-minute lag. A capillary fingerstick will lead a falling CGM and lag a rising one.",
                 targetUrl = "$BASE_RESOURCES_URL#cgm",
                 actionText = "Why This Matters: Sensor Lag ▶",
-                severity = "yellow"
+                severity = "yellow",
+                shortBadge = "📡",
+                shortTitle = "Why This Matters: Sensor Lag (5–15m)"
             )
         }
 
@@ -154,7 +164,9 @@ object ClinicalContextEngine {
                 snippet = "Extended exposure above 180–200 mg/dL causes shear degradation of the endothelial glycocalyx—the delicate gel-like lining of renal and retinal microvessels. Keeping time-in-range tight preserves capillary barrier integrity.",
                 targetUrl = "$BASE_RESOURCES_URL#complications",
                 actionText = "Why This Matters: Microvascular Health ▶",
-                severity = "yellow"
+                severity = "yellow",
+                shortBadge = "🔬",
+                shortTitle = "Why This Matters: Microvascular Health"
             )
         }
 
@@ -167,7 +179,9 @@ object ClinicalContextEngine {
             snippet = "In target range, insulin receptors activate GLUT4 transporters smoothly, allowing glucose to enter skeletal muscle and fuel mitochondrial ATP synthesis without triggering counter-regulatory stress or microvascular shear.",
             targetUrl = "$BASE_RESOURCES_URL#cellular",
             actionText = "Explore Biology of T1D ▶",
-            severity = "normal"
+            severity = "normal",
+            shortBadge = "💡",
+            shortTitle = "Why This Matters: Cellular Energy"
         )
     }
 }

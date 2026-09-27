@@ -742,15 +742,24 @@ class MainActivity : AppCompatActivity() {
         )
 
         currentInsightUrl = insight.targetUrl
-        tvBadge?.text = insight.badge
-        tvTitle?.text = insight.title
+        tvBadge?.text = insight.shortBadge
+        tvTitle?.text = insight.shortTitle
         tvSnippet?.text = insight.snippet
-        btnAction?.text = insight.actionText
+        btnAction?.text = "›"
 
         when (insight.severity) {
-            "red" -> tvBadge?.setTextColor(Color.parseColor("#FF4D4D"))
-            "yellow" -> tvBadge?.setTextColor(Color.parseColor("#FDE047"))
-            else -> tvBadge?.setTextColor(Color.parseColor("#2EE59D"))
+            "red" -> {
+                tvTitle?.setTextColor(Color.parseColor("#FECACA"))
+                btnAction?.setTextColor(Color.parseColor("#FF6B6B"))
+            }
+            "yellow" -> {
+                tvTitle?.setTextColor(Color.parseColor("#FEF08A"))
+                btnAction?.setTextColor(Color.parseColor("#FDE047"))
+            }
+            else -> {
+                tvTitle?.setTextColor(Color.parseColor("#F3E8FF"))
+                btnAction?.setTextColor(Color.parseColor("#C084FC"))
+            }
         }
 
         cardView.visibility = View.VISIBLE
