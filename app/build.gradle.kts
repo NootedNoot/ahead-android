@@ -15,7 +15,7 @@ android {
         versionCode = 2
         versionName = "0.2.0"
 
-        buildConfigField("String", "BACKEND_BASE_URL", "\"https://martial-optimum-projects-conflict.trycloudflare.com\"")
+        buildConfigField("String", "BACKEND_BASE_URL", "\"https://api.aheadt1d.com\"")
     }
 
     buildTypes {
