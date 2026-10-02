@@ -33,7 +33,7 @@ object UserEventRepository {
         glucoseOverride: Float? = null
     ): Long {
         val currentGlucose = glucoseOverride ?: LatestTrendRepository.latestRawReading.value?.value?.toFloat()
-        return dao(context).insert(
+        val id = dao(context).insert(
             UserEvent(
                 timestamp = timestamp,
                 tag = tag.storageValue,
@@ -41,6 +41,8 @@ object UserEventRepository {
                 glucoseAtTime = currentGlucose
             )
         )
+        EventSync.requestSync(context, force = true)
+        return id
     }
 
     /** Overwrites tag/note on an already-logged event - id/timestamp/
@@ -48,9 +50,13 @@ object UserEventRepository {
      *  rewrite when it happened or what the glucose reading was. */
     suspend fun updateEvent(context: Context, event: UserEvent, tag: EventTag, note: String?) {
         dao(context).update(event.copy(tag = tag.storageValue, note = note?.takeIf { it.isNotBlank() }))
+        EventSync.requestSync(context, force = true)
     }
 
-    suspend fun deleteEvent(context: Context, event: UserEvent) = dao(context).delete(event)
+    suspend fun deleteEvent(context: Context, event: UserEvent) {
+        dao(context).delete(event)
+        EventSync.requestSync(context, force = true)
+    }
 
     fun allEvents(context: Context): Flow<List<UserEvent>> = dao(context).getAll()
 

@@ -163,6 +163,13 @@ class EventHistoryActivity : AppCompatActivity() {
         recyclerView.visibility = if (filtered.isEmpty()) View.GONE else View.VISIBLE
     }
 
+    /** Pull anything logged/edited on the web portal; the list updates by
+     *  itself through the Room Flow once it lands. */
+    override fun onResume() {
+        super.onResume()
+        EventSync.requestSync(this, force = true)
+    }
+
     companion object {
         fun createIntent(context: Context): Intent = Intent(context, EventHistoryActivity::class.java)
     }

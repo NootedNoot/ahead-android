@@ -79,6 +79,10 @@ object GlucoseCheckRunner {
         // the reported bug (notification only updates when the app is opened,
         // not on the CGM's ~5-min cadence).
         GlucoseStatusService.refreshNotification(context)
+        // Logged events -> portal/doctor report (and web edits back). Runs on
+        // its own background scope after everything above is done, never
+        // blocks or affects the alert decision; throttled to ~every 4 min.
+        com.aheadt1d.app.events.EventSync.requestSync(context)
     }
 
     private suspend fun runInternal(context: Context): Outcome {

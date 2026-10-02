@@ -42,6 +42,9 @@ enum class EventTag(val storageValue: String, val label: String, val glyph: Stri
     EXERCISE("exercise", "Exercise", "🏃"),
     CORRECTION("correction", "Correction", "💉"),
     INSULIN("insulin", "Insulin", "💉"),
+    // 2026-10-02: plain logging only (nothing alert-side reads it) - gives a
+    // doctor the "what did I eat before this high" context the report needs.
+    MEAL("meal", "Meal / Food", "🍽️"),
     OTHER("other", "Other", "📝");
 
     companion object {

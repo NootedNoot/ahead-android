@@ -21,6 +21,14 @@ interface UserEventDao {
     @Query("SELECT * FROM user_events ORDER BY timestamp ASC")
     fun getAll(): Flow<List<UserEvent>>
 
+    /** One-shot snapshots for EventSync (not Flows). Read-only queries -
+     *  no schema change. */
+    @Query("SELECT * FROM user_events ORDER BY id ASC")
+    suspend fun getAllOnce(): List<UserEvent>
+
+    @Query("SELECT * FROM user_events WHERE id = :id")
+    suspend fun getById(id: Long): UserEvent?
+
     @Query("SELECT * FROM user_events WHERE timestamp BETWEEN :startMillis AND :endMillis ORDER BY timestamp ASC")
     fun getInRange(startMillis: Long, endMillis: Long): Flow<List<UserEvent>>
 
