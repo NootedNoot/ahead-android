@@ -132,14 +132,59 @@ object EventLogDialogs {
                 .setItems(arrayOf("🍊  Treating a LOW (carbs / juice)", "💉  Correcting a HIGH (insulin)")) { _, which ->
                     val isLow = which == 0
                     val directionNote = if (isLow) "Low treatment (carbs)" else "High correction (insulin)"
-                    val fullNote = if (note.isNullOrBlank()) directionNote else "$directionNote — $note"
-                    doLog(context, scope, tag, fullNote, pointContext, explicitLow = isLow)
+                    if (note.isNullOrBlank()) {
+                        askOptionalCorrectionNote(context, scope, tag, directionNote, pointContext, isLow)
+                    } else {
+                        doLog(context, scope, tag, "$directionNote — $note", pointContext, explicitLow = isLow)
+                    }
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
             return
         }
         doLog(context, scope, tag, note, pointContext, explicitLow = null)
+    }
+
+    /**
+     * The quick Correction button used to save only the direction. This adds
+     * one optional step for what was typed ("3u for the 245", "juice box"),
+     * saved as "<direction> — <typed>" - the same format the custom-note path
+     * already uses, which the portal and doctor report split back apart.
+     * Never blocks logging: Skip, back, or tapping outside all still log the
+     * correction (and start correction tracking) right away, without a note.
+     */
+    private fun askOptionalCorrectionNote(
+        context: Context,
+        scope: LifecycleCoroutineScope,
+        tag: EventTag,
+        directionNote: String,
+        pointContext: LoggedPointContext?,
+        isLow: Boolean,
+    ) {
+        val input = EditText(context).apply {
+            hint = if (isLow) "e.g. juice box, 15g tabs" else "e.g. 3u for the 245"
+            setSingleLine(false)
+            maxLines = 4
+        }
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(context, 20), dp(context, 8), dp(context, 20), 0)
+            addView(input, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        }
+        var logged = false
+        fun logOnce(typed: String?) {
+            if (logged) return
+            logged = true
+            val fullNote = if (typed.isNullOrBlank()) directionNote else "$directionNote — ${typed.trim()}"
+            doLog(context, scope, tag, fullNote, pointContext, explicitLow = isLow)
+        }
+        AlertDialog.Builder(context)
+            .setTitle(titleFor("Add a note? (optional)", pointContext))
+            .setView(container)
+            .setPositiveButton("Save") { _, _ -> logOnce(input.text?.toString()) }
+            .setNegativeButton("Skip") { _, _ -> logOnce(null) }
+            .setOnDismissListener { logOnce(null) }
+            .show()
     }
 
     private fun doLog(
